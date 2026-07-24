@@ -1,3 +1,4 @@
+import cadquery as cq
 import json
 import os
 
@@ -22,11 +23,28 @@ def generate_pot():
     wall = config["wall_thickness"]
     bottom = config["bottom_thickness"]
 
-    print("DOBO Hollow Pot generated!")
-    print(f"Diameter: {diameter} mm")
-    print(f"Height: {height} mm")
-    print(f"Wall thickness: {wall} mm")
-    print(f"Bottom thickness: {bottom} mm")
+    outer_radius = diameter / 2
+    inner_radius = outer_radius - wall
+
+    pot = (
+        cq.Workplane("XY")
+        .circle(outer_radius)
+        .extrude(height)
+        .faces(">Z")
+        .workplane()
+        .circle(inner_radius)
+        .cutBlind(-(height - bottom))
+    )
+
+    output = "outputs/models/dobo_pot.step"
+
+    cq.exporters.export(
+        pot,
+        output
+    )
+
+    print("DOBO Pot CAD generated!")
+    print(output)
 
 
 if __name__ == "__main__":
