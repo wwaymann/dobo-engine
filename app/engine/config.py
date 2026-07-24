@@ -1,0 +1,5 @@
+# DOBO Engine Configuration
+
+POT_DIAMETER = 120
+POT_HEIGHT = 100
+WALL_THICKNESS = 3
