@@ -5,6 +5,7 @@ import cadquery as cq
 
 from body import build_body
 from drain import build_drain
+from export import export_model
 
 
 def load_config() -> dict:
@@ -49,50 +50,12 @@ def generate_pot() -> cq.Workplane:
     pot = build_drain(pot, config)
 
     # ------------------------
-    # Output paths
+    # Export component
     # ------------------------
 
-    project_root = os.path.abspath(
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "..",
-        )
-    )
-
-    output_directory = os.path.join(
-        project_root,
-        "outputs",
-        "models",
-    )
-
-    os.makedirs(
-        output_directory,
-        exist_ok=True,
-    )
-
-    step_path = os.path.join(
-        output_directory,
-        "dobo_pot.step",
-    )
-
-    stl_path = os.path.join(
-        output_directory,
-        "dobo_pot.stl",
-    )
-
-    # ------------------------
-    # Export
-    # ------------------------
-
-    cq.exporters.export(
+    step_path, stl_path = export_model(
         pot,
-        step_path,
-    )
-
-    cq.exporters.export(
-        pot,
-        stl_path,
+        "dobo_pot",
     )
 
     # ------------------------
@@ -102,36 +65,18 @@ def generate_pot() -> cq.Workplane:
     print("\nDOBO Engine v0.5")
     print("----------------------------")
 
-    print(
-        f"Top diameter    : "
-        f"{config['top_diameter']} mm"
-    )
+    print(f"Top diameter    : " f"{config['top_diameter']} mm")
 
-    print(
-        f"Bottom diameter : "
-        f"{config['bottom_diameter']} mm"
-    )
+    print(f"Bottom diameter : " f"{config['bottom_diameter']} mm")
 
-    print(
-        f"Height          : "
-        f"{config['height']} mm"
-    )
+    print(f"Height          : " f"{config['height']} mm")
 
-    print(
-        f"Wall thickness  : "
-        f"{config['wall_thickness']} mm"
-    )
+    print(f"Wall thickness  : " f"{config['wall_thickness']} mm")
 
-    print(
-        f"Bottom thickness: "
-        f"{config['bottom_thickness']} mm"
-    )
+    print(f"Bottom thickness: " f"{config['bottom_thickness']} mm")
 
     if config.get("drain_hole", False):
-        print(
-            f"Drain diameter  : "
-            f"{config['drain_diameter']} mm"
-        )
+        print(f"Drain diameter  : " f"{config['drain_diameter']} mm")
 
     print("\nGenerated files:")
     print(step_path)
