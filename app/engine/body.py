@@ -1,17 +1,19 @@
+from context import EngineContext
 import cadquery as cq
 
 
-def build_body(config: dict) -> cq.Workplane:
+def build_body(
+    model: cq.Workplane | None,
+    context: EngineContext,
+) -> cq.Workplane:
     """
     Construye el cuerpo hueco de la maceta.
 
-    Este módulo solo es responsable de:
-    - Crear la geometría exterior.
-    - Crear la cavidad interior.
-    - Mantener el espesor del fondo.
-
-    No agrega drenajes ni exporta archivos.
+    Este módulo inicia la geometría del pipeline,
+    por lo que ignora el modelo recibido.
     """
+
+    config = context.config
 
     top_diameter = config["top_diameter"]
     bottom_diameter = config["bottom_diameter"]
@@ -78,5 +80,7 @@ def build_body(config: dict) -> cq.Workplane:
     # el espesor definido en la base.
 
     body = outer_body.cut(inner_body.translate((0, 0, bottom)))
+
+    context.add_operation("build_body")
 
     return body

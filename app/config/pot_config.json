@@ -2,16 +2,18 @@
     "top_diameter": 120,
     "bottom_diameter": 100,
     "height": 100,
-
     "wall_thickness": 3,
     "bottom_thickness": 5,
-
     "rim_radius": 2,
-
     "drain_hole": true,
     "drain_count": 5,
     "drain_diameter": 6,
-
     "feet_enabled": false,
-    "feet_height": 3
+    "feet_height": 3,
+    "components": {
+        "drain": true,
+        "text": false,
+        "pattern": false,
+        "decoration": false
+    }
 }
