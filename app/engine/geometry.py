@@ -1,143 +1,143 @@
-import cadquery as cq
 import json
 import os
 
+import cadquery as cq
 
-def load_config():
-    config_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "config",
-        "pot_config.json"
+from body import build_body
+from drain import build_drain
+
+
+def load_config() -> dict:
+    """
+    Carga la configuración paramétrica desde pot_config.json.
+    """
+
+    config_path = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "config",
+            "pot_config.json",
+        )
     )
 
-    with open(config_path, "r") as file:
+    with open(
+        config_path,
+        "r",
+        encoding="utf-8",
+    ) as file:
         return json.load(file)
 
 
-def generate_pot():
+def generate_pot() -> cq.Workplane:
+    """
+    Coordina la construcción y exportación de la maceta.
+    """
 
     config = load_config()
 
-    top_diameter = config["top_diameter"]
-    bottom_diameter = config["bottom_diameter"]
-
-    height = config["height"]
-
-    wall = config["wall_thickness"]
-    bottom = config["bottom_thickness"]
-
-    top_radius = top_diameter / 2
-    bottom_radius = bottom_diameter / 2
-
     # ------------------------
-    # Validations
+    # Body component
     # ------------------------
 
-    assert wall >= 2, "Wall thickness must be >= 2 mm"
-    assert bottom >= 3, "Bottom thickness must be >= 3 mm"
+    pot = build_body(config)
 
     # ------------------------
-    # Outer shell
+    # Drain component
     # ------------------------
 
-    pot = (
-        cq.Workplane("XY")
-        .circle(bottom_radius)
-        .workplane(offset=height)
-        .circle(top_radius)
-        .loft()
-    )
+    pot = build_drain(pot, config)
 
     # ------------------------
-    # Inner cavity
+    # Output paths
     # ------------------------
 
-    inner_pot = (
-        cq.Workplane("XY")
-        .circle(bottom_radius - wall)
-        .workplane(offset=height)
-        .circle(top_radius - wall)
-        .loft()
-    )
-
-    pot = pot.cut(
-        inner_pot.translate((0, 0, bottom))
-    )
-
-    # ------------------------
-    # Drain hole
-    # ------------------------
-
-    if config["drain_hole"]:
-
-        pot = (
-            pot.faces("<Z")
-            .workplane()
-            .hole(config["drain_diameter"])
+    project_root = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
         )
+    )
+
+    output_directory = os.path.join(
+        project_root,
+        "outputs",
+        "models",
+    )
+
+    os.makedirs(
+        output_directory,
+        exist_ok=True,
+    )
+
+    step_path = os.path.join(
+        output_directory,
+        "dobo_pot.step",
+    )
+
+    stl_path = os.path.join(
+        output_directory,
+        "dobo_pot.stl",
+    )
 
     # ------------------------
     # Export
     # ------------------------
 
-    os.makedirs(
-        "outputs/models",
-        exist_ok=True
+    cq.exporters.export(
+        pot,
+        step_path,
     )
 
     cq.exporters.export(
         pot,
-        "outputs/models/dobo_pot.step"
-    )
-
-    cq.exporters.export(
-        pot,
-        "outputs/models/dobo_pot.stl"
+        stl_path,
     )
 
     # ------------------------
     # Console output
     # ------------------------
 
-    print("\nDOBO Engine v0.4")
+    print("\nDOBO Engine v0.5")
     print("----------------------------")
 
     print(
-        f"Top diameter    : {top_diameter} mm"
+        f"Top diameter    : "
+        f"{config['top_diameter']} mm"
     )
 
     print(
-        f"Bottom diameter : {bottom_diameter} mm"
+        f"Bottom diameter : "
+        f"{config['bottom_diameter']} mm"
     )
 
     print(
-        f"Height          : {height} mm"
+        f"Height          : "
+        f"{config['height']} mm"
     )
 
     print(
-        f"Wall thickness  : {wall} mm"
+        f"Wall thickness  : "
+        f"{config['wall_thickness']} mm"
     )
 
     print(
-        f"Bottom thickness: {bottom} mm"
+        f"Bottom thickness: "
+        f"{config['bottom_thickness']} mm"
     )
 
-    if config["drain_hole"]:
-
+    if config.get("drain_hole", False):
         print(
             f"Drain diameter  : "
             f"{config['drain_diameter']} mm"
         )
 
     print("\nGenerated files:")
-    print(
-        "outputs/models/dobo_pot.step"
-    )
+    print(step_path)
+    print(stl_path)
 
-    print(
-        "outputs/models/dobo_pot.stl"
-    )
+    return pot
 
 
 if __name__ == "__main__":
