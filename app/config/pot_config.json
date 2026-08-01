@@ -8,8 +8,8 @@
     "rim_radius": 2,
     "components": {
         "drain": true,
-        "text": true,
-        "pattern": false,
+        "text": false,
+        "pattern": true,
         "decoration": false
     },
     "drain": {
@@ -38,8 +38,17 @@
         "line_spacing": 4
     },
     "pattern": {
-        "enabled": false,
-        "type": "none"
+        "enabled": true,
+        "type": "dots",
+        "diameter": 3,
+        "depth": 1,
+        "spacing_x": 15,
+        "spacing_y": 15,
+        "start_z": 30,
+        "end_z": 60,
+        "angle_start": -30,
+        "angle_end": 30,
+        "mode": "embossed"
     },
     "decoration": {
         "enabled": false,
