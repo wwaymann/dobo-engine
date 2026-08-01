@@ -297,3 +297,21 @@ def apply_pattern_boolean(
         ) from error
 
     return cq.Workplane(obj=result_shape)
+
+
+from patterns.registry import register_pattern
+
+register_pattern(
+    "hexagons",
+    build_hexagons,
+)
+
+register_pattern(
+    "hexagon",
+    build_hexagons,
+)
+
+register_pattern(
+    "honeycomb",
+    build_hexagons,
+)

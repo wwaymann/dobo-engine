@@ -2,9 +2,9 @@ import copy
 
 import cadquery as cq
 
+import patterns
 from context import EngineContext
-from patterns.dots import build_dots
-from patterns.hexagons import build_hexagons
+from patterns.registry import get_pattern_builder
 
 
 def build_pattern(
@@ -12,15 +12,8 @@ def build_pattern(
     context: EngineContext,
 ) -> cq.Workplane:
     """
-    Aplica uno o varios patrones al modelo.
-
-    Admite:
-
-    - La estructura nueva:
-      "patterns": [{...}, {...}]
-
-    - La estructura anterior:
-      "pattern": {...}
+    Aplica uno o varios patrones registrados
+    al modelo.
     """
 
     if model is None:
@@ -50,43 +43,30 @@ def build_pattern(
             )
         ).lower()
 
-        # Creamos una configuración temporal para
-        # mantener compatibles dots.py y hexagons.py,
-        # que todavía leen config["pattern"].
+        if pattern_type == "none":
+            continue
+
         component_config = copy.deepcopy(config)
 
         component_config["pattern"] = pattern_config
 
         component_context = EngineContext(component_config)
 
-        if pattern_type == "dots":
-            model = build_dots(
-                model=model,
-                context=component_context,
-            )
+        try:
+            builder = get_pattern_builder(pattern_type)
 
-        elif pattern_type in {
-            "hexagon",
-            "hexagons",
-            "honeycomb",
-        }:
-            model = build_hexagons(
-                model=model,
-                context=component_context,
-            )
-
-        elif pattern_type == "none":
-            continue
-
-        else:
+        except ValueError as error:
             raise ValueError(
-                "Unsupported pattern type at "
+                f"Unsupported pattern type at "
                 f"patterns[{pattern_index}]: "
                 f"{pattern_type}"
-            )
+            ) from error
 
-        # Copiamos al contexto principal las
-        # operaciones registradas por el patrón.
+        model = builder(
+            model,
+            component_context,
+        )
+
         for operation in component_context.operations:
             context.add_operation(operation)
 
@@ -99,7 +79,7 @@ def get_pattern_configs(
     config: dict,
 ) -> list[dict]:
     """
-    Obtiene la lista de configuraciones de patrones.
+    Obtiene la lista de configuraciones.
 
     Prioriza la estructura nueva "patterns".
     Mantiene compatibilidad con "pattern".

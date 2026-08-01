@@ -289,3 +289,11 @@ def apply_pattern_boolean(
         ) from error
 
     return cq.Workplane(obj=result_shape)
+
+
+from patterns.registry import register_pattern
+
+register_pattern(
+    "dots",
+    build_dots,
+)
