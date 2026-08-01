@@ -16,28 +16,34 @@ PatternMode = Literal[
 ]
 
 
-def build_dots(
+def build_hexagons(
     model: cq.Workplane,
     context: EngineContext,
 ) -> cq.Workplane:
     """
-    Construye una malla de puntos sobre una superficie
-    cilíndrica o cónica.
+    Construye una malla de hexágonos sobre una
+    superficie cilíndrica o cónica.
 
-    Los puntos se generan individualmente, pero la
-    unión o el corte se realiza una sola vez al final.
+    Los hexágonos se generan primero y se aplica
+    una sola operación booleana al final.
     """
 
     config = context.config
-    pattern_config = config.get("pattern", {})
+    pattern_config = config.get(
+        "pattern",
+        {},
+    )
 
-    if not pattern_config.get("enabled", False):
+    if not pattern_config.get(
+        "enabled",
+        False,
+    ):
         return model
 
-    diameter = float(
+    cell_size = float(
         pattern_config.get(
-            "diameter",
-            3,
+            "cell_size",
+            6,
         )
     )
 
@@ -48,45 +54,59 @@ def build_dots(
         )
     )
 
+    rotation = float(
+        pattern_config.get(
+            "rotation",
+            30,
+        )
+    )
+
     spacing_x = float(
         pattern_config.get(
             "spacing_x",
-            15,
+            16,
         )
     )
 
     spacing_y = float(
         pattern_config.get(
             "spacing_y",
-            15,
+            14,
         )
     )
 
     start_z = float(
         pattern_config.get(
             "start_z",
-            20,
+            25,
         )
     )
 
     end_z = float(
         pattern_config.get(
             "end_z",
-            80,
+            75,
         )
     )
 
     angle_start = float(
         pattern_config.get(
             "angle_start",
-            -45,
+            -40,
         )
     )
 
     angle_end = float(
         pattern_config.get(
             "angle_end",
-            45,
+            40,
+        )
+    )
+
+    row_offset = bool(
+        pattern_config.get(
+            "row_offset",
+            True,
         )
     )
 
@@ -97,9 +117,9 @@ def build_dots(
         )
     ).lower()
 
-    validate_dots_config(
+    validate_hexagon_config(
         config=config,
-        diameter=diameter,
+        cell_size=cell_size,
         depth=depth,
         spacing_x=spacing_x,
         spacing_y=spacing_y,
@@ -115,18 +135,10 @@ def build_dots(
         mode_value,
     )
 
-    dot_shapes: list[cq.Shape] = []
+    hexagon_shapes: list[cq.Shape] = []
 
     current_z = start_z
-
     row_index = 0
-
-    row_offset_enabled = bool(
-        pattern_config.get(
-            "row_offset",
-            False,
-        )
-    )
 
     while current_z <= end_z + 1e-9:
         radius = get_radius_at_z(
@@ -142,34 +154,43 @@ def build_dots(
             radius=radius,
         )
 
-        offset = 0.0
-
-        if row_offset_enabled and row_index % 2 == 1:
-            offset = angle_step / 2
-
         angles = build_angle_positions(
-            angle_start=angle_start + offset,
+            angle_start=angle_start,
             angle_end=angle_end,
             angle_step=angle_step,
         )
 
+        # Desplaza la primera fila, la tercera,
+        # la quinta, etc., media separación.
+        if row_offset and row_index % 2 == 0:
+            shifted_angles: list[float] = []
+
+            for angle in angles:
+                shifted_angle = angle + angle_step / 2
+
+                if shifted_angle <= angle_end:
+                    shifted_angles.append(shifted_angle)
+
+            angles = shifted_angles
+
         for angle_degrees in angles:
-            dot_shape = create_dot_shape(
+            hexagon_shape = create_hexagon_shape(
                 config=config,
-                diameter=diameter,
+                cell_size=cell_size,
                 depth=depth,
                 position_z=current_z,
                 angle_degrees=angle_degrees,
+                rotation=rotation,
                 mode=mode,
             )
 
-            dot_shapes.append(dot_shape)
+            hexagon_shapes.append(hexagon_shape)
 
         current_z += spacing_y
         row_index += 1
 
-    if not dot_shapes:
-        context.add_operation("build_dots")
+    if not hexagon_shapes:
+        context.add_operation("build_hexagons")
         return model
 
     base_shape = cast(
@@ -179,24 +200,24 @@ def build_dots(
 
     try:
         if mode == "embossed":
-            result_shape = base_shape.fuse(*dot_shapes)
+            result_shape = base_shape.fuse(*hexagon_shapes)
 
         else:
-            result_shape = base_shape.cut(*dot_shapes)
+            result_shape = base_shape.cut(*hexagon_shapes)
 
     except Exception as error:
         raise RuntimeError(
-            "Could not apply the dots pattern " "to the model."
+            "Could not apply the hexagon pattern " "to the model."
         ) from error
 
-    context.add_operation("build_dots")
+    context.add_operation("build_hexagons")
 
     return cq.Workplane(obj=result_shape)
 
 
-def validate_dots_config(
+def validate_hexagon_config(
     config: dict,
-    diameter: float,
+    cell_size: float,
     depth: float,
     spacing_x: float,
     spacing_y: float,
@@ -207,7 +228,7 @@ def validate_dots_config(
     mode: str,
 ) -> None:
     """
-    Valida la configuración del patrón de puntos.
+    Valida la configuración del patrón hexagonal.
     """
 
     height = float(config["height"])
@@ -215,8 +236,8 @@ def validate_dots_config(
     if height <= 0:
         raise ValueError("Model height must be greater than 0.")
 
-    if diameter <= 0:
-        raise ValueError("Pattern diameter must be greater than 0.")
+    if cell_size <= 0:
+        raise ValueError("Pattern cell_size must be greater than 0.")
 
     if depth <= 0:
         raise ValueError("Pattern depth must be greater than 0.")
@@ -258,10 +279,7 @@ def build_angle_positions(
     angle_step: float,
 ) -> list[float]:
     """
-    Genera las posiciones angulares para una fila.
-
-    La separación se aproxima al valor solicitado
-    en spacing_x y la distribución queda centrada.
+    Genera las posiciones angulares de una fila.
     """
 
     if angle_step <= 0:
@@ -284,67 +302,67 @@ def build_angle_positions(
     return [angle_start + index * actual_step for index in range(interval_count + 1)]
 
 
-def create_dot_shape(
+def create_hexagon_shape(
     config: dict,
-    diameter: float,
+    cell_size: float,
     depth: float,
     position_z: float,
     angle_degrees: float,
+    rotation: float,
     mode: PatternMode,
 ) -> cq.Shape:
     """
-    Crea un punto individual orientado sobre
-    la superficie del modelo.
+    Crea un hexágono individual adaptado al plano
+    tangente de la superficie.
 
-    Esta función no modifica la maceta.
-    Solo devuelve la geometría del punto.
+    cell_size representa el diámetro exterior
+    aproximado del hexágono.
     """
 
-    # Penetración suficiente para que la operación
-    # booleana tenga una intersección real.
     overlap = max(
         1.0,
         depth,
     )
 
     if mode == "embossed":
-        # El plano comienza dentro de la pared y
-        # extruye hacia el exterior.
-        dot_plane = create_surface_plane(
+        hexagon_plane = create_surface_plane(
             config=config,
             position_z=position_z,
             angle_degrees=angle_degrees,
             overlap=overlap,
             outward=False,
-            rotation_degrees=0,
+            rotation_degrees=rotation,
         )
 
         extrusion_distance = depth + overlap
 
     else:
-        # El plano comienza fuera de la pared y
-        # extruye hacia el interior.
-        dot_plane = create_surface_plane(
+        hexagon_plane = create_surface_plane(
             config=config,
             position_z=position_z,
             angle_degrees=angle_degrees,
             overlap=overlap,
             outward=True,
-            rotation_degrees=0,
+            rotation_degrees=rotation,
         )
 
         extrusion_distance = -(depth + overlap)
 
-    dot_workplane = (
-        cq.Workplane(dot_plane).circle(diameter / 2).extrude(extrusion_distance)
+    hexagon_workplane = (
+        cq.Workplane(hexagon_plane)
+        .polygon(
+            6,
+            cell_size,
+        )
+        .extrude(extrusion_distance)
     )
 
-    dot_shape = dot_workplane.val()
+    hexagon_shape = hexagon_workplane.val()
 
     if not isinstance(
-        dot_shape,
+        hexagon_shape,
         cq.Shape,
     ):
-        raise RuntimeError("The dot geometry could not be created.")
+        raise RuntimeError("The hexagon geometry could not be created.")
 
-    return dot_shape
+    return hexagon_shape
