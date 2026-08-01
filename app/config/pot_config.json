@@ -37,21 +37,40 @@
         "letter_spacing": 1.5,
         "line_spacing": 4
     },
-    "pattern": {
-        "enabled": true,
-        "type": "hexagons",
-        "cell_size": 6,
-        "depth": 4,
-        "rotation": 30,
-        "spacing_x": 16,
-        "spacing_y": 14,
-        "start_z": 25,
-        "end_z": 75,
-        "angle_start": -40,
-        "angle_end": 40,
-        "row_offset": true,
-        "mode": "embossed"
-    },
+    "patterns": [
+        {
+            "enabled": true,
+            "type": "dots",
+            "diameter": 4,
+            "depth": 1.5,
+            "rotation": 0,
+            "spacing_x": 18,
+            "spacing_y": 18,
+            "start_z": 25,
+            "end_z": 70,
+            "angle_start": -35,
+            "angle_end": 35,
+            "row_offset": true,
+            "offset_first_row": false,
+            "mode": "embossed"
+        },
+        {
+            "enabled": true,
+            "type": "hexagons",
+            "cell_size": 6,
+            "depth": 1.5,
+            "rotation": 30,
+            "spacing_x": 18,
+            "spacing_y": 16,
+            "start_z": 30,
+            "end_z": 75,
+            "angle_start": 50,
+            "angle_end": 110,
+            "row_offset": true,
+            "offset_first_row": true,
+            "mode": "embossed"
+        }
+    ],
     "decoration": {
         "enabled": false,
         "type": "none"
