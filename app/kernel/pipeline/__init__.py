@@ -1,10 +1,10 @@
 from .pipeline import (
     KernelPipeline,
-    ProviderPipelineResult,
+    KernelPipelineResult,
 )
 
 
 __all__ = [
     "KernelPipeline",
-    "ProviderPipelineResult",
+    "KernelPipelineResult",
 ]
