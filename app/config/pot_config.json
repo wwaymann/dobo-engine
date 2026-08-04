@@ -8,7 +8,7 @@
     "rim_radius": 2,
     "components": {
         "drain": true,
-        "text": false,
+        "text": true,
         "pattern": true,
         "decoration": false
     },
@@ -68,6 +68,24 @@
             "angle_end": 110,
             "row_offset": true,
             "offset_first_row": true,
+            "mode": "embossed"
+        },
+        {
+            "enabled": true,
+            "type": "svg",
+            "file": "assets/svg/test.svg",
+            "width": 20,
+            "depth": 2,
+            "rotation": 0,
+            "spacing_x": 40,
+            "spacing_y": 40,
+            "start_z": 50,
+            "end_z": 50,
+            "angle_start": 0,
+            "angle_end": 0,
+            "row_offset": false,
+            "offset_first_row": false,
+            "samples_per_path": 128,
             "mode": "embossed"
         }
     ],

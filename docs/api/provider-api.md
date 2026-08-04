@@ -95,7 +95,7 @@ class Provider(ABC):
     def build_contours(
         self,
         request: ProviderRequest,
-    ) -> list[Contour]:
+    ) -> ContourSet:
         """Generate contour geometry."""
 ```
 

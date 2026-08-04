@@ -335,3 +335,23 @@ The Kernel remains independent from all applications.
 Every new capability should extend the Kernel rather than modify it.
 
 Architectural stability always takes precedence over feature growth.
+
+# Future Improvement
+
+Geometry Backend Abstraction
+
+Introduce a Geometry2D Protocol to replace the generic `Any`
+used by Contour.geometry.
+
+Goal
+
+Completely decouple the Kernel from CadQuery and allow
+multiple geometric backends.
+
+Priority
+
+Low
+
+Version
+
+2.2+

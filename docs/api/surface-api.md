@@ -70,12 +70,13 @@ class SurfaceEngine(ABC):
     @abstractmethod
     def place(
         self,
-        contours: list[Contour],
+        contours: ContourSet,
         placement: Placement,
         surface: Surface,
     ) -> SurfacePlacement:
         """
-        Adapts and positions contours on a target surface.
+        Adapts and positions a ContourSet
+        on a target surface.
         """
 ```
 
