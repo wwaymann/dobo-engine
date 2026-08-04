@@ -10,8 +10,19 @@ from .surface_engine import (
     SurfaceEngine,
     SurfaceEngineInterface,
 )
-
-
+from .geometry_projection_engine import (
+    GeometryProjectionEngine,
+    GeometryProjectionEngineInterface,
+)
+from .wire_builder import (
+    WireBuilder,
+    WireBuilderInterface,
+    WireBuildResult,
+)
+from .wire_extrusion_engine import (
+    WireExtrusionEngine,
+    WireExtrusionEngineInterface,
+)
 __all__ = [
     "SurfaceEngine",
     "SurfaceEngineInterface",
@@ -19,4 +30,11 @@ __all__ = [
     "ExtrusionEngineInterface",
     "BooleanEngine",
     "BooleanEngineInterface",
+    "GeometryProjectionEngine",
+    "GeometryProjectionEngineInterface",
+    "WireBuilder",
+    "WireBuilderInterface",
+    "WireBuildResult",
+    "WireExtrusionEngine",
+    "WireExtrusionEngineInterface",
 ]

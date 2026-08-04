@@ -36,7 +36,25 @@ from .surface_placement import (
     SurfacePlacement,
     SurfaceSample,
 )
+from .contour_definition import (
+    ContourDefinition,
+    Point2D,
+)
+from .contour_definition_set import (
+    ContourDefinitionSet,
+)
+from .projected_point import (
+    ProjectedPoint,
+    Point3D,
+)
 
+from .projected_contour import (
+    ProjectedContour,
+)
+
+from .projected_contour_set import (
+    ProjectedContourSet,
+)
 
 __all__ = [
     "Configuration",
@@ -63,4 +81,12 @@ __all__ = [
     "ExecutionWarning",
     "ExecutionError",
     "StageExecution",
+    "ContourDefinition",
+    "Point2D",
+    "ContourDefinitionSet",
+    "ProjectedPoint",
+    "ProjectedContour",
+    "ProjectedContourSet",
+    "Point3D",
+    
 ]
