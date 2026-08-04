@@ -55,6 +55,9 @@ from .projected_contour import (
 from .projected_contour_set import (
     ProjectedContourSet,
 )
+from .offset_point import OffsetPoint
+from .offset_contour import OffsetContour
+from .offset_contour_set import OffsetContourSet
 
 __all__ = [
     "Configuration",
@@ -88,5 +91,8 @@ __all__ = [
     "ProjectedContour",
     "ProjectedContourSet",
     "Point3D",
+    "OffsetPoint",
+    "OffsetContour",
+    "OffsetContourSet"
     
 ]

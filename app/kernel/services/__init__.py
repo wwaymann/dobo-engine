@@ -23,6 +23,15 @@ from .wire_extrusion_engine import (
     WireExtrusionEngine,
     WireExtrusionEngineInterface,
 )
+from .offset_engine import (
+    OffsetEngine,
+    OffsetEngineInterface,
+)
+from .offset_solid_builder import (
+    OffsetSolidBuilder,
+    OffsetSolidBuilderInterface,
+    OffsetSolidBuildResult,
+)
 __all__ = [
     "SurfaceEngine",
     "SurfaceEngineInterface",
@@ -37,4 +46,9 @@ __all__ = [
     "WireBuildResult",
     "WireExtrusionEngine",
     "WireExtrusionEngineInterface",
+    "OffsetEngine",
+    "OffsetEngineInterface",
+    "OffsetSolidBuilder",
+    "OffsetSolidBuilderInterface",
+    "OffsetSolidBuildResult",
 ]
