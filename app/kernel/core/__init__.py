@@ -27,6 +27,9 @@ from .boolean_operation_executor import (
 from .export_operation_executor import (
     ExportOperationExecutor,
 )
+from .kernel_execution_engine import (
+    KernelExecutionEngine,
+)
 
 __all__ = [
     "KernelModel",
@@ -41,4 +44,5 @@ __all__ = [
     "GeometryOperationExecutor",
     "BooleanOperationExecutor",
     "ExportOperationExecutor",
+    "KernelExecutionEngine",
 ]
