@@ -12,7 +12,7 @@ from .definition_provider import (
 from .definition_registry import (
     DefinitionProviderRegistry,
 )
-
+from .region_definition_provider import RegionDefinitionProvider
 __all__ = [
     "Provider",
     "ProviderRegistry",
@@ -22,4 +22,5 @@ __all__ = [
     "CircleDefinitionProvider",
     "DefinitionProviderInterface",
     "DefinitionProviderRegistry",
+    "RegionDefinitionProvider",
 ]

@@ -66,7 +66,15 @@ from .operations import (
     KernelOperation,
     OperationType,
 )
-
+from .geometry_definition import GeometryDefinition
+from .geometry_definition_set import GeometryDefinitionSet
+from .geometry_operation_type import (
+    GeometryOperationType,
+)
+from .geometry_request import (
+    GeometryRequest,
+    Vector3,
+)
 __all__ = [
     "Configuration",
     "ProviderRequest",
@@ -108,4 +116,9 @@ __all__ = [
     "KernelBooleanOperation",
     "ExportOperation",
     "KernelOperation",
+    "GeometryDefinition",
+    "GeometryDefinitionSet",
+    "GeometryOperationType",
+    "GeometryRequest",
+    "Vector3",
 ]
