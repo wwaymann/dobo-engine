@@ -21,9 +21,13 @@ from kernel.contracts.contour_definition_set import (
 from kernel.contracts.provider_request import (
     ProviderRequest,
 )
+from kernel.providers.definition_provider import (
+    DefinitionProviderInterface,
+)
 
-
-class CircleDefinitionProvider:
+class CircleDefinitionProvider(
+    DefinitionProviderInterface,
+):
     """
     Generates one circular ContourDefinition.
 

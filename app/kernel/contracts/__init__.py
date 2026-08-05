@@ -58,6 +58,14 @@ from .projected_contour_set import (
 from .offset_point import OffsetPoint
 from .offset_contour import OffsetContour
 from .offset_contour_set import OffsetContourSet
+from .operations import (
+    BaseOperation,
+    BooleanOperation as KernelBooleanOperation,
+    ExportOperation,
+    GeometryOperation,
+    KernelOperation,
+    OperationType,
+)
 
 __all__ = [
     "Configuration",
@@ -93,6 +101,11 @@ __all__ = [
     "Point3D",
     "OffsetPoint",
     "OffsetContour",
-    "OffsetContourSet"
-    
+    "OffsetContourSet",
+    "OperationType",
+    "BaseOperation",
+    "GeometryOperation",
+    "KernelBooleanOperation",
+    "ExportOperation",
+    "KernelOperation",
 ]

@@ -1,0 +1,173 @@
+from kernel.contracts.boolean_request import (
+    BooleanOperation as BooleanMode,
+)
+from kernel.contracts.config import (
+    GeometryPipelineConfiguration,
+    OffsetConfiguration,
+    ProviderConfiguration,
+    SurfaceConfiguration,
+)
+from kernel.contracts.operations import (
+    BooleanOperation,
+    GeometryOperation,
+)
+from kernel.contracts.placement import Placement
+from kernel.contracts.surface import (
+    Surface,
+    SurfaceType,
+)
+from kernel.core.boolean_operation_executor import (
+    BooleanOperationExecutor,
+)
+from kernel.core.execution_context import (
+    KernelExecutionContext,
+)
+from kernel.core.geometry_operation_executor import (
+    GeometryOperationExecutor,
+)
+from kernel.core.operation_dispatcher import (
+    OperationDispatcher,
+)
+from kernel.pipeline.geometry_pipeline import GeometryPipeline
+from kernel.providers.circle_definition_provider import (
+    CircleDefinitionProvider,
+)
+from kernel.providers.definition_registry import (
+    DefinitionProviderRegistry,
+)
+from kernel.services.boolean_engine import BooleanEngine
+from kernel.services.geometry_projection_engine import (
+    GeometryProjectionEngine,
+)
+from kernel.services.offset_engine import OffsetEngine
+from kernel.services.offset_solid_builder import (
+    OffsetSolidBuilder,
+)
+
+
+def build_pipeline() -> GeometryPipeline:
+    registry = DefinitionProviderRegistry()
+
+    registry.register_provider(CircleDefinitionProvider())
+
+    return GeometryPipeline(
+        provider_registry=registry,
+        projection_engine=GeometryProjectionEngine(),
+        offset_engine=OffsetEngine(),
+        solid_builder=OffsetSolidBuilder(),
+    )
+
+
+def build_geometry(
+    output_id: str,
+    radius: float,
+    position_x: float,
+) -> GeometryOperation:
+    return GeometryOperation(
+        name=f"Create {output_id}",
+        output_id=output_id,
+        configuration=GeometryPipelineConfiguration(
+            project_name="Boolean Executor Test",
+            provider=ProviderConfiguration(
+                name="circle_definition",
+                parameters={
+                    "radius": radius,
+                    "samples": 64,
+                },
+            ),
+            surface=SurfaceConfiguration(
+                surface=Surface(
+                    type=SurfaceType.PLANE,
+                    parameters={
+                        "origin": (0.0, 0.0, 0.0),
+                        "normal": (0.0, 0.0, 1.0),
+                    },
+                ),
+                placement=Placement(
+                    position=(
+                        position_x,
+                        0.0,
+                        0.0,
+                    ),
+                ),
+            ),
+            offset=OffsetConfiguration(
+                distance=4.0,
+                symmetric=True,
+            ),
+        ),
+    )
+
+
+def main() -> None:
+    context = KernelExecutionContext()
+
+    dispatcher = OperationDispatcher()
+
+    dispatcher.register(GeometryOperationExecutor(pipeline=build_pipeline()))
+
+    dispatcher.register(BooleanOperationExecutor(boolean_engine=BooleanEngine()))
+
+    dispatcher.dispatch(
+        build_geometry(
+            output_id="base",
+            radius=20.0,
+            position_x=0.0,
+        ),
+        context,
+    )
+
+    dispatcher.dispatch(
+        build_geometry(
+            output_id="tool",
+            radius=8.0,
+            position_x=5.0,
+        ),
+        context,
+    )
+
+    boolean = BooleanOperation(
+        name="Cut tool from base",
+        mode=BooleanMode.CUT,
+        target_id="base",
+        tool_id="tool",
+        output_id="result",
+    )
+
+    payload = dispatcher.dispatch(
+        boolean,
+        context,
+    )
+
+    if payload.solid is None:
+        raise RuntimeError("Boolean executor returned no Solid.")
+
+    print()
+    print("DOBO Boolean Operation Executor")
+    print("-------------------------------")
+    print(
+        "Registry IDs:",
+        context.solids.ids,
+    )
+    print(
+        "Result output:",
+        payload.output_id,
+    )
+    print(
+        "Result valid:",
+        payload.solid.is_valid,
+    )
+    print(
+        "Result volume:",
+        payload.solid.volume,
+    )
+    print(
+        "Logs:",
+        context.log_count,
+    )
+    print("Valid: OK")
+    print()
+
+
+if __name__ == "__main__":
+    main()

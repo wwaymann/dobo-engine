@@ -8,6 +8,12 @@ from .export_configuration import (
 from .extrusion_configuration import (
     ExtrusionConfiguration,
 )
+from .geometry_pipeline_configuration import (
+    GeometryPipelineConfiguration,
+)
+from .offset_configuration import (
+    OffsetConfiguration,
+)
 from .provider_configuration import (
     ProviderConfiguration,
 )
@@ -20,7 +26,9 @@ __all__ = [
     "ProviderConfiguration",
     "SurfaceConfiguration",
     "ExtrusionConfiguration",
+    "OffsetConfiguration",
     "BooleanConfiguration",
     "ExportConfiguration",
     "ExportFormat",
+    "GeometryPipelineConfiguration",
 ]
