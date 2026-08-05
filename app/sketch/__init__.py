@@ -36,29 +36,33 @@ from .sketch import (
     Sketch,
 )
 
+from .topology import (
+    Region,
+    RegionBuilder,
+    RegionSet,
+)
+
 __all__ = [
     # basic geometry
     "Point2D",
     "Bounds2D",
     "SketchPoint",
-
     # entities
     "SketchEntityType",
     "SketchEntity",
     "SketchEntityValue",
-
     "LineEntity",
     "CircleEntity",
     "PolylineEntity",
-
     # sketch
     "Sketch",
-
     # profile system
     "Profile",
     "ProfileSet",
     "ProfileBuilder",
-
     # kernel bridge
     "SketchContourBuilder",
+    "Region",
+    "RegionBuilder",
+    "RegionSet",
 ]
