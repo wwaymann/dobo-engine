@@ -43,7 +43,13 @@ from kernel.services.offset_engine import OffsetEngine
 from kernel.services.offset_solid_builder import (
     OffsetSolidBuilder,
 )
-
+from kernel.geometry import (
+    ExtrudeRequestExecutor,
+    GeometryRequestExecutorRegistry,
+)
+from kernel.services.geometry_execution_service import (
+    GeometryExecutionService,
+)
 
 def build_pipeline() -> GeometryPipeline:
     registry = DefinitionProviderRegistry()
@@ -56,7 +62,25 @@ def build_pipeline() -> GeometryPipeline:
         offset_engine=OffsetEngine(),
         solid_builder=OffsetSolidBuilder(),
     )
+def build_geometry_service() -> GeometryExecutionService:
+    """
+    Creates the geometry execution service.
+    """
 
+    request_registry = (
+        GeometryRequestExecutorRegistry()
+    )
+
+    request_registry.register(
+        ExtrudeRequestExecutor()
+    )
+
+    request_registry.validate()
+
+    return GeometryExecutionService(
+        pipeline=build_pipeline(),
+        request_registry=request_registry,
+    )
 
 def build_geometry(
     output_id: str,
@@ -104,7 +128,13 @@ def main() -> None:
 
     dispatcher = OperationDispatcher()
 
-    dispatcher.register(GeometryOperationExecutor(pipeline=build_pipeline()))
+    dispatcher.register(
+    GeometryOperationExecutor(
+        geometry_service=(
+            build_geometry_service()
+        )
+    )
+)
 
     dispatcher.register(BooleanOperationExecutor(boolean_engine=BooleanEngine()))
 

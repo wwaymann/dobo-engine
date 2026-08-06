@@ -3,8 +3,8 @@ DOBO CAD Kernel
 
 Geometry Operation Executor
 
-Executes GeometryOperation objects through
-the Kernel v2 GeometryPipeline.
+Executes GeometryOperation objects through the
+GeometryExecutionService.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from kernel.core.operation_executor import (
     OperationExecutor,
     OperationExecutorPayload,
 )
-from kernel.pipeline.geometry_pipeline import (
-    GeometryPipeline,
+from kernel.services.geometry_execution_service import (
+    GeometryExecutionService,
 )
 
 
@@ -30,28 +30,24 @@ class GeometryOperationExecutor(
     """
     Executes GeometryOperation objects.
 
-    Flow:
-
-    GeometryOperation
-    -> GeometryPipeline
-    -> Solid
-    -> OperationExecutorPayload
+    Geometry generation is delegated completely to
+    GeometryExecutionService.
     """
 
     def __init__(
         self,
-        pipeline: GeometryPipeline,
+        geometry_service: GeometryExecutionService,
     ) -> None:
         if not isinstance(
-            pipeline,
-            GeometryPipeline,
+            geometry_service,
+            GeometryExecutionService,
         ):
             raise TypeError(
                 "GeometryOperationExecutor requires "
-                "a GeometryPipeline."
+                "GeometryExecutionService."
             )
 
-        self._pipeline = pipeline
+        self._geometry_service = geometry_service
 
     @property
     def operation_class(
@@ -75,51 +71,8 @@ class GeometryOperationExecutor(
         operation.validate()
         context.validate()
 
-        configuration = (
-            operation.configuration
-        )
-
-        configuration.validate()
-
-        result = self._pipeline.execute(
-            provider_name=(
-                configuration.provider.name
-            ),
-            provider_parameters=dict(
-                configuration.provider.parameters
-            ),
-            placement=(
-                configuration
-                .surface
-                .placement
-            ),
-            surface=(
-                configuration
-                .surface
-                .surface
-            ),
-            offset_distance=(
-                configuration.offset.distance
-            ),
-            symmetric_offset=(
-                configuration.offset.symmetric
-            ),
-            metadata={
-                "operation_id": operation.id,
-                "operation_name": (
-                    operation.display_name
-                ),
-                "configuration_id": (
-                    configuration.id
-                ),
-                "project_name": (
-                    configuration.project_name
-                ),
-                "units": configuration.units,
-                "tags": operation.tags,
-                **configuration.metadata,
-                **operation.metadata,
-            },
+        result = self._geometry_service.execute(
+            operation
         )
 
         result.validate()
@@ -128,78 +81,38 @@ class GeometryOperationExecutor(
             level="info",
             message=(
                 "Geometry operation generated "
-                f"solid '{operation.output_id}'."
+                f"solid '{result.output_id}' "
+                f"through route '{result.route}'."
             ),
             operation_id=operation.id,
             metadata={
-                "provider": (
-                    operation.provider_name
-                ),
-                "surface": (
-                    operation.surface_type
-                ),
-                "offset_distance": (
-                    operation.offset_distance
-                ),
-                "definition_points": (
-                    result
-                    .definitions
-                    .point_count
-                ),
-                "projected_points": (
-                    result
-                    .projected
-                    .point_count
-                ),
-                "offset_points": (
-                    result
-                    .offset
-                    .point_count
-                ),
+                "route": result.route,
+                "output_id": result.output_id,
                 "volume": result.solid.volume,
+                "tags": operation.tags,
+                **result.metadata,
             },
         )
 
         return OperationExecutorPayload(
-            output_id=operation.output_id,
+            output_id=result.output_id,
             solid=result.solid,
             metadata={
                 "executor": (
                     "geometry_operation_executor"
                 ),
-                "provider": (
-                    operation.provider_name
-                ),
-                "surface": (
-                    operation.surface_type
-                ),
-                "offset_distance": (
-                    operation.offset_distance
-                ),
-                "definition_count": (
-                    result.definitions.count
-                ),
-                "definition_point_count": (
-                    result
-                    .definitions
-                    .point_count
-                ),
-                "projected_count": (
-                    result.projected.count
-                ),
-                "projected_point_count": (
-                    result
-                    .projected
-                    .point_count
-                ),
-                "offset_count": (
-                    result.offset.count
-                ),
-                "offset_point_count": (
-                    result
-                    .offset
-                    .point_count
-                ),
+                "route": result.route,
                 "volume": result.solid.volume,
+                **result.metadata,
             },
         )
+
+    @property
+    def geometry_service(
+        self,
+    ) -> GeometryExecutionService:
+        """
+        Returns the geometry execution service.
+        """
+
+        return self._geometry_service

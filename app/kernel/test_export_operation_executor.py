@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 
+from app.kernel.services.geometry_request_engine import GeometryRequestEngine
 from kernel.contracts.config import (
     ExportConfiguration,
     ExportFormat,
@@ -63,7 +64,13 @@ from kernel.services.offset_engine import (
 from kernel.services.offset_solid_builder import (
     OffsetSolidBuilder,
 )
-
+from kernel.geometry import (
+    ExtrudeRequestExecutor,
+    GeometryRequestExecutorRegistry,
+)
+from kernel.services.geometry_execution_service import (
+    GeometryExecutionService,
+)
 
 def build_pipeline() -> GeometryPipeline:
     """
@@ -80,7 +87,25 @@ def build_pipeline() -> GeometryPipeline:
         offset_engine=OffsetEngine(),
         solid_builder=OffsetSolidBuilder(),
     )
+def build_geometry_service() -> GeometryExecutionService:
+    """
+    Creates the geometry execution service.
+    """
 
+    request_registry = (
+        GeometryRequestExecutorRegistry()
+    )
+
+    request_registry.register(
+        ExtrudeRequestExecutor()
+    )
+
+    request_registry.validate()
+
+    return GeometryExecutionService(
+        pipeline=build_pipeline(),
+        request_registry=request_registry,
+    )
 
 def build_geometry_operation() -> GeometryOperation:
     """
@@ -179,7 +204,13 @@ def main() -> None:
 
     dispatcher = OperationDispatcher()
 
-    dispatcher.register(GeometryOperationExecutor(pipeline=build_pipeline()))
+    dispatcher.register(
+    GeometryOperationExecutor(
+        geometry_service=(
+            build_geometry_service()
+        )
+    )
+)
 
     dispatcher.register(ExportOperationExecutor())
 
