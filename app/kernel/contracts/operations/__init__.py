@@ -11,6 +11,10 @@ from .export_operation import (
 from .geometry_operation import (
     GeometryOperation,
 )
+from .modeling_operation import (
+    ModelingOperation,
+    ModelingTool,
+)
 from .shell_operation import (
     ShellOperation,
 )
@@ -20,6 +24,7 @@ KernelOperation = (
     GeometryOperation
     | BooleanOperation
     | ShellOperation
+    | ModelingOperation
     | ExportOperation
 )
 
@@ -30,6 +35,8 @@ __all__ = [
     "GeometryOperation",
     "BooleanOperation",
     "ShellOperation",
+    "ModelingOperation",
+    "ModelingTool",
     "ExportOperation",
     "KernelOperation",
 ]

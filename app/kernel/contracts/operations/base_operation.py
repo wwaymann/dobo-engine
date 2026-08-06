@@ -24,7 +24,7 @@ class OperationType(str, Enum):
     BOOLEAN = "boolean"
     EXPORT = "export"
     SHELL = "shell"
-
+    MODELING = "modeling"
 
 @dataclass(frozen=True, slots=True)
 class BaseOperation:

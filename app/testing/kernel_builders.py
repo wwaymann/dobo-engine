@@ -21,6 +21,9 @@ from kernel.core.geometry_operation_executor import (
 from kernel.core.kernel_execution_engine import (
     KernelExecutionEngine,
 )
+from kernel.core.modeling_operation_executor import (
+    ModelingOperationExecutor,
+)
 from kernel.core.operation_dispatcher import (
     OperationDispatcher,
 )
@@ -108,9 +111,6 @@ def build_request_registry(
 ) -> GeometryRequestExecutorRegistry:
     """
     Builds the GeometryRequest executor registry.
-
-    The registry supports every currently implemented
-    backend-independent geometry operation.
     """
 
     registry = (
@@ -158,6 +158,7 @@ def build_dispatcher(
     include_geometry: bool = True,
     include_boolean: bool = True,
     include_shell: bool = True,
+    include_modeling: bool = True,
     include_export: bool = True,
 ) -> OperationDispatcher:
     """
@@ -191,6 +192,14 @@ def build_dispatcher(
         )
 
     if not isinstance(
+        include_modeling,
+        bool,
+    ):
+        raise TypeError(
+            "include_modeling must be boolean."
+        )
+
+    if not isinstance(
         include_export,
         bool,
     ):
@@ -221,6 +230,11 @@ def build_dispatcher(
             ShellOperationExecutor()
         )
 
+    if include_modeling:
+        dispatcher.register(
+            ModelingOperationExecutor()
+        )
+
     if include_export:
         dispatcher.register(
             ExportOperationExecutor()
@@ -236,6 +250,7 @@ def build_kernel_engine(
     include_geometry: bool = True,
     include_boolean: bool = True,
     include_shell: bool = True,
+    include_modeling: bool = True,
     include_export: bool = True,
     stop_on_error: bool = True,
 ) -> KernelExecutionEngine:
@@ -256,6 +271,7 @@ def build_kernel_engine(
             include_geometry=include_geometry,
             include_boolean=include_boolean,
             include_shell=include_shell,
+            include_modeling=include_modeling,
             include_export=include_export,
         ),
         stop_on_error=stop_on_error,
