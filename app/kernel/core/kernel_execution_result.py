@@ -56,9 +56,7 @@ class OperationExecutionResult:
 
     error_message: str | None = None
 
-    metadata: dict[str, Any] = field(
-        default_factory=dict
-    )
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         """
@@ -81,8 +79,7 @@ class OperationExecutionResult:
             datetime,
         ):
             raise TypeError(
-                "OperationExecutionResult started_at "
-                "must be a datetime."
+                "OperationExecutionResult started_at " "must be a datetime."
             )
 
         if not isinstance(
@@ -90,14 +87,12 @@ class OperationExecutionResult:
             datetime,
         ):
             raise TypeError(
-                "OperationExecutionResult finished_at "
-                "must be a datetime."
+                "OperationExecutionResult finished_at " "must be a datetime."
             )
 
         if self.finished_at < self.started_at:
             raise ValueError(
-                "OperationExecutionResult finished_at "
-                "cannot precede started_at."
+                "OperationExecutionResult finished_at " "cannot precede started_at."
             )
 
         if isinstance(
@@ -110,45 +105,49 @@ class OperationExecutionResult:
                 float,
             ),
         ):
-            raise TypeError(
-                "OperationExecutionResult duration_ms "
-                "must be numeric."
-            )
+            raise TypeError("OperationExecutionResult duration_ms " "must be numeric.")
 
         if self.duration_ms < 0:
             raise ValueError(
-                "OperationExecutionResult duration_ms "
-                "cannot be negative."
+                "OperationExecutionResult duration_ms " "cannot be negative."
             )
 
         if self.output_id is not None:
-            if not isinstance(
-                self.output_id,
-                str,
-            ) or not self.output_id.strip():
+            if (
+                not isinstance(
+                    self.output_id,
+                    str,
+                )
+                or not self.output_id.strip()
+            ):
                 raise ValueError(
-                    "OperationExecutionResult output_id "
-                    "must be a non-empty string."
+                    "OperationExecutionResult output_id " "must be a non-empty string."
                 )
 
         if self.solid is not None:
             self.solid.validate()
 
         if self.export_path is not None:
-            if not isinstance(
-                self.export_path,
-                str,
-            ) or not self.export_path.strip():
+            if (
+                not isinstance(
+                    self.export_path,
+                    str,
+                )
+                or not self.export_path.strip()
+            ):
                 raise ValueError(
                     "OperationExecutionResult export_path "
                     "must be a non-empty string."
                 )
 
         if self.error_message is not None:
-            if not isinstance(
-                self.error_message,
-                str,
-            ) or not self.error_message.strip():
+            if (
+                not isinstance(
+                    self.error_message,
+                    str,
+                )
+                or not self.error_message.strip()
+            ):
                 raise ValueError(
                     "OperationExecutionResult error_message "
                     "must be a non-empty string."
@@ -159,29 +158,22 @@ class OperationExecutionResult:
             dict,
         ):
             raise TypeError(
-                "OperationExecutionResult metadata "
-                "must be a dictionary."
+                "OperationExecutionResult metadata " "must be a dictionary."
             )
 
         if (
-            self.status
-            == OperationExecutionStatus.COMPLETED
+            self.status == OperationExecutionStatus.COMPLETED
             and self.error_message is not None
         ):
             raise ValueError(
-                "Completed operation results cannot "
-                "contain an error message."
+                "Completed operation results cannot " "contain an error message."
             )
 
         if (
-            self.status
-            == OperationExecutionStatus.FAILED
+            self.status == OperationExecutionStatus.FAILED
             and self.error_message is None
         ):
-            raise ValueError(
-                "Failed operation results require "
-                "an error message."
-            )
+            raise ValueError("Failed operation results require " "an error message.")
 
     @property
     def succeeded(self) -> bool:
@@ -189,10 +181,7 @@ class OperationExecutionResult:
         Returns whether the operation completed.
         """
 
-        return (
-            self.status
-            == OperationExecutionStatus.COMPLETED
-        )
+        return self.status == OperationExecutionStatus.COMPLETED
 
     @property
     def failed(self) -> bool:
@@ -200,10 +189,7 @@ class OperationExecutionResult:
         Returns whether the operation failed.
         """
 
-        return (
-            self.status
-            == OperationExecutionStatus.FAILED
-        )
+        return self.status == OperationExecutionStatus.FAILED
 
     @property
     def skipped(self) -> bool:
@@ -211,10 +197,7 @@ class OperationExecutionResult:
         Returns whether the operation was skipped.
         """
 
-        return (
-            self.status
-            == OperationExecutionStatus.SKIPPED
-        )
+        return self.status == OperationExecutionStatus.SKIPPED
 
     @property
     def operation_type(self) -> OperationType:
@@ -244,15 +227,11 @@ class KernelExecutionResult:
         ...,
     ]
 
-    solids: dict[str, Solid] = field(
-        default_factory=dict
-    )
+    solids: dict[str, Solid] = field(default_factory=dict)
 
     exports: tuple[str, ...] = ()
 
-    metadata: dict[str, Any] = field(
-        default_factory=dict
-    )
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         """
@@ -265,24 +244,17 @@ class KernelExecutionResult:
             self.started_at,
             datetime,
         ):
-            raise TypeError(
-                "KernelExecutionResult started_at "
-                "must be a datetime."
-            )
+            raise TypeError("KernelExecutionResult started_at " "must be a datetime.")
 
         if not isinstance(
             self.finished_at,
             datetime,
         ):
-            raise TypeError(
-                "KernelExecutionResult finished_at "
-                "must be a datetime."
-            )
+            raise TypeError("KernelExecutionResult finished_at " "must be a datetime.")
 
         if self.finished_at < self.started_at:
             raise ValueError(
-                "KernelExecutionResult finished_at "
-                "cannot precede started_at."
+                "KernelExecutionResult finished_at " "cannot precede started_at."
             )
 
         if isinstance(
@@ -295,20 +267,12 @@ class KernelExecutionResult:
                 float,
             ),
         ):
-            raise TypeError(
-                "KernelExecutionResult duration_ms "
-                "must be numeric."
-            )
+            raise TypeError("KernelExecutionResult duration_ms " "must be numeric.")
 
         if self.duration_ms < 0:
-            raise ValueError(
-                "KernelExecutionResult duration_ms "
-                "cannot be negative."
-            )
+            raise ValueError("KernelExecutionResult duration_ms " "cannot be negative.")
 
-        if len(
-            self.operations
-        ) != self.model.enabled_count:
+        if len(self.operations) != self.model.enabled_count:
             raise ValueError(
                 "KernelExecutionResult operation count "
                 "must match enabled model operations."
@@ -321,41 +285,37 @@ class KernelExecutionResult:
             self.solids,
             dict,
         ):
-            raise TypeError(
-                "KernelExecutionResult solids "
-                "must be a dictionary."
-            )
+            raise TypeError("KernelExecutionResult solids " "must be a dictionary.")
 
         for output_id, solid in self.solids.items():
-            if not isinstance(
-                output_id,
-                str,
-            ) or not output_id.strip():
-                raise ValueError(
-                    "KernelExecutionResult solid IDs "
-                    "cannot be empty."
+            if (
+                not isinstance(
+                    output_id,
+                    str,
                 )
+                or not output_id.strip()
+            ):
+                raise ValueError("KernelExecutionResult solid IDs " "cannot be empty.")
 
             solid.validate()
 
         for export_path in self.exports:
-            if not isinstance(
-                export_path,
-                str,
-            ) or not export_path.strip():
+            if (
+                not isinstance(
+                    export_path,
+                    str,
+                )
+                or not export_path.strip()
+            ):
                 raise ValueError(
-                    "KernelExecutionResult exports "
-                    "must contain non-empty strings."
+                    "KernelExecutionResult exports " "must contain non-empty strings."
                 )
 
         if not isinstance(
             self.metadata,
             dict,
         ):
-            raise TypeError(
-                "KernelExecutionResult metadata "
-                "must be a dictionary."
-            )
+            raise TypeError("KernelExecutionResult metadata " "must be a dictionary.")
 
     @property
     def operation_count(self) -> int:
@@ -363,9 +323,7 @@ class KernelExecutionResult:
         Returns the executed operation count.
         """
 
-        return len(
-            self.operations
-        )
+        return len(self.operations)
 
     @property
     def completed_count(self) -> int:
@@ -373,11 +331,7 @@ class KernelExecutionResult:
         Returns the successful operation count.
         """
 
-        return sum(
-            1
-            for result in self.operations
-            if result.succeeded
-        )
+        return sum(1 for result in self.operations if result.succeeded)
 
     @property
     def failed_count(self) -> int:
@@ -385,11 +339,7 @@ class KernelExecutionResult:
         Returns the failed operation count.
         """
 
-        return sum(
-            1
-            for result in self.operations
-            if result.failed
-        )
+        return sum(1 for result in self.operations if result.failed)
 
     @property
     def skipped_count(self) -> int:
@@ -397,11 +347,7 @@ class KernelExecutionResult:
         Returns the skipped operation count.
         """
 
-        return sum(
-            1
-            for result in self.operations
-            if result.skipped
-        )
+        return sum(1 for result in self.operations if result.skipped)
 
     @property
     def succeeded(self) -> bool:
@@ -409,11 +355,7 @@ class KernelExecutionResult:
         Returns whether the complete execution succeeded.
         """
 
-        return (
-            self.failed_count == 0
-            and self.completed_count
-            == self.operation_count
-        )
+        return self.failed_count == 0 and self.completed_count == self.operation_count
 
     @property
     def final_solid(self) -> Solid | None:
@@ -424,6 +366,4 @@ class KernelExecutionResult:
         if not self.solids:
             return None
 
-        return tuple(
-            self.solids.values()
-        )[-1]
+        return tuple(self.solids.values())[-1]
