@@ -24,9 +24,23 @@ from kernel.core.kernel_execution_engine import (
 from kernel.core.operation_dispatcher import (
     OperationDispatcher,
 )
-from kernel.geometry import (
+from kernel.core.shell_operation_executor import (
+    ShellOperationExecutor,
+)
+from kernel.geometry.extrude_request_executor import (
     ExtrudeRequestExecutor,
+)
+from kernel.geometry.geometry_request_executor_registry import (
     GeometryRequestExecutorRegistry,
+)
+from kernel.geometry.loft_request_executor import (
+    LoftRequestExecutor,
+)
+from kernel.geometry.revolve_request_executor import (
+    RevolveRequestExecutor,
+)
+from kernel.geometry.sweep_request_executor import (
+    SweepRequestExecutor,
 )
 from kernel.pipeline.geometry_pipeline import (
     GeometryPipeline,
@@ -94,6 +108,9 @@ def build_request_registry(
 ) -> GeometryRequestExecutorRegistry:
     """
     Builds the GeometryRequest executor registry.
+
+    The registry supports every currently implemented
+    backend-independent geometry operation.
     """
 
     registry = (
@@ -102,6 +119,18 @@ def build_request_registry(
 
     registry.register(
         ExtrudeRequestExecutor()
+    )
+
+    registry.register(
+        RevolveRequestExecutor()
+    )
+
+    registry.register(
+        LoftRequestExecutor()
+    )
+
+    registry.register(
+        SweepRequestExecutor()
     )
 
     registry.validate()
@@ -128,6 +157,7 @@ def build_dispatcher(
     *,
     include_geometry: bool = True,
     include_boolean: bool = True,
+    include_shell: bool = True,
     include_export: bool = True,
 ) -> OperationDispatcher:
     """
@@ -150,6 +180,14 @@ def build_dispatcher(
     ):
         raise TypeError(
             "include_boolean must be boolean."
+        )
+
+    if not isinstance(
+        include_shell,
+        bool,
+    ):
+        raise TypeError(
+            "include_shell must be boolean."
         )
 
     if not isinstance(
@@ -178,6 +216,11 @@ def build_dispatcher(
             )
         )
 
+    if include_shell:
+        dispatcher.register(
+            ShellOperationExecutor()
+        )
+
     if include_export:
         dispatcher.register(
             ExportOperationExecutor()
@@ -192,6 +235,7 @@ def build_kernel_engine(
     *,
     include_geometry: bool = True,
     include_boolean: bool = True,
+    include_shell: bool = True,
     include_export: bool = True,
     stop_on_error: bool = True,
 ) -> KernelExecutionEngine:
@@ -211,6 +255,7 @@ def build_kernel_engine(
         dispatcher=build_dispatcher(
             include_geometry=include_geometry,
             include_boolean=include_boolean,
+            include_shell=include_shell,
             include_export=include_export,
         ),
         stop_on_error=stop_on_error,

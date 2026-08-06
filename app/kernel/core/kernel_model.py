@@ -21,6 +21,7 @@ from kernel.contracts.operations import (
     ExportOperation,
     GeometryOperation,
     KernelOperation,
+    ShellOperation,
 )
 
 
@@ -360,6 +361,34 @@ class KernelModel:
 
             if isinstance(
                 operation,
+                ShellOperation,
+            ):
+                self._require_available_output(
+                    output_id=operation.source_id,
+                    available_outputs=available_outputs,
+                    operation=operation,
+                    index=index,
+                    role="source",
+                )
+
+                self._validate_new_output(
+                    output_id=operation.output_id,
+                    declared_outputs=declared_outputs,
+                    index=index,
+                )
+
+                available_outputs.add(
+                    operation.output_id
+                )
+
+                declared_outputs.add(
+                    operation.output_id
+                )
+
+                continue
+
+            if isinstance(
+                operation,
                 ExportOperation,
             ):
                 self._require_available_output(
@@ -400,7 +429,9 @@ class KernelModel:
         )
 
     @property
-    def operation_ids(self) -> tuple[str, ...]:
+    def operation_ids(
+        self,
+    ) -> tuple[str, ...]:
         """
         Returns operation IDs in execution order.
         """
@@ -411,7 +442,9 @@ class KernelModel:
         )
 
     @property
-    def output_ids(self) -> tuple[str, ...]:
+    def output_ids(
+        self,
+    ) -> tuple[str, ...]:
         """
         Returns all declared Solid output IDs.
         """
@@ -464,6 +497,12 @@ class KernelModel:
         if isinstance(
             operation,
             BooleanOperation,
+        ):
+            return operation.output_id
+
+        if isinstance(
+            operation,
+            ShellOperation,
         ):
             return operation.output_id
 

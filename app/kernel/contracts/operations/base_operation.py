@@ -23,6 +23,7 @@ class OperationType(str, Enum):
     GEOMETRY = "geometry"
     BOOLEAN = "boolean"
     EXPORT = "export"
+    SHELL = "shell"
 
 
 @dataclass(frozen=True, slots=True)

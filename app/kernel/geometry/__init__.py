@@ -16,11 +16,22 @@ from .geometry_request_executor_registry import (
 from .solid_factory import (
     SolidFactory,
 )
-
+from .loft_request_executor import (
+    LoftRequestExecutor,
+)
+from .revolve_request_executor import (
+    RevolveRequestExecutor,
+)
+from .sweep_request_executor import (
+    SweepRequestExecutor,
+)
 
 __all__ = [
     "GeometryRequestExecutor",
     "GeometryRequestExecutorRegistry",
     "ExtrudeRequestExecutor",
+    "LoftRequestExecutor",
+    "RevolveRequestExecutor",
+    "SweepRequestExecutor",
     "SolidFactory",
 ]
