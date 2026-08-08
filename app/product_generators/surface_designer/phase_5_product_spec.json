@@ -1,0 +1,30 @@
+{
+  "id": "dobo-json-complete-001",
+  "body": "phase4_organic",
+  "primitives": true,
+  "booleans": true,
+  "geometric_decoration": true,
+  "text": {
+    "content": "DOBO",
+    "mode": "emboss",
+    "depth": 1.8,
+    "size": 12.0,
+    "font": "Arial",
+    "kind": "bold",
+    "width_fraction": 0.32,
+    "height_fraction": 0.18,
+    "u_center": 0.5,
+    "v_center": 0.64
+  },
+  "svg": {
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M 0 12 L 10 0 L 20 12 L 30 0 L 40 12 L 30 24 L 20 12 L 10 24 Z\"/></svg>",
+    "mode": "deboss",
+    "depth": 1.4,
+    "width_fraction": 0.25,
+    "height_fraction": 0.17,
+    "u_center": 0.5,
+    "v_center": 0.38,
+    "document_id": "phase_5_json_svg"
+  },
+  "output_filename": "dobo_json_complete_product.step"
+}
