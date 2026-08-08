@@ -1,0 +1,19 @@
+{
+  "phase": "7.9",
+  "rule_count": 24,
+  "groups": {
+    "final_product": 5,
+    "structural_body": 6,
+    "text": 3,
+    "decoration": 2,
+    "color": 4,
+    "production": 4
+  },
+  "statuses": [
+    "OK",
+    "WARNING",
+    "ERROR",
+    "SOURCE_PENDING",
+    "NOT_AVAILABLE"
+  ]
+}
