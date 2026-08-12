@@ -156,3 +156,73 @@ def rounded_triangle_prism_distance(
     triangle = smooth_intersection(triangle, signed_edges[2], round_mm)
     depth = np.abs(y - center_y) - half_depth
     return smooth_intersection(triangle, depth, 0.6 * round_mm)
+
+
+def rounded_box_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    *,
+    center: tuple[float, float, float],
+    half_sizes: tuple[float, float, float],
+    round_mm: float,
+) -> FloatArray:
+    """Signed distance to an axis-aligned rounded box."""
+    if any(size <= 0.0 for size in half_sizes):
+        raise ValueError("Rounded-box half sizes must be positive.")
+    if round_mm <= 0.0 or round_mm >= min(half_sizes):
+        raise ValueError("Rounded-box radius must fit inside every half size.")
+    qx = np.abs(x - center[0]) - (half_sizes[0] - round_mm)
+    qy = np.abs(y - center[1]) - (half_sizes[1] - round_mm)
+    qz = np.abs(z - center[2]) - (half_sizes[2] - round_mm)
+    outside = np.sqrt(
+        np.maximum(qx, 0.0) ** 2
+        + np.maximum(qy, 0.0) ** 2
+        + np.maximum(qz, 0.0) ** 2
+    )
+    inside = np.minimum(np.maximum(np.maximum(qx, qy), qz), 0.0)
+    return outside + inside - round_mm
+
+
+def arched_prism_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    *,
+    center_x: float,
+    center_y: float,
+    bottom_z: float,
+    spring_z: float,
+    half_width: float,
+    half_depth: float,
+    round_mm: float,
+) -> FloatArray:
+    """Approximate SDF for a vertical round-arched prism."""
+    if spring_z <= bottom_z:
+        raise ValueError("Arched-prism spring_z must be above bottom_z.")
+    if min(half_width, half_depth, round_mm) <= 0.0:
+        raise ValueError("Arched-prism dimensions must be positive.")
+    lower_center_z = 0.5 * (bottom_z + spring_z)
+    lower_round = min(
+        round_mm,
+        0.45 * (spring_z - bottom_z),
+        0.45 * half_width,
+        0.45 * half_depth,
+    )
+    lower = rounded_box_distance(
+        x,
+        y,
+        z,
+        center=(center_x, center_y, lower_center_z),
+        half_sizes=(half_width, half_depth, 0.5 * (spring_z - bottom_z)),
+        round_mm=lower_round,
+    )
+    radial = np.sqrt((x - center_x) ** 2 + (z - spring_z) ** 2) - half_width
+    depth = np.abs(y - center_y) - half_depth
+    outside = np.sqrt(
+        np.maximum(radial, 0.0) ** 2 + np.maximum(depth, 0.0) ** 2
+    )
+    inside = np.minimum(np.maximum(radial, depth), 0.0)
+    crown = outside + inside
+    crown = np.maximum(crown, spring_z - z)
+    return smooth_union(lower, crown, round_mm)

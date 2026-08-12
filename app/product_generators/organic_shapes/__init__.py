@@ -9,6 +9,11 @@ from .mesh_quality import (
     OrganicMeshQualityMetrics,
 )
 from .specification import OrganicShapeParser, OrganicShapeSpecification
+from .structural_engine import StructuralVesselEngine
+from .structural_specification import (
+    StructuralVesselParser,
+    StructuralVesselSpecification,
+)
 from .vessel_engine import OrganicVesselEngine, OrganicVesselResult
 from .vessel_specification import OrganicVesselParser, OrganicVesselSpecification
 
@@ -27,4 +32,7 @@ __all__ = (
     "OrganicVesselParser",
     "OrganicVesselResult",
     "OrganicVesselSpecification",
+    "StructuralVesselEngine",
+    "StructuralVesselParser",
+    "StructuralVesselSpecification",
 )
