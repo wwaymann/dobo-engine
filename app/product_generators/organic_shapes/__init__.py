@@ -1,6 +1,11 @@
 """Implicit organic shape generation for DOBO products."""
 
 from .engine import OrganicShapeEngine, OrganicShapeResult
+from .feature_program_engine import FeatureProgramVesselEngine
+from .feature_program_specification import (
+    FeatureProgramParser,
+    FeatureProgramSpecification,
+)
 from .cat_engine import OrganicCatVesselEngine
 from .cat_specification import OrganicCatParser, OrganicCatSpecification
 from .mesh_quality import (
@@ -19,6 +24,9 @@ from .vessel_specification import OrganicVesselParser, OrganicVesselSpecificatio
 
 __all__ = (
     "OrganicShapeEngine",
+    "FeatureProgramParser",
+    "FeatureProgramSpecification",
+    "FeatureProgramVesselEngine",
     "OrganicCatParser",
     "OrganicCatSpecification",
     "OrganicCatVesselEngine",
