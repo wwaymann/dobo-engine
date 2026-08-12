@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .mesh_quality import OrganicMeshQualityContract
 from .specification import (
     EllipsoidFieldSpec,
     OrganicBounds,
@@ -64,6 +65,7 @@ class OrganicVesselSpecification:
     fields: tuple[EllipsoidFieldSpec, ...]
     composition: SmoothUnionSpec
     vessel: OrganicVesselContract
+    mesh_quality: OrganicMeshQualityContract | None
     output: OrganicOutputSpec
 
     def validate(self) -> None:
@@ -72,6 +74,8 @@ class OrganicVesselSpecification:
         self.grid.validate()
         self.composition.validate()
         self.vessel.validate()
+        if self.mesh_quality is not None:
+            self.mesh_quality.validate()
         self.output.validate()
         if len(self.fields) < 2:
             raise ValueError("Organic vessel requires at least two envelope fields.")
@@ -102,6 +106,9 @@ class OrganicVesselParser:
         composition = _object(data, "composition")
         vessel = _object(data, "vessel")
         output = _object(data, "output")
+        mesh_quality_data = data.get("mesh_quality")
+        if mesh_quality_data is not None and not isinstance(mesh_quality_data, dict):
+            raise TypeError("mesh_quality must be an object when provided.")
         fields = data.get("fields")
         if not isinstance(fields, list) or not all(isinstance(item, dict) for item in fields):
             raise TypeError("fields must be an array of objects.")
@@ -144,6 +151,44 @@ class OrganicVesselParser:
                 drain_radius_mm=float(vessel["drain_radius_mm"]),
                 drain_start_z_mm=float(vessel["drain_start_z_mm"]),
                 drain_end_z_mm=float(vessel["drain_end_z_mm"]),
+            ),
+            mesh_quality=(
+                OrganicMeshQualityContract(
+                    subdivision_passes=int(mesh_quality_data["subdivision_passes"]),
+                    projection_iterations=int(
+                        mesh_quality_data["projection_iterations"]
+                    ),
+                    projection_epsilon_mm=float(
+                        mesh_quality_data["projection_epsilon_mm"]
+                    ),
+                    max_surface_error_mm=float(
+                        mesh_quality_data["max_surface_error_mm"]
+                    ),
+                    iterations=int(mesh_quality_data["iterations"]),
+                    lambda_factor=float(mesh_quality_data["lambda_factor"]),
+                    mu_factor=float(mesh_quality_data["mu_factor"]),
+                    rim_axial_band_mm=float(mesh_quality_data["rim_axial_band_mm"]),
+                    rim_radial_band=float(mesh_quality_data["rim_radial_band"]),
+                    max_displacement_mm=float(
+                        mesh_quality_data["max_displacement_mm"]
+                    ),
+                    base_protection_mm=float(
+                        mesh_quality_data["base_protection_mm"]
+                    ),
+                    drain_protection_mm=float(
+                        mesh_quality_data["drain_protection_mm"]
+                    ),
+                    max_volume_drift_percent=float(
+                        mesh_quality_data["max_volume_drift_percent"]
+                    ),
+                    minimum_roughness_improvement_percent=float(
+                        mesh_quality_data[
+                            "minimum_roughness_improvement_percent"
+                        ]
+                    ),
+                )
+                if mesh_quality_data is not None
+                else None
             ),
             output=OrganicOutputSpec(
                 directory=Path(str(output["directory"])),

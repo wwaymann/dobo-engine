@@ -8,6 +8,7 @@ import numpy as np
 import trimesh
 
 from .engine import OrganicShapeEngine
+from .mesh_quality import LocalizedTaubinRefiner, OrganicMeshQualityMetrics
 from .fields import (
     capped_cylinder_distance,
     ellipsoid_distance,
@@ -34,6 +35,7 @@ class OrganicVesselResult:
     flat_base_z_mm: float
     flat_base_vertex_count: int
     semantic_checks: dict[str, bool]
+    mesh_quality: OrganicMeshQualityMetrics | None
     stage_seconds: dict[str, float]
     generation_seconds: float
     max_generation_seconds: float
@@ -80,6 +82,41 @@ class OrganicVesselEngine:
             "surface_extraction",
             lambda: OrganicShapeEngine._extract(specification, field),
         )
+        mesh_quality = None
+        if specification.mesh_quality is not None:
+            mesh, mesh_quality = self._timed(
+                stages,
+                "localized_mesh_refinement",
+                lambda: LocalizedTaubinRefiner.refine(
+                    mesh,
+                    specification.mesh_quality,
+                    opening_center=specification.vessel.opening_center,
+                    opening_radii=specification.vessel.opening_radii,
+                    opening_start_z_mm=specification.vessel.opening_start_z_mm,
+                    base_z_mm=specification.vessel.base_z_mm,
+                    cavity_floor_z_mm=specification.vessel.cavity_floor_z_mm,
+                    drain_center=specification.vessel.drain_center,
+                    drain_radius_mm=specification.vessel.drain_radius_mm,
+                    field_sampler=lambda points: np.asarray(
+                        self._material_field(
+                            specification,
+                            points[:, 0],
+                            points[:, 1],
+                            points[:, 2],
+                        ),
+                        dtype=np.float64,
+                    ),
+                    outer_field_sampler=lambda points: np.asarray(
+                        self._outer_field(
+                            specification,
+                            points[:, 0],
+                            points[:, 1],
+                            points[:, 2],
+                        ),
+                        dtype=np.float64,
+                    ),
+                ),
+            )
         self._timed(
             stages,
             "mesh_validation",
@@ -115,6 +152,7 @@ class OrganicVesselEngine:
             flat_base_z_mm=specification.vessel.base_z_mm,
             flat_base_vertex_count=flat_count,
             semantic_checks=semantic_checks,
+            mesh_quality=mesh_quality,
             stage_seconds=stages,
             generation_seconds=perf_counter() - started,
             max_generation_seconds=specification.output.max_generation_seconds,
