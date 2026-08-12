@@ -1,0 +1,49 @@
+{
+  "id": "v2_prototype_1_dobo",
+  "body": {
+    "template": "basic_round_01",
+    "color": "white",
+    "height_mm": 140.0,
+    "bottom_radius_mm": 56.0,
+    "top_radius_mm": 65.0,
+    "wall_mm": 4.0,
+    "bottom_mm": 4.0
+  },
+  "texts": [
+    {
+      "content": "Dobo",
+      "size_mm": 12.0,
+      "depth_mm": 0.8,
+      "font": "Arial",
+      "kind": "bold",
+      "width_fraction": 0.24,
+      "height_fraction": 0.13,
+      "u_center": 0.50,
+      "v_center": 0.61
+    },
+    {
+      "content": "Planta una idea",
+      "size_mm": 7.0,
+      "depth_mm": 0.8,
+      "font": "Arial",
+      "kind": "regular",
+      "width_fraction": 0.34,
+      "height_fraction": 0.085,
+      "u_center": 0.50,
+      "v_center": 0.48
+    }
+  ],
+  "manufacturing": {
+    "process": "fdm",
+    "colors": 1,
+    "nozzle_mm": 0.4,
+    "layer_height_mm": 0.2,
+    "max_generation_seconds": 30.0
+  },
+  "output": {
+    "directory": "outputs/product_generators/surface_designer/v2_prototype_1_dobo",
+    "basename": "v2_prototype_1_dobo",
+    "mesh_tolerance_mm": 0.08,
+    "angular_tolerance": 0.15
+  }
+}
