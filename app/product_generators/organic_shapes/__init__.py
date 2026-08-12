@@ -1,6 +1,8 @@
 """Implicit organic shape generation for DOBO products."""
 
 from .engine import OrganicShapeEngine, OrganicShapeResult
+from .cat_engine import OrganicCatVesselEngine
+from .cat_specification import OrganicCatParser, OrganicCatSpecification
 from .mesh_quality import (
     LocalizedTaubinRefiner,
     OrganicMeshQualityContract,
@@ -12,6 +14,9 @@ from .vessel_specification import OrganicVesselParser, OrganicVesselSpecificatio
 
 __all__ = (
     "OrganicShapeEngine",
+    "OrganicCatParser",
+    "OrganicCatSpecification",
+    "OrganicCatVesselEngine",
     "OrganicShapeParser",
     "OrganicShapeResult",
     "OrganicShapeSpecification",

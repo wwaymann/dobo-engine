@@ -138,6 +138,7 @@ class LocalizedTaubinRefiner:
         drain_radius_mm: float,
         field_sampler: Callable[[np.ndarray], np.ndarray],
         outer_field_sampler: Callable[[np.ndarray], np.ndarray],
+        feature_weight_sampler: Callable[[np.ndarray], np.ndarray] | None = None,
     ) -> tuple[trimesh.Trimesh, OrganicMeshQualityMetrics]:
         contract.validate()
         input_face_count = int(len(mesh.faces))
@@ -156,6 +157,11 @@ class LocalizedTaubinRefiner:
                 drain_center=drain_center,
                 drain_radius_mm=drain_radius_mm,
             )
+            if feature_weight_sampler is not None:
+                selection_weights = np.maximum(
+                    selection_weights,
+                    np.asarray(feature_weight_sampler(vertices), dtype=np.float64),
+                )
             functional_faces = cls._functional_face_mask(
                 vertices,
                 faces,
@@ -207,6 +213,12 @@ class LocalizedTaubinRefiner:
             drain_center=drain_center,
             drain_radius_mm=drain_radius_mm,
         )
+        if feature_weight_sampler is not None:
+            weights = np.maximum(
+                weights,
+                np.asarray(feature_weight_sampler(reference), dtype=np.float64),
+            )
+            weights[protected] = 0.0
         active = weights > 1e-6
         vertices = cls._project_to_surface(
             reference,

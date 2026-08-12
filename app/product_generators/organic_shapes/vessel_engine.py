@@ -115,6 +115,14 @@ class OrganicVesselEngine:
                         ),
                         dtype=np.float64,
                     ),
+                    feature_weight_sampler=(
+                        (lambda vertices: self._feature_refinement_weights(
+                            specification,
+                            vertices,
+                        ))
+                        if hasattr(self, "_feature_refinement_weights")
+                        else None
+                    ),
                 ),
             )
         self._timed(

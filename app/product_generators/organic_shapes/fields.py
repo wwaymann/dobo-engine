@@ -91,3 +91,68 @@ def capped_cylinder_distance(
     outside = np.sqrt(np.maximum(radial, 0.0) ** 2 + np.maximum(axial, 0.0) ** 2)
     inside = np.minimum(np.maximum(radial, axial), 0.0)
     return outside + inside
+
+
+def capsule_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    *,
+    start: tuple[float, float, float],
+    end: tuple[float, float, float],
+    radius: float,
+) -> FloatArray:
+    """Signed distance to a capsule joining two three-dimensional points."""
+    if radius <= 0.0:
+        raise ValueError("Capsule radius must be positive.")
+    segment = np.asarray(end, dtype=np.float64) - np.asarray(start, dtype=np.float64)
+    length_squared = float(np.dot(segment, segment))
+    if length_squared <= 1e-12:
+        raise ValueError("Capsule endpoints must be distinct.")
+    px = x - start[0]
+    py = y - start[1]
+    pz = z - start[2]
+    projection = np.clip(
+        (px * segment[0] + py * segment[1] + pz * segment[2])
+        / length_squared,
+        0.0,
+        1.0,
+    )
+    dx = px - projection * segment[0]
+    dy = py - projection * segment[1]
+    dz = pz - projection * segment[2]
+    return np.sqrt(dx * dx + dy * dy + dz * dz) - radius
+
+
+def rounded_triangle_prism_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    *,
+    vertices_xz: tuple[
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float],
+    ],
+    center_y: float,
+    half_depth: float,
+    round_mm: float,
+) -> FloatArray:
+    """Approximate SDF for a softly rounded triangular prism."""
+    if half_depth <= 0.0 or round_mm <= 0.0:
+        raise ValueError("Rounded triangle prism dimensions must be positive.")
+    points = np.asarray(vertices_xz, dtype=np.float64)
+    signed_edges = []
+    for index in range(3):
+        start = points[index]
+        end = points[(index + 1) % 3]
+        edge = end - start
+        length = float(np.linalg.norm(edge))
+        if length <= 1e-12:
+            raise ValueError("Triangle prism vertices must be distinct.")
+        cross = edge[0] * (z - start[1]) - edge[1] * (x - start[0])
+        signed_edges.append(-cross / length)
+    triangle = smooth_intersection(signed_edges[0], signed_edges[1], round_mm)
+    triangle = smooth_intersection(triangle, signed_edges[2], round_mm)
+    depth = np.abs(y - center_y) - half_depth
+    return smooth_intersection(triangle, depth, 0.6 * round_mm)
