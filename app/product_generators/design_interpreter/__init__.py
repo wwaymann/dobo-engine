@@ -48,6 +48,13 @@ from .design_pipeline import (
     DoboDesignPipeline,
 )
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
+from .structural_vocabulary import (
+    StructuralAnchor,
+    StructuralDesignProgram,
+    StructuralFeature,
+    StructuralVisualGroup,
+    StructuralVocabularyResolver,
+)
 
 __all__ = (
     "Ambiguity",
@@ -84,6 +91,11 @@ __all__ = (
     "DoboDesignPipeline",
     "ThreeMFExportResult",
     "ThreeMFMeshExporter",
+    "StructuralAnchor",
+    "StructuralDesignProgram",
+    "StructuralFeature",
+    "StructuralVisualGroup",
+    "StructuralVocabularyResolver",
     "SemanticProgramParser",
     "SemanticRelation",
     "SourceIntent",
