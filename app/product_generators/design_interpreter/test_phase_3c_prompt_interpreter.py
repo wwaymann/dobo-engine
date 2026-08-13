@@ -9,6 +9,7 @@ from .prompt_interpreter import (
     OpenAIResponsesSemanticClient,
     PromptSemanticInterpreter,
     SemanticModelResponse,
+    SYSTEM_INSTRUCTIONS,
 )
 from .semantic_compiler import SemanticToMotorCompiler
 
@@ -53,6 +54,29 @@ def _must_reject(label: str, action) -> None:
     raise RuntimeError(f"Phase 3C accepted invalid case '{label}'.")
 
 
+def _contains_key(value, target: str) -> bool:
+    if isinstance(value, dict):
+        return target in value or any(
+            _contains_key(item, target) for item in value.values()
+        )
+    if isinstance(value, list):
+        return any(_contains_key(item, target) for item in value)
+    return False
+
+
+def _literal_constraints_without_type(value) -> int:
+    if isinstance(value, dict):
+        current = int(
+            ("const" in value or "enum" in value) and "type" not in value
+        )
+        return current + sum(
+            _literal_constraints_without_type(item) for item in value.values()
+        )
+    if isinstance(value, list):
+        return sum(_literal_constraints_without_type(item) for item in value)
+    return 0
+
+
 def main() -> None:
     print()
     print("DOBO Design Interpreter - Phase 3C")
@@ -60,6 +84,16 @@ def main() -> None:
     print("-----------------------------------")
     fixture = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
     prompt = fixture["source"]["prompt"]
+    manufacturing_rule = (
+        "manufacturing.maximum_relief_depth_mm MUST be strictly smaller than"
+    )
+    print(
+        "cross-field manufacturing instruction",
+        manufacturing_rule in SYSTEM_INSTRUCTIONS,
+        "OK",
+    )
+    if manufacturing_rule not in SYSTEM_INSTRUCTIONS:
+        raise RuntimeError("Prompt interpreter omitted the manufacturing invariant.")
     fixture_client = FixtureSemanticClient(fixture)
     result = PromptSemanticInterpreter(fixture_client).interpret(prompt)
     print("model calls", len(fixture_client.calls), "OK")
@@ -84,15 +118,48 @@ def main() -> None:
         model="configured-model",
         client=SimpleNamespace(responses=fake_responses),
     )
-    live_shape = PromptSemanticInterpreter(openai_adapter).interpret(prompt)
+    live_interpreter = PromptSemanticInterpreter(openai_adapter)
+    canonical_has_unique_items = _contains_key(
+        live_interpreter.schema, "uniqueItems"
+    )
+    live_shape = live_interpreter.interpret(prompt)
     request = fake_responses.request
     response_format = request["text"]["format"]
+    api_schema_has_unique_items = _contains_key(
+        response_format["schema"], "uniqueItems"
+    )
+    canonical_implicit_literal_types = _literal_constraints_without_type(
+        live_interpreter.schema
+    )
+    api_implicit_literal_types = _literal_constraints_without_type(
+        response_format["schema"]
+    )
     print("Responses API model", request["model"], "OK")
     print("structured output type", response_format["type"], "OK")
     print("strict JSON Schema", response_format["strict"], "OK")
+    print("canonical uniqueItems preserved", canonical_has_unique_items, "OK")
+    print(
+        "OpenAI schema uniqueItems removed",
+        not api_schema_has_unique_items,
+        "OK",
+    )
+    print(
+        "canonical implicit literal types",
+        canonical_implicit_literal_types,
+        "OK",
+    )
+    print(
+        "OpenAI explicit literal types",
+        api_implicit_literal_types == 0,
+        "OK",
+    )
     print("OpenAI adapter semantic features", len(live_shape.program.features), "OK")
     if response_format["type"] != "json_schema" or not response_format["strict"]:
         raise RuntimeError("OpenAI adapter did not request strict Structured Outputs.")
+    if not canonical_has_unique_items or api_schema_has_unique_items:
+        raise RuntimeError("OpenAI schema projection altered the wrong schema.")
+    if canonical_implicit_literal_types == 0 or api_implicit_literal_types != 0:
+        raise RuntimeError("OpenAI schema projection did not type every literal.")
 
     wrong_prompt = deepcopy(fixture)
     wrong_prompt["source"]["prompt"] = "Otro prompt distinto y suficientemente largo."

@@ -10,8 +10,13 @@ from .semantic_contract import DesignSemanticProgram
 from .semantic_parser import SemanticProgramParser
 
 
-PROMPT_INTERPRETER_VERSION = "3C.1"
+PROMPT_INTERPRETER_VERSION = "3C.4"
 DEFAULT_SCHEMA_PATH = Path(__file__).with_name("semantic_program.schema.json")
+
+# Structured Outputs accepts a strict subset of JSON Schema. Keep the canonical
+# 3A.1 schema unchanged for local validation and remove only constraints that
+# the Responses API cannot accept from the copy sent to OpenAI.
+_OPENAI_UNSUPPORTED_SCHEMA_KEYWORDS = frozenset({"uniqueItems"})
 
 SYSTEM_INSTRUCTIONS = """You are the semantic design interpreter for DOBO.
 Convert the user's planter description into exactly one Design Semantic Program 3A.1.
@@ -28,7 +33,52 @@ Rules:
 - Use a blocking ambiguity when no safe interpretation exists.
 - Required features cannot be omittable.
 - Manufacturing values must remain internally safe.
+- manufacturing.maximum_relief_depth_mm MUST be strictly smaller than
+  manufacturing.minimum_wall_mm. Prefer a conservative relief depth no greater
+  than half the wall thickness when the user does not provide exact values.
 """
+
+
+def _json_schema_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    raise TypeError(f"Unsupported JSON Schema literal type: {type(value).__name__}.")
+
+
+def _openai_compatible_schema(value: Any) -> Any:
+    if isinstance(value, dict):
+        projected = {
+            key: _openai_compatible_schema(item)
+            for key, item in value.items()
+            if key not in _OPENAI_UNSUPPORTED_SCHEMA_KEYWORDS
+        }
+        if "type" not in projected and "const" in projected:
+            projected["type"] = _json_schema_type(projected["const"])
+        if "type" not in projected and "enum" in projected:
+            inferred_types = list(
+                dict.fromkeys(_json_schema_type(item) for item in projected["enum"])
+            )
+            if not inferred_types:
+                raise ValueError("OpenAI enum schemas must contain at least one value.")
+            projected["type"] = (
+                inferred_types[0] if len(inferred_types) == 1 else inferred_types
+            )
+        return projected
+    if isinstance(value, list):
+        return [_openai_compatible_schema(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +184,7 @@ class OpenAIResponsesSemanticClient:
         system_instructions: str,
         schema: dict[str, Any],
     ) -> SemanticModelResponse:
+        api_schema = _openai_compatible_schema(schema)
         response = self.client.responses.create(
             model=self.model,
             input=[
@@ -144,7 +195,7 @@ class OpenAIResponsesSemanticClient:
                 "format": {
                     "type": "json_schema",
                     "name": "dobo_semantic_program_3a_1",
-                    "schema": schema,
+                    "schema": api_schema,
                     "strict": True,
                 }
             },
