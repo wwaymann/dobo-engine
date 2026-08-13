@@ -125,6 +125,33 @@ class OrganicVesselEngine:
                     ),
                 ),
             )
+            if hasattr(self, "_feature_subdivision_passes"):
+                detail_passes = self._feature_subdivision_passes(specification)
+                if detail_passes:
+                    mesh = self._timed(
+                        stages,
+                        "adaptive_detail_subdivision",
+                        lambda: LocalizedTaubinRefiner.subdivide_feature_detail(
+                            mesh,
+                            specification.mesh_quality,
+                            passes=detail_passes,
+                            feature_weight_sampler=lambda vertices: (
+                                self._feature_refinement_weights(
+                                    specification,
+                                    vertices,
+                                )
+                            ),
+                            field_sampler=lambda points: np.asarray(
+                                self._material_field(
+                                    specification,
+                                    points[:, 0],
+                                    points[:, 1],
+                                    points[:, 2],
+                                ),
+                                dtype=np.float64,
+                            ),
+                        ),
+                    )
         self._timed(
             stages,
             "mesh_validation",

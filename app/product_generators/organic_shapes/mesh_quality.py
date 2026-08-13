@@ -65,6 +65,7 @@ class OrganicMeshQualityMetrics:
     input_face_count: int
     refined_face_count: int
     active_vertex_count: int
+    feature_active_vertex_count: int
     protected_vertex_count: int
     iterations_applied: int
     roughness_before_mm: float
@@ -213,12 +214,14 @@ class LocalizedTaubinRefiner:
             drain_center=drain_center,
             drain_radius_mm=drain_radius_mm,
         )
+        feature_weights = np.zeros(len(reference), dtype=np.float64)
         if feature_weight_sampler is not None:
-            weights = np.maximum(
-                weights,
-                np.asarray(feature_weight_sampler(reference), dtype=np.float64),
+            feature_weights = np.asarray(
+                feature_weight_sampler(reference), dtype=np.float64
             )
+            weights = np.maximum(weights, feature_weights)
             weights[protected] = 0.0
+            feature_weights[protected] = 0.0
         active = weights > 1e-6
         vertices = cls._project_to_surface(
             reference,
@@ -323,6 +326,9 @@ class LocalizedTaubinRefiner:
             input_face_count=input_face_count,
             refined_face_count=int(len(faces)),
             active_vertex_count=int(np.count_nonzero(active)),
+            feature_active_vertex_count=int(
+                np.count_nonzero(feature_weights > 1e-6)
+            ),
             protected_vertex_count=int(np.count_nonzero(protected)),
             iterations_applied=best_iteration,
             roughness_before_mm=roughness_before,
@@ -357,6 +363,50 @@ class LocalizedTaubinRefiner:
         )
         metrics.validate(contract)
         return refined, metrics
+
+    @classmethod
+    def subdivide_feature_detail(
+        cls,
+        mesh: trimesh.Trimesh,
+        contract: OrganicMeshQualityContract,
+        *,
+        passes: int,
+        feature_weight_sampler: Callable[[np.ndarray], np.ndarray],
+        field_sampler: Callable[[np.ndarray], np.ndarray],
+    ) -> trimesh.Trimesh:
+        """Add conforming feature density while reprojecting only new vertices."""
+
+        if not 1 <= passes <= 2:
+            raise ValueError("Detail subdivision passes must be between 1 and 2.")
+        vertices = np.asarray(mesh.vertices, dtype=np.float64).copy()
+        faces = np.asarray(mesh.faces, dtype=np.int64).copy()
+        for _ in range(passes):
+            feature_weights = np.asarray(
+                feature_weight_sampler(vertices), dtype=np.float64
+            )
+            selected = np.max(feature_weights[faces], axis=1) > 0.02
+            previous_count = len(vertices)
+            vertices, faces = cls._subdivide_selected(vertices, faces, selected)
+            reference = vertices.copy()
+            new_vertex_weights = np.zeros(len(vertices), dtype=np.float64)
+            new_vertex_weights[previous_count:] = 1.0
+            vertices = cls._project_to_surface(
+                vertices,
+                field_sampler,
+                new_vertex_weights,
+                np.zeros(len(vertices), dtype=bool),
+                reference,
+                contract,
+            )
+        refined = trimesh.Trimesh(
+            vertices=vertices,
+            faces=faces,
+            process=False,
+            validate=False,
+        )
+        if not refined.is_winding_consistent or refined.volume < 0.0:
+            refined.fix_normals(multibody=True)
+        return refined
 
     @staticmethod
     def _functional_face_mask(

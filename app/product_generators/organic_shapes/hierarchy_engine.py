@@ -6,6 +6,10 @@ from math import cos, radians, sin
 
 import numpy as np
 
+from .adaptive_refinement import (
+    feature_characteristic_size,
+    surface_proximity_weights,
+)
 from .feature_program_engine import FeatureProgramVesselEngine
 from .feature_program_specification import FeatureInstruction
 from .fields import capped_cylinder_distance, elliptical_column_distance, smooth_intersection, smooth_union
@@ -44,6 +48,11 @@ def _transform_matrix(transform: TransformSpec) -> np.ndarray:
 
 
 class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
+    @staticmethod
+    def _feature_subdivision_passes(specification) -> int:
+        contract = specification.adaptive_refinement
+        return contract.detail_subdivision_passes if contract is not None else 0
+
     @classmethod
     @lru_cache(maxsize=16)
     def placements(
@@ -179,7 +188,68 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
 
     @classmethod
     def _feature_refinement_weights(cls, specification, vertices):
-        return np.zeros(len(vertices), dtype=np.float64)
+        contract = specification.adaptive_refinement
+        weights = np.zeros(len(vertices), dtype=np.float64)
+        if contract is None:
+            return weights
+        x, y, z = vertices.T
+        for placement in cls.placements(specification):
+            feature_size = (
+                feature_characteristic_size(placement.feature)
+                * placement.distance_scale
+            )
+            band = contract.influence_band_mm(feature_size)
+            signed_distance = np.asarray(
+                cls._placed_field(placement, x, y, z), dtype=np.float64
+            )
+            weights = np.maximum(
+                weights,
+                surface_proximity_weights(
+                    signed_distance,
+                    band_mm=band,
+                    feature_size_mm=feature_size,
+                    small_feature_threshold_mm=contract.small_feature_threshold_mm,
+                ),
+            )
+        return weights
+
+    @classmethod
+    def adaptive_refinement_diagnostics(cls, specification, mesh):
+        contract = specification.adaptive_refinement
+        if contract is None:
+            raise RuntimeError("Adaptive refinement is not enabled.")
+        vertices = np.asarray(mesh.vertices, dtype=np.float64)
+        weights = cls._feature_refinement_weights(specification, vertices)
+        edges = np.asarray(mesh.edges_unique, dtype=np.int64)
+        edge_lengths = np.linalg.norm(
+            vertices[edges[:, 0]] - vertices[edges[:, 1]], axis=1
+        )
+        edge_weights = np.max(weights[edges], axis=1)
+        feature_edges = edge_weights >= 0.5
+        background_edges = edge_weights <= 1e-9
+        placements_selected = 0
+        small_placements = 0
+        x, y, z = vertices.T
+        for placement in cls.placements(specification):
+            size = (
+                feature_characteristic_size(placement.feature)
+                * placement.distance_scale
+            )
+            if size <= contract.small_feature_threshold_mm:
+                small_placements += 1
+            distance = np.abs(cls._placed_field(placement, x, y, z))
+            if np.any(distance <= contract.influence_band_mm(size)):
+                placements_selected += 1
+        return {
+            "placements_selected": placements_selected,
+            "small_placements": small_placements,
+            "feature_vertices": int(np.count_nonzero(weights >= 0.5)),
+            "feature_edges": int(np.count_nonzero(feature_edges)),
+            "feature_median_edge_mm": float(np.median(edge_lengths[feature_edges])),
+            "background_median_edge_mm": float(
+                np.median(edge_lengths[background_edges])
+            ),
+        }
 
     @classmethod
     def hierarchy_checks(cls, specification) -> dict[str, bool]:

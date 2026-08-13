@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .adaptive_refinement import AdaptiveFeatureRefinementContract
 from .feature_program_specification import FeatureInstruction, FeatureProgramParser
 from .specification import _object, _vector3
 from .vessel_specification import OrganicVesselParser, OrganicVesselSpecification
@@ -65,6 +66,7 @@ class HierarchicalFeatureSpecification:
     vessel_specification: OrganicVesselSpecification
     templates: tuple[FeatureInstruction, ...]
     roots: tuple[HierarchyNode, ...]
+    adaptive_refinement: AdaptiveFeatureRefinementContract | None = None
 
     def __getattr__(self, name: str):
         return getattr(self.vessel_specification, name)
@@ -96,6 +98,8 @@ class HierarchicalFeatureSpecification:
                 raise ValueError(f"Duplicate hierarchy root id '{root.id}'.")
             root_ids.add(root.id)
             validate_references(root)
+        if self.adaptive_refinement is not None:
+            self.adaptive_refinement.validate()
 
 
 class HierarchicalFeatureParser:
@@ -108,6 +112,7 @@ class HierarchicalFeatureParser:
         program = _object(data, "hierarchy_program")
         raw_templates = program.get("templates")
         raw_roots = program.get("roots")
+        raw_adaptive = program.get("adaptive_refinement")
         if not isinstance(raw_templates, list) or not all(
             isinstance(item, dict) for item in raw_templates
         ):
@@ -116,12 +121,29 @@ class HierarchicalFeatureParser:
             isinstance(item, dict) for item in raw_roots
         ):
             raise TypeError("hierarchy_program.roots must be an array of objects.")
+        if raw_adaptive is not None and not isinstance(raw_adaptive, dict):
+            raise TypeError("hierarchy_program.adaptive_refinement must be an object.")
         specification = HierarchicalFeatureSpecification(
             vessel_specification=vessel,
             templates=tuple(
                 FeatureProgramParser._feature(item) for item in raw_templates
             ),
             roots=tuple(self._node(item) for item in raw_roots),
+            adaptive_refinement=(
+                AdaptiveFeatureRefinementContract(
+                    surface_band_mm=float(raw_adaptive["surface_band_mm"]),
+                    size_band_ratio=float(raw_adaptive["size_band_ratio"]),
+                    maximum_band_mm=float(raw_adaptive["maximum_band_mm"]),
+                    small_feature_threshold_mm=float(
+                        raw_adaptive["small_feature_threshold_mm"]
+                    ),
+                    detail_subdivision_passes=int(
+                        raw_adaptive["detail_subdivision_passes"]
+                    ),
+                )
+                if raw_adaptive is not None
+                else None
+            ),
         )
         specification.validate()
         return specification
