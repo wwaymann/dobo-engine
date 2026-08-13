@@ -14,6 +14,7 @@ from .feature_program_engine import FeatureProgramVesselEngine
 from .feature_program_specification import FeatureInstruction
 from .fields import capped_cylinder_distance, elliptical_column_distance, smooth_intersection, smooth_union
 from .hierarchy_specification import HierarchicalFeatureSpecification, HierarchyNode, TransformSpec
+from .surface_anchoring import ResolvedSurfaceAnchor, SurfaceAnchorResolver
 from .vessel_engine import OrganicVesselEngine
 
 
@@ -48,6 +49,36 @@ def _transform_matrix(transform: TransformSpec) -> np.ndarray:
 
 
 class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
+    @classmethod
+    def _resolved_anchor(
+        cls,
+        specification: HierarchicalFeatureSpecification,
+        node: HierarchyNode,
+    ) -> ResolvedSurfaceAnchor | None:
+        if node.surface_anchor is None:
+            return None
+        maximum_radius = 1.5 * max(
+            abs(specification.grid.minimum[0]),
+            abs(specification.grid.minimum[1]),
+            abs(specification.grid.maximum[0]),
+            abs(specification.grid.maximum[1]),
+        )
+        return SurfaceAnchorResolver.resolve(
+            node.surface_anchor,
+            field_sampler=lambda x, y, z: float(
+                OrganicVesselEngine._outer_field(
+                    specification,
+                    np.asarray(x),
+                    np.asarray(y),
+                    np.asarray(z),
+                )
+            ),
+            base_z_mm=specification.vessel.base_z_mm,
+            opening_start_z_mm=specification.vessel.opening_start_z_mm,
+            maximum_radius_mm=maximum_radius,
+            gradient_epsilon_mm=max(0.05, 0.2 * specification.grid.voxel_mm),
+        )
+
     @staticmethod
     def _feature_subdivision_passes(specification) -> int:
         contract = specification.adaptive_refinement
@@ -63,6 +94,10 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
 
         def visit(node: HierarchyNode, parent: np.ndarray, path: str) -> None:
             node_matrix = _transform_matrix(node.transform)
+            resolved_anchor = cls._resolved_anchor(specification, node)
+            placement_parent = (
+                resolved_anchor.matrix if resolved_anchor is not None else parent
+            )
             mirrors = (None, node.mirror_axis) if node.mirror_axis else (None,)
             for index in range(node.repeat.count):
                 step = TransformSpec(
@@ -80,7 +115,7 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
                     if mirror_axis is not None:
                         mirror["xyz".index(mirror_axis), "xyz".index(mirror_axis)] = -1.0
                         mirror_name = f".mirror_{mirror_axis}"
-                    world = parent @ mirror @ repeat_matrix @ node_matrix
+                    world = placement_parent @ mirror @ repeat_matrix @ node_matrix
                     linear = world[:3, :3]
                     distance_scale = float(np.linalg.svd(linear, compute_uv=False).min())
                     instance_path = f"{path}/{node.id}[{index}]{mirror_name}"
@@ -102,6 +137,31 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
         for root in specification.roots:
             visit(root, identity, "root")
         return tuple(placed)
+
+    @classmethod
+    def surface_anchor_checks(cls, specification) -> dict[str, bool]:
+        checks: dict[str, bool] = {}
+
+        def visit(node: HierarchyNode, path: str) -> None:
+            resolved = cls._resolved_anchor(specification, node)
+            if resolved is not None:
+                rotation = resolved.matrix[:3, :3]
+                normal = np.asarray(resolved.outward_normal)
+                checks[f"{path}/{node.id}_surface_residual"] = (
+                    resolved.surface_residual_mm <= 1e-5
+                )
+                checks[f"{path}/{node.id}_normal_alignment"] = np.allclose(
+                    -rotation[:, 1], normal, atol=1e-7
+                )
+                checks[f"{path}/{node.id}_orthonormal_frame"] = np.allclose(
+                    rotation.T @ rotation, np.eye(3), atol=1e-7
+                )
+            for child in node.children:
+                visit(child, f"{path}/{node.id}")
+
+        for root in specification.roots:
+            visit(root, "root")
+        return checks
 
     @staticmethod
     def _local_coordinates(placement: PlacedFeature, x, y, z):

@@ -20,6 +20,11 @@ from .mesh_quality import (
     OrganicMeshQualityMetrics,
 )
 from .specification import OrganicShapeParser, OrganicShapeSpecification
+from .surface_anchoring import (
+    ResolvedSurfaceAnchor,
+    SurfaceAnchorResolver,
+    SurfaceAnchorSpec,
+)
 from .structural_engine import StructuralVesselEngine
 from .structural_specification import (
     StructuralVesselParser,
@@ -43,6 +48,9 @@ __all__ = (
     "OrganicShapeParser",
     "OrganicShapeResult",
     "OrganicShapeSpecification",
+    "ResolvedSurfaceAnchor",
+    "SurfaceAnchorResolver",
+    "SurfaceAnchorSpec",
     "LocalizedTaubinRefiner",
     "OrganicMeshQualityContract",
     "OrganicMeshQualityMetrics",

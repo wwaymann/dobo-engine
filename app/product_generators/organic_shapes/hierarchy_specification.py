@@ -8,6 +8,7 @@ from typing import Any
 from .adaptive_refinement import AdaptiveFeatureRefinementContract
 from .feature_program_specification import FeatureInstruction, FeatureProgramParser
 from .specification import _object, _vector3
+from .surface_anchoring import SurfaceAnchorSpec
 from .vessel_specification import OrganicVesselParser, OrganicVesselSpecification
 
 
@@ -41,6 +42,7 @@ class HierarchyNode:
     repeat: RepeatSpec
     mirror_axis: str | None
     children: tuple["HierarchyNode", ...]
+    surface_anchor: SurfaceAnchorSpec | None = None
 
     def validate(self) -> None:
         if not self.id.strip():
@@ -49,6 +51,8 @@ class HierarchyNode:
             raise ValueError("Hierarchy mirror_axis must be x, y or z.")
         self.transform.validate()
         self.repeat.validate()
+        if self.surface_anchor is not None:
+            self.surface_anchor.validate()
         if not self.template_ids and not self.children:
             raise ValueError(f"Hierarchy node '{self.id}' is empty.")
         child_ids: set[str] = set()
@@ -153,6 +157,7 @@ class HierarchicalFeatureParser:
         raw_transform = data.get("transform", {})
         raw_repeat = data.get("repeat", {})
         raw_children = data.get("children", [])
+        raw_anchor = data.get("surface_anchor")
         template_ids = data.get("template_ids", [])
         if not isinstance(raw_transform, dict) or not isinstance(raw_repeat, dict):
             raise TypeError("Hierarchy transform and repeat values must be objects.")
@@ -164,6 +169,8 @@ class HierarchicalFeatureParser:
             isinstance(item, str) for item in template_ids
         ):
             raise TypeError("Hierarchy template_ids must be an array of strings.")
+        if raw_anchor is not None and not isinstance(raw_anchor, dict):
+            raise TypeError("Hierarchy surface_anchor must be an object.")
         return HierarchyNode(
             id=str(data["id"]),
             template_ids=tuple(template_ids),
@@ -194,6 +201,16 @@ class HierarchicalFeatureParser:
             ),
             mirror_axis=(
                 str(data["mirror_axis"]) if data.get("mirror_axis") is not None else None
+            ),
+            surface_anchor=(
+                SurfaceAnchorSpec(
+                    azimuth_degrees=float(raw_anchor["azimuth_degrees"]),
+                    height_ratio=float(raw_anchor["height_ratio"]),
+                    offset_mm=float(raw_anchor.get("offset_mm", 0.0)),
+                    roll_degrees=float(raw_anchor.get("roll_degrees", 0.0)),
+                )
+                if raw_anchor is not None
+                else None
             ),
             children=tuple(cls._node(item) for item in raw_children),
         )
