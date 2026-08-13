@@ -27,6 +27,14 @@ from .semantic_compiler import (
     SemanticCompilationResult,
     SemanticToMotorCompiler,
 )
+from .image_interpreter import (
+    ImageInterpretationResult,
+    ImageInterpretationTrace,
+    ImageModelClient,
+    ImageModelResponse,
+    ImageSemanticInterpreter,
+    OpenAIResponsesImageClient,
+)
 
 __all__ = (
     "Ambiguity",
@@ -47,6 +55,12 @@ __all__ = (
     "SemanticCompilationReport",
     "SemanticCompilationResult",
     "SemanticToMotorCompiler",
+    "ImageInterpretationResult",
+    "ImageInterpretationTrace",
+    "ImageModelClient",
+    "ImageModelResponse",
+    "ImageSemanticInterpreter",
+    "OpenAIResponsesImageClient",
     "SemanticProgramParser",
     "SemanticRelation",
     "SourceIntent",
