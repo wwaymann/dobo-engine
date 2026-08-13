@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dobo.local/schemas/design-semantic-program-3a.1.json",
+  "title": "DOBO Design Semantic Program 3A.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "product_kind", "source", "body", "features", "relations", "manufacturing", "assumptions", "ambiguities"],
+  "properties": {
+    "schema_version": {"const": "3A.1"},
+    "id": {"$ref": "#/$defs/identifier"},
+    "product_kind": {"const": "planter"},
+    "source": {"$ref": "#/$defs/source"},
+    "body": {"$ref": "#/$defs/body"},
+    "features": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/feature"}},
+    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+    "manufacturing": {"$ref": "#/$defs/manufacturing"},
+    "assumptions": {"type": "array", "items": {"$ref": "#/$defs/assumption"}},
+    "ambiguities": {"type": "array", "items": {"$ref": "#/$defs/ambiguity"}}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$"},
+    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "prompt", "image_reference"],
+      "properties": {
+        "kind": {"enum": ["prompt", "image", "prompt_and_image"]},
+        "prompt": {"type": ["string", "null"]},
+        "image_reference": {"type": ["string", "null"]}
+      }
+    },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "height_mm", "width_mm", "depth_mm", "opening_shape", "opening_width_ratio", "opening_depth_ratio", "style_tags"],
+      "properties": {
+        "family": {"enum": ["organic", "cylindrical", "tapered", "hexagonal", "character"]},
+        "height_mm": {"type": "number", "minimum": 30.0, "maximum": 500.0},
+        "width_mm": {"type": "number", "minimum": 30.0, "maximum": 500.0},
+        "depth_mm": {"type": "number", "minimum": 30.0, "maximum": 500.0},
+        "opening_shape": {"enum": ["circular", "elliptical", "polygonal"]},
+        "opening_width_ratio": {"type": "number", "minimum": 0.15, "maximum": 0.95},
+        "opening_depth_ratio": {"type": "number", "minimum": 0.15, "maximum": 0.95},
+        "style_tags": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}}
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region", "horizontal", "vertical", "roll_degrees"],
+      "properties": {
+        "region": {"enum": ["front", "back", "left", "right", "upper", "lower", "all_around"]},
+        "horizontal": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+        "vertical": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "roll_degrees": {"type": "number", "minimum": -180.0, "maximum": 180.0}
+      }
+    },
+    "feature_size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width_ratio", "height_ratio", "depth_mm"],
+      "properties": {
+        "width_ratio": {"type": "number", "minimum": 0.01, "maximum": 1.0},
+        "height_ratio": {"type": "number", "minimum": 0.01, "maximum": 1.0},
+        "depth_mm": {"type": "number", "minimum": 0.1, "maximum": 20.0}
+      }
+    },
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "concept", "form_hint", "surface_effect", "anchor", "size", "priority", "can_omit", "confidence"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "concept": {"$ref": "#/$defs/identifier"},
+        "form_hint": {"enum": ["arch", "badge", "capsule", "disc", "leaf", "oval", "point", "ridge", "slit", "text", "unspecified"]},
+        "surface_effect": {"enum": ["raised", "recessed", "cutout", "marking"]},
+        "anchor": {"$ref": "#/$defs/anchor"},
+        "size": {"$ref": "#/$defs/feature_size"},
+        "priority": {"enum": ["required", "preferred", "optional"]},
+        "can_omit": {"type": "boolean"},
+        "confidence": {"$ref": "#/$defs/confidence"}
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "subject_id", "object_id", "confidence"],
+      "properties": {
+        "kind": {"enum": ["above", "aligned_with", "below", "centered_on", "grouped_with", "mirror_of", "repeated_from"]},
+        "subject_id": {"$ref": "#/$defs/identifier"},
+        "object_id": {"$ref": "#/$defs/identifier"},
+        "confidence": {"$ref": "#/$defs/confidence"}
+      }
+    },
+    "manufacturing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_wall_mm", "minimum_feature_mm", "maximum_relief_depth_mm", "drainage_required", "multicolor_requested"],
+      "properties": {
+        "minimum_wall_mm": {"type": "number", "exclusiveMinimum": 0.0},
+        "minimum_feature_mm": {"type": "number", "exclusiveMinimum": 0.0},
+        "maximum_relief_depth_mm": {"type": "number", "exclusiveMinimum": 0.0},
+        "drainage_required": {"type": "boolean"},
+        "multicolor_requested": {"type": "boolean"}
+      }
+    },
+    "assumption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_path", "selected_value", "reason", "confidence", "requires_confirmation"],
+      "properties": {
+        "field_path": {"type": "string", "minLength": 1},
+        "selected_value": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "requires_confirmation": {"type": "boolean"}
+      }
+    },
+    "ambiguity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_path", "candidates", "question", "blocking"],
+      "properties": {
+        "field_path": {"type": "string", "minLength": 1},
+        "candidates": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "question": {"type": "string", "minLength": 1},
+        "blocking": {"type": "boolean"}
+      }
+    }
+  }
+}
