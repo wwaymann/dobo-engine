@@ -42,6 +42,12 @@ from .proposal_repair import (
     SemanticRepairReport,
     SemanticRepairResult,
 )
+from .design_pipeline import (
+    DesignPipelineResult,
+    DesignPipelineTrace,
+    DoboDesignPipeline,
+)
+from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
 __all__ = (
     "Ambiguity",
@@ -73,6 +79,11 @@ __all__ = (
     "SemanticRepairAction",
     "SemanticRepairReport",
     "SemanticRepairResult",
+    "DesignPipelineResult",
+    "DesignPipelineTrace",
+    "DoboDesignPipeline",
+    "ThreeMFExportResult",
+    "ThreeMFMeshExporter",
     "SemanticProgramParser",
     "SemanticRelation",
     "SourceIntent",
