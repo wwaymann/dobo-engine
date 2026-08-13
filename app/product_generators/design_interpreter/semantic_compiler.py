@@ -74,6 +74,14 @@ class SemanticToMotorCompiler:
             0.5 * depth * body.opening_depth_ratio,
         )
         margin = max(8.0, 0.08 * max(width, depth, height))
+        minimum_blend_mm = max(
+            0.4,
+            0.4 * manufacturing.minimum_feature_mm,
+        )
+        minimum_relief_depth_mm = min(
+            0.8,
+            min(feature.size.depth_mm for feature in program.features),
+        )
 
         templates: list[dict[str, Any]] = []
         roots: list[dict[str, Any]] = []
@@ -86,6 +94,9 @@ class SemanticToMotorCompiler:
                 body_width_mm=width,
                 body_height_mm=height,
                 minimum_feature_mm=manufacturing.minimum_feature_mm,
+                minimum_blend_mm=minimum_blend_mm,
+                minimum_relief_depth_mm=minimum_relief_depth_mm,
+                maximum_relief_depth_mm=manufacturing.maximum_relief_depth_mm,
             )
             templates.append(template)
             node: dict[str, Any] = {
@@ -184,14 +195,9 @@ class SemanticToMotorCompiler:
                 },
                 "feature_manufacturability": {
                     "minimum_feature_mm": manufacturing.minimum_feature_mm,
-                    "minimum_relief_depth_mm": min(
-                        0.8,
-                        min(feature.size.depth_mm for feature in program.features),
-                    ),
+                    "minimum_relief_depth_mm": minimum_relief_depth_mm,
                     "maximum_relief_depth_mm": maximum_depth,
-                    "minimum_blend_mm": max(
-                        0.4, 0.4 * manufacturing.minimum_feature_mm
-                    ),
+                    "minimum_blend_mm": minimum_blend_mm,
                     "wall_reserve_mm": max(0.5, wall - maximum_depth),
                 },
                 "templates": templates,
@@ -282,6 +288,9 @@ class SemanticToMotorCompiler:
         body_width_mm: float,
         body_height_mm: float,
         minimum_feature_mm: float,
+        minimum_blend_mm: float,
+        minimum_relief_depth_mm: float,
+        maximum_relief_depth_mm: float,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         width = max(
             feature.size.width_ratio * body_width_mm,
@@ -310,7 +319,16 @@ class SemanticToMotorCompiler:
         }
         transform = None
         if feature.form_hint in {"slit", "capsule"}:
-            radius = max(0.5 * height, 0.5 * minimum_feature_mm)
+            requested_radius = max(
+                0.5 * height,
+                0.5 * minimum_feature_mm,
+            )
+            # A capsule requires distinct start/end points. Semantic inputs can
+            # legitimately describe a square or vertical "slit" (for example,
+            # a stylized eye), where height >= width. Capping the radius below
+            # half the width preserves a real center segment instead of
+            # emitting a degenerate capsule rejected by the Motor contract.
+            radius = min(requested_radius, 0.45 * width)
             half_segment = max(0.0, 0.5 * width - radius)
             base.update(
                 kind="capsule",
@@ -318,9 +336,21 @@ class SemanticToMotorCompiler:
                 end=[half_segment, 0.0, 0.0],
                 radius_mm=radius,
             )
+            effective_depth = min(
+                maximum_relief_depth_mm,
+                max(depth, 1.01 * minimum_relief_depth_mm),
+            )
             transform = {
-                "scale": [1.0, depth / radius, 1.0],
+                "scale": [1.0, effective_depth / radius, 1.0],
             }
+            # Manufacturability evaluates the blend after applying the node
+            # transform. Reserve enough nominal blend for a shallow capsule so
+            # its effective blend still satisfies the Motor contract.
+            depth_scale = min(1.0, effective_depth / radius)
+            base["blend_mm"] = max(
+                float(base["blend_mm"]),
+                1.01 * minimum_blend_mm / depth_scale,
+            )
         elif feature.form_hint in {"disc", "oval"}:
             base.update(
                 kind="ellipsoid",

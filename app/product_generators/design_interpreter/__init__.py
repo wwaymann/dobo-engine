@@ -55,6 +55,21 @@ from .structural_vocabulary import (
     StructuralVisualGroup,
     StructuralVocabularyResolver,
 )
+from .structural_compiler import (
+    STRUCTURAL_COMPILER_VERSION,
+    STRUCTURAL_HIERARCHY_VERSION,
+    STRUCTURAL_TEMPLATE_VERSION,
+    StructuralCompilationReport,
+    StructuralCompilationResult,
+    StructuralSemanticCompiler,
+)
+from .structural_pipeline import (
+    STRUCTURAL_FUSION_VERSION,
+    STRUCTURAL_PIPELINE_VERSION,
+    DoboStructuralPipeline,
+    StructuralPipelineResult,
+    StructuralPipelineTrace,
+)
 
 __all__ = (
     "Ambiguity",
@@ -96,6 +111,17 @@ __all__ = (
     "StructuralFeature",
     "StructuralVisualGroup",
     "StructuralVocabularyResolver",
+    "StructuralCompilationReport",
+    "StructuralCompilationResult",
+    "StructuralSemanticCompiler",
+    "STRUCTURAL_COMPILER_VERSION",
+    "STRUCTURAL_TEMPLATE_VERSION",
+    "STRUCTURAL_HIERARCHY_VERSION",
+    "STRUCTURAL_FUSION_VERSION",
+    "STRUCTURAL_PIPELINE_VERSION",
+    "DoboStructuralPipeline",
+    "StructuralPipelineResult",
+    "StructuralPipelineTrace",
     "SemanticProgramParser",
     "SemanticRelation",
     "SourceIntent",
