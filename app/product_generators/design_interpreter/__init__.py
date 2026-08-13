@@ -13,6 +13,12 @@ from .semantic_contract import (
     SourceIntent,
 )
 from .semantic_parser import SemanticProgramParser
+from .semantic_compiler import (
+    CompilationTrace,
+    SemanticCompilationReport,
+    SemanticCompilationResult,
+    SemanticToMotorCompiler,
+)
 
 __all__ = (
     "Ambiguity",
@@ -23,6 +29,10 @@ __all__ = (
     "FeatureSizeIntent",
     "ManufacturingIntent",
     "SemanticAnchor",
+    "CompilationTrace",
+    "SemanticCompilationReport",
+    "SemanticCompilationResult",
+    "SemanticToMotorCompiler",
     "SemanticProgramParser",
     "SemanticRelation",
     "SourceIntent",
