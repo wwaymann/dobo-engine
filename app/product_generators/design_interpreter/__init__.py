@@ -13,6 +13,14 @@ from .semantic_contract import (
     SourceIntent,
 )
 from .semantic_parser import SemanticProgramParser
+from .prompt_interpreter import (
+    OpenAIResponsesSemanticClient,
+    PromptInterpretationResult,
+    PromptInterpretationTrace,
+    PromptSemanticInterpreter,
+    SemanticModelClient,
+    SemanticModelResponse,
+)
 from .semantic_compiler import (
     CompilationTrace,
     SemanticCompilationReport,
@@ -29,6 +37,12 @@ __all__ = (
     "FeatureSizeIntent",
     "ManufacturingIntent",
     "SemanticAnchor",
+    "OpenAIResponsesSemanticClient",
+    "PromptInterpretationResult",
+    "PromptInterpretationTrace",
+    "PromptSemanticInterpreter",
+    "SemanticModelClient",
+    "SemanticModelResponse",
     "CompilationTrace",
     "SemanticCompilationReport",
     "SemanticCompilationResult",
