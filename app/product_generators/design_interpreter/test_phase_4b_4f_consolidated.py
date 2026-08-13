@@ -259,10 +259,16 @@ def main() -> None:
 
     english_roots = {root.id: root for root in english_spec.roots}
     spanish_roots = {root.id: root for root in spanish_spec.roots}
+    english_fields = {
+        field["id"]: field for field in english_compiled.motor_program["fields"]
+    }
+    spanish_fields = {
+        field["id"]: field for field in spanish_compiled.motor_program["fields"]
+    }
     print(
         "ears alter silhouette",
-        abs(english_roots["left_ear"].surface_anchor.azimuth_degrees) > 45.0
-        and abs(english_roots["right_ear"].surface_anchor.azimuth_degrees) > 45.0,
+        "left_ear__silhouette_mass" in english_fields
+        and "right_ear__silhouette_mass" in english_fields,
         "OK",
     )
     print(
@@ -272,16 +278,16 @@ def main() -> None:
         "OK",
     )
     print(
-        "nose nested under muzzle",
-        len(spanish_roots["hocico"].children) == 1
-        and spanish_roots["hocico"].children[0].id == "nariz_central",
+        "nose composed with muzzle",
+        "hocico__compound_mass" in spanish_fields
+        and "nariz_central__compound_child_mass" in spanish_fields,
         "OK",
     )
     print(
         "mirror consistency",
-        spanish_roots["oreja_izquierda"].surface_anchor.azimuth_degrees
-        == -spanish_roots["oreja_derecha"].surface_anchor.azimuth_degrees
-        and spanish_roots["oreja_izquierda"].surface_anchor.azimuth_degrees
+        spanish_fields["oreja_izquierda__silhouette_mass"]["center"][0]
+        == -spanish_fields["oreja_derecha__silhouette_mass"]["center"][0]
+        and spanish_fields["oreja_izquierda__silhouette_mass"]["center"][0]
         < 0.0,
         "OK",
     )

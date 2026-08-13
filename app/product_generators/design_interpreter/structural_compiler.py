@@ -16,6 +16,21 @@ from .structural_vocabulary import (
 STRUCTURAL_COMPILER_VERSION = "4B.1"
 STRUCTURAL_TEMPLATE_VERSION = "4C.1"
 STRUCTURAL_HIERARCHY_VERSION = "4D.1"
+STRUCTURAL_ORIENTATION_VERSION = "4G.1"
+VOLUMETRIC_SILHOUETTE_VERSION = "4H.1"
+SILHOUETTE_VALIDATION_VERSION = "4J.1"
+EAR_CALIBRATION_VERSION = "4L.1"
+COMPOUND_MASS_VERSION = "4M.1"
+LOCAL_FUSION_VERSION = "4N.1"
+FACIAL_ACCEPTANCE_VERSION = "4O.1"
+VISUAL_GRID_VERSION = "4O.2"
+MUZZLE_EXPOSURE_VERSION = "4Q.1"
+NOSE_MASS_VERSION = "4R.1"
+CANONICAL_FUSION_VERSION = "4S.1"
+SURFACE_ACCEPTANCE_VERSION = "4T.1"
+
+_VOLUMETRIC_SILHOUETTE_CONCEPTS = {"ear", "oreja"}
+_VOLUMETRIC_COMPOUND_CONCEPTS = {"muzzle", "hocico"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +44,9 @@ class StructuralCompilationReport:
     compound_children: int
     normalized_anchors: int
     mirror_groups: int
+    volumetric_silhouette_features: int
+    volumetric_compound_parents: int
+    volumetric_compound_children: int
 
     def validate(self, expected_features: int) -> None:
         if self.compiler_version != STRUCTURAL_COMPILER_VERSION:
@@ -44,6 +62,12 @@ class StructuralCompilationReport:
         )
         if represented != expected_features:
             raise RuntimeError("Structural compiler lost semantic features.")
+        if not 0 <= self.volumetric_silhouette_features <= self.silhouette_features:
+            raise RuntimeError("Invalid volumetric-silhouette count.")
+        if not 0 <= self.volumetric_compound_parents <= self.surface_features:
+            raise RuntimeError("Invalid volumetric-compound count.")
+        if not 0 <= self.volumetric_compound_children <= self.compound_children:
+            raise RuntimeError("Invalid volumetric-child count.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +99,9 @@ class StructuralSemanticCompiler:
         structural_features = {
             feature.semantic_feature_id: feature for feature in structural.features
         }
+        volumetric_silhouette_ids: set[str] = set()
+        volumetric_compound_ids: set[str] = set()
+        volumetric_child_ids: set[str] = set()
 
         normalized = 0
         for feature_id, resolved in structural_features.items():
@@ -86,10 +113,50 @@ class StructuralSemanticCompiler:
             normalized += 1
             if resolved.structural_role == "silhouette":
                 template = templates[f"{feature_id}_template"]
-                cls._apply_silhouette_template(template, motor)
+                if semantic_feature.concept.strip().lower() in (
+                    _VOLUMETRIC_SILHOUETTE_CONCEPTS
+                ):
+                    cls._promote_ear_to_volumetric_mass(
+                        motor,
+                        node=node,
+                        template=template,
+                        resolved=resolved,
+                        semantic_feature=semantic_feature,
+                        program=program,
+                    )
+                    volumetric_silhouette_ids.add(feature_id)
+                else:
+                    cls._apply_silhouette_template(template, motor)
+            elif (
+                semantic_feature.concept.strip().lower()
+                in _VOLUMETRIC_COMPOUND_CONCEPTS
+                and resolved.geometric_operation == "add"
+            ):
+                template = templates[f"{feature_id}_template"]
+                cls._promote_muzzle_to_volumetric_mass(
+                    motor,
+                    node=node,
+                    template=template,
+                    semantic_feature=semantic_feature,
+                    program=program,
+                )
+                volumetric_compound_ids.add(feature_id)
 
         for child_id, resolved in structural_features.items():
             if resolved.parent_feature_id is None:
+                continue
+            if resolved.parent_feature_id in volumetric_compound_ids:
+                parent_feature = semantic_features[resolved.parent_feature_id]
+                child_feature = semantic_features[child_id]
+                cls._promote_compound_child_to_volumetric_mass(
+                    motor,
+                    resolved=resolved,
+                    parent_feature=parent_feature,
+                    child_feature=child_feature,
+                    program=program,
+                )
+                volumetric_child_ids.add(child_id)
+                normalized += 1
                 continue
             child_node = roots.pop(child_id)
             parent_node = roots[resolved.parent_feature_id]
@@ -107,9 +174,27 @@ class StructuralSemanticCompiler:
             normalized += 1
 
         ordered_ids = [feature.id for feature in program.features]
-        hierarchy["roots"] = [roots[item] for item in ordered_ids if item in roots]
+        promoted_ids = (
+            volumetric_silhouette_ids
+            | volumetric_compound_ids
+            | volumetric_child_ids
+        )
+        hierarchy["roots"] = [
+            roots[item]
+            for item in ordered_ids
+            if item in roots and item not in promoted_ids
+        ]
+        hierarchy["templates"] = [
+            template
+            for template in hierarchy["templates"]
+            if not any(
+                template["id"] == f"{feature_id}_template"
+                for feature_id in promoted_ids
+            )
+        ]
         cls._apply_mirror_consistency(hierarchy["roots"], structural)
         cls._apply_visual_adjacency(motor, structural)
+        cls._reserve_promoted_mass_grid(motor, promoted_ids)
         output_id = f"structural_{semantic.report.output_program_id}"
         motor["id"] = output_id
         motor["output"]["basename"] = output_id
@@ -135,6 +220,9 @@ class StructuralSemanticCompiler:
             ),
             normalized_anchors=normalized,
             mirror_groups=sum(group.kind == "mirror_pair" for group in structural.groups),
+            volumetric_silhouette_features=len(volumetric_silhouette_ids),
+            volumetric_compound_parents=len(volumetric_compound_ids),
+            volumetric_compound_children=len(volumetric_child_ids),
         )
         report.validate(len(program.features))
         return StructuralCompilationResult(
@@ -153,7 +241,9 @@ class StructuralSemanticCompiler:
     ) -> None:
         anchor = node["surface_anchor"]
         if resolved.attachment_mode == "body_silhouette":
-            anchor["azimuth_degrees"] = 105.0 * resolved.anchor.horizontal
+            # Keep crown features readable from the front. Large azimuths made
+            # planar templates appear edge-on as detached lateral plates.
+            anchor["azimuth_degrees"] = 60.0 * resolved.anchor.horizontal
             height_extent = 0.5 * (
                 semantic_feature.size.height_ratio * program.body.height_mm
             )
@@ -198,6 +288,173 @@ class StructuralSemanticCompiler:
         template["blend_mm"] = max(float(template["blend_mm"]), 1.4 * voxel)
         # Silhouette pieces remain within semantic manufacturability depth, but
         # receive enough implicit blending to become part of the body mass.
+
+    @staticmethod
+    def _promote_ear_to_volumetric_mass(
+        motor_program: dict[str, Any],
+        *,
+        node: dict[str, Any],
+        template: dict[str, Any],
+        resolved: StructuralFeature,
+        semantic_feature,
+        program: DesignSemanticProgram,
+    ) -> None:
+        """Turn an ear-like silhouette feature into a fused body field.
+
+        Surface features inherit the tangent frame of the vessel. That is ideal
+        for relief, but it made ears into thin side plates. A body field is a
+        true three-dimensional mass, participates in the vessel smooth union,
+        and is not incorrectly constrained as shallow surface relief.
+        """
+        width = max(
+            semantic_feature.size.width_ratio * program.body.width_mm,
+            2.0 * program.manufacturing.minimum_feature_mm,
+        )
+        height = max(
+            semantic_feature.size.height_ratio * program.body.height_mm,
+            2.0 * program.manufacturing.minimum_feature_mm,
+        )
+        half_width = max(0.5 * width, 0.105 * program.body.width_mm)
+        half_height = max(0.5 * height, 0.10 * program.body.height_mm)
+        half_depth = max(
+            0.32 * min(2.0 * half_width, 2.0 * half_height),
+            2.5 * semantic_feature.size.depth_mm,
+            2.0 * program.manufacturing.minimum_feature_mm,
+        )
+        side = -1.0 if resolved.anchor.horizontal < 0.0 else 1.0
+        field_id = f"{semantic_feature.id}__silhouette_mass"
+        field = {
+            "id": field_id,
+            "center": [
+                side * 0.38 * program.body.width_mm,
+                -0.16 * program.body.depth_mm,
+                0.25 * program.body.height_mm,
+            ],
+            "radii": [half_width, half_depth, half_height],
+        }
+        motor_program["fields"].append(field)
+        motor_program["composition"]["field_ids"].append(field_id)
+        voxel = float(motor_program["grid"]["voxel_mm"])
+        motor_program["composition"]["blend_mm"] = min(
+            float(motor_program["composition"]["blend_mm"]),
+            max(3.6, 4.0 * voxel),
+        )
+        # Keep the node/template arguments explicit: their removal happens only
+        # after every semantic feature has been processed, preserving stable
+        # lookup and compilation traces during this pass.
+        _ = node, template
+
+    @staticmethod
+    def _promote_muzzle_to_volumetric_mass(
+        motor_program: dict[str, Any],
+        *,
+        node: dict[str, Any],
+        template: dict[str, Any],
+        semantic_feature,
+        program: DesignSemanticProgram,
+    ) -> None:
+        width = max(
+            semantic_feature.size.width_ratio * program.body.width_mm,
+            3.0 * program.manufacturing.minimum_feature_mm,
+        )
+        height = max(
+            semantic_feature.size.height_ratio * program.body.height_mm,
+            3.0 * program.manufacturing.minimum_feature_mm,
+        )
+        half_depth = max(
+            0.18 * min(width, height),
+            2.0 * semantic_feature.size.depth_mm,
+            2.0 * program.manufacturing.minimum_feature_mm,
+        )
+        field_id = f"{semantic_feature.id}__compound_mass"
+        field = {
+            "id": field_id,
+            "center": [
+                0.0,
+                -0.50 * program.body.depth_mm,
+                -0.075 * program.body.height_mm,
+            ],
+            "radii": [0.5 * width, half_depth, 0.5 * height],
+        }
+        motor_program["fields"].append(field)
+        motor_program["composition"]["field_ids"].append(field_id)
+        voxel = float(motor_program["grid"]["voxel_mm"])
+        motor_program["composition"]["blend_mm"] = min(
+            float(motor_program["composition"]["blend_mm"]),
+            max(3.6, 4.0 * voxel),
+        )
+        _ = node, template
+
+    @staticmethod
+    def _promote_compound_child_to_volumetric_mass(
+        motor_program: dict[str, Any],
+        *,
+        resolved: StructuralFeature,
+        parent_feature,
+        child_feature,
+        program: DesignSemanticProgram,
+    ) -> None:
+        parent_width = max(
+            parent_feature.size.width_ratio * program.body.width_mm,
+            3.0 * program.manufacturing.minimum_feature_mm,
+        )
+        parent_height = max(
+            parent_feature.size.height_ratio * program.body.height_mm,
+            3.0 * program.manufacturing.minimum_feature_mm,
+        )
+        parent_half_depth = max(
+            0.18 * min(parent_width, parent_height),
+            2.0 * parent_feature.size.depth_mm,
+            2.0 * program.manufacturing.minimum_feature_mm,
+        )
+        child_width = max(
+            child_feature.size.width_ratio * program.body.width_mm,
+            2.0 * program.manufacturing.minimum_feature_mm,
+        )
+        child_height = max(
+            child_feature.size.height_ratio * program.body.height_mm,
+            2.0 * program.manufacturing.minimum_feature_mm,
+        )
+        child_half_depth = max(
+            0.22 * min(child_width, child_height),
+            1.5 * child_feature.size.depth_mm,
+            1.5 * program.manufacturing.minimum_feature_mm,
+        )
+        parent_center_y = -0.50 * program.body.depth_mm
+        parent_center_z = -0.075 * program.body.height_mm
+        field_id = f"{child_feature.id}__compound_child_mass"
+        motor_program["fields"].append(
+            {
+                "id": field_id,
+                "center": [
+                    resolved.anchor.horizontal * parent_width,
+                    parent_center_y
+                    - parent_half_depth
+                    - 0.30 * child_half_depth,
+                    parent_center_z
+                    + (resolved.anchor.vertical - 0.5) * parent_height,
+                ],
+                "radii": [
+                    0.5 * child_width,
+                    child_half_depth,
+                    0.5 * child_height,
+                ],
+            }
+        )
+        motor_program["composition"]["field_ids"].append(field_id)
+
+    @staticmethod
+    def _reserve_promoted_mass_grid(
+        motor_program: dict[str, Any], promoted_ids: set[str]
+    ) -> None:
+        if not promoted_ids:
+            return
+        voxel = float(motor_program["grid"]["voxel_mm"])
+        blend = float(motor_program["composition"]["blend_mm"])
+        front_reserve = max(6.0, 2.0 * voxel, 1.5 * blend)
+        motor_program["grid"]["minimum"][1] = (
+            float(motor_program["grid"]["minimum"][1]) - front_reserve
+        )
 
     @staticmethod
     def _child_transform(

@@ -18,8 +18,8 @@ from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
 
-STRUCTURAL_PIPELINE_VERSION = "4F.2"
-STRUCTURAL_FUSION_VERSION = "4E.1"
+STRUCTURAL_PIPELINE_VERSION = "4U.1"
+STRUCTURAL_FUSION_VERSION = "4S.1"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 
 

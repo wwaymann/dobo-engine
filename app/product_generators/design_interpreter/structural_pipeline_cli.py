@@ -71,7 +71,7 @@ def main() -> None:
     print("STL", result.stl_path)
     print("3MF", result.three_mf_path)
     print("manifest", result.manifest_path)
-    print("DOBO Structural Composition Phase 4F: Valid OK")
+    print("DOBO Canonical Facial Acceptance Phase 4U: Valid OK")
 
 
 if __name__ == "__main__":
