@@ -35,6 +35,13 @@ from .image_interpreter import (
     ImageSemanticInterpreter,
     OpenAIResponsesImageClient,
 )
+from .proposal_repair import (
+    ProposalValidationSnapshot,
+    SemanticProposalRepairer,
+    SemanticRepairAction,
+    SemanticRepairReport,
+    SemanticRepairResult,
+)
 
 __all__ = (
     "Ambiguity",
@@ -61,6 +68,11 @@ __all__ = (
     "ImageModelResponse",
     "ImageSemanticInterpreter",
     "OpenAIResponsesImageClient",
+    "ProposalValidationSnapshot",
+    "SemanticProposalRepairer",
+    "SemanticRepairAction",
+    "SemanticRepairReport",
+    "SemanticRepairResult",
     "SemanticProgramParser",
     "SemanticRelation",
     "SourceIntent",
