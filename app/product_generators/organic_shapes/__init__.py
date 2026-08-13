@@ -6,6 +6,11 @@ from .feature_program_specification import (
     FeatureProgramParser,
     FeatureProgramSpecification,
 )
+from .hierarchy_engine import HierarchicalFeatureVesselEngine
+from .hierarchy_specification import (
+    HierarchicalFeatureParser,
+    HierarchicalFeatureSpecification,
+)
 from .cat_engine import OrganicCatVesselEngine
 from .cat_specification import OrganicCatParser, OrganicCatSpecification
 from .mesh_quality import (
@@ -27,6 +32,9 @@ __all__ = (
     "FeatureProgramParser",
     "FeatureProgramSpecification",
     "FeatureProgramVesselEngine",
+    "HierarchicalFeatureParser",
+    "HierarchicalFeatureSpecification",
+    "HierarchicalFeatureVesselEngine",
     "OrganicCatParser",
     "OrganicCatSpecification",
     "OrganicCatVesselEngine",
