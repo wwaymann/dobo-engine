@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from .adaptive_refinement import AdaptiveFeatureRefinementContract
+from .adaptive_layout import (
+    FeatureManufacturabilityContract,
+    LayoutConstraintContract,
+    ProportionalScaleContract,
+)
 from .feature_program_specification import FeatureInstruction, FeatureProgramParser
 from .specification import _object, _vector3
 from .surface_anchoring import SurfaceAnchorSpec
@@ -71,6 +76,9 @@ class HierarchicalFeatureSpecification:
     templates: tuple[FeatureInstruction, ...]
     roots: tuple[HierarchyNode, ...]
     adaptive_refinement: AdaptiveFeatureRefinementContract | None = None
+    proportional_scaling: ProportionalScaleContract | None = None
+    layout_constraints: LayoutConstraintContract | None = None
+    feature_manufacturability: FeatureManufacturabilityContract | None = None
 
     def __getattr__(self, name: str):
         return getattr(self.vessel_specification, name)
@@ -104,6 +112,12 @@ class HierarchicalFeatureSpecification:
             validate_references(root)
         if self.adaptive_refinement is not None:
             self.adaptive_refinement.validate()
+        if self.proportional_scaling is not None:
+            self.proportional_scaling.validate()
+        if self.layout_constraints is not None:
+            self.layout_constraints.validate()
+        if self.feature_manufacturability is not None:
+            self.feature_manufacturability.validate()
 
 
 class HierarchicalFeatureParser:
@@ -117,6 +131,9 @@ class HierarchicalFeatureParser:
         raw_templates = program.get("templates")
         raw_roots = program.get("roots")
         raw_adaptive = program.get("adaptive_refinement")
+        raw_scaling = program.get("proportional_scaling")
+        raw_layout = program.get("layout_constraints")
+        raw_manufacturing = program.get("feature_manufacturability")
         if not isinstance(raw_templates, list) or not all(
             isinstance(item, dict) for item in raw_templates
         ):
@@ -127,6 +144,23 @@ class HierarchicalFeatureParser:
             raise TypeError("hierarchy_program.roots must be an array of objects.")
         if raw_adaptive is not None and not isinstance(raw_adaptive, dict):
             raise TypeError("hierarchy_program.adaptive_refinement must be an object.")
+        for name, value in (
+            ("proportional_scaling", raw_scaling),
+            ("layout_constraints", raw_layout),
+            ("feature_manufacturability", raw_manufacturing),
+        ):
+            if value is not None and not isinstance(value, dict):
+                raise TypeError(f"hierarchy_program.{name} must be an object.")
+        raw_ignored_pairs = (
+            raw_layout.get("ignored_pairs", []) if raw_layout is not None else []
+        )
+        if not isinstance(raw_ignored_pairs, list) or not all(
+            isinstance(pair, list)
+            and len(pair) == 2
+            and all(isinstance(value, str) for value in pair)
+            for pair in raw_ignored_pairs
+        ):
+            raise TypeError("layout_constraints.ignored_pairs must contain string pairs.")
         specification = HierarchicalFeatureSpecification(
             vessel_specification=vessel,
             templates=tuple(
@@ -146,6 +180,46 @@ class HierarchicalFeatureParser:
                     ),
                 )
                 if raw_adaptive is not None
+                else None
+            ),
+            proportional_scaling=(
+                ProportionalScaleContract(
+                    reference_radius_mm=float(raw_scaling["reference_radius_mm"]),
+                    reference_height_mm=float(raw_scaling["reference_height_mm"]),
+                    minimum_scale=float(raw_scaling["minimum_scale"]),
+                    maximum_scale=float(raw_scaling["maximum_scale"]),
+                    scale_depth=bool(raw_scaling.get("scale_depth", False)),
+                )
+                if raw_scaling is not None
+                else None
+            ),
+            layout_constraints=(
+                LayoutConstraintContract(
+                    minimum_clearance_mm=float(raw_layout["minimum_clearance_mm"]),
+                    base_clearance_mm=float(raw_layout["base_clearance_mm"]),
+                    opening_clearance_mm=float(raw_layout["opening_clearance_mm"]),
+                    ignored_pairs=tuple(
+                        (str(pair[0]), str(pair[1])) for pair in raw_ignored_pairs
+                    ),
+                )
+                if raw_layout is not None
+                else None
+            ),
+            feature_manufacturability=(
+                FeatureManufacturabilityContract(
+                    minimum_feature_mm=float(
+                        raw_manufacturing["minimum_feature_mm"]
+                    ),
+                    minimum_relief_depth_mm=float(
+                        raw_manufacturing["minimum_relief_depth_mm"]
+                    ),
+                    maximum_relief_depth_mm=float(
+                        raw_manufacturing["maximum_relief_depth_mm"]
+                    ),
+                    minimum_blend_mm=float(raw_manufacturing["minimum_blend_mm"]),
+                    wall_reserve_mm=float(raw_manufacturing["wall_reserve_mm"]),
+                )
+                if raw_manufacturing is not None
                 else None
             ),
         )

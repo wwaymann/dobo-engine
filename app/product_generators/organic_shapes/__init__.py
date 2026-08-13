@@ -1,6 +1,13 @@
 """Implicit organic shape generation for DOBO products."""
 
 from .adaptive_refinement import AdaptiveFeatureRefinementContract
+from .adaptive_layout import (
+    FeatureManufacturabilityContract,
+    LayoutConstraintContract,
+    LayoutReport,
+    ManufacturabilityReport,
+    ProportionalScaleContract,
+)
 from .engine import OrganicShapeEngine, OrganicShapeResult
 from .feature_program_engine import FeatureProgramVesselEngine
 from .feature_program_specification import (
@@ -36,6 +43,11 @@ from .vessel_specification import OrganicVesselParser, OrganicVesselSpecificatio
 __all__ = (
     "OrganicShapeEngine",
     "AdaptiveFeatureRefinementContract",
+    "FeatureManufacturabilityContract",
+    "LayoutConstraintContract",
+    "LayoutReport",
+    "ManufacturabilityReport",
+    "ProportionalScaleContract",
     "FeatureProgramParser",
     "FeatureProgramSpecification",
     "FeatureProgramVesselEngine",

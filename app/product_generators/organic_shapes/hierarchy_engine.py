@@ -10,6 +10,7 @@ from .adaptive_refinement import (
     feature_characteristic_size,
     surface_proximity_weights,
 )
+from .adaptive_layout import evaluate_layout, evaluate_manufacturability
 from .feature_program_engine import FeatureProgramVesselEngine
 from .feature_program_specification import FeatureInstruction
 from .fields import capped_cylinder_distance, elliptical_column_distance, smooth_intersection, smooth_union
@@ -25,6 +26,7 @@ class PlacedFeature:
     matrix: np.ndarray
     inverse: np.ndarray
     distance_scale: float
+    proportional_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
 
 
 def _transform_matrix(transform: TransformSpec) -> np.ndarray:
@@ -49,6 +51,19 @@ def _transform_matrix(transform: TransformSpec) -> np.ndarray:
 
 
 class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
+    @staticmethod
+    def _proportional_scale(specification, resolved_anchor):
+        contract = specification.proportional_scaling
+        if contract is None or resolved_anchor is None:
+            return (1.0, 1.0, 1.0)
+        return contract.factors(
+            radial_distance_mm=resolved_anchor.radial_distance_mm,
+            usable_height_mm=(
+                specification.vessel.opening_start_z_mm
+                - specification.vessel.base_z_mm
+            ),
+        )
+
     @classmethod
     def _resolved_anchor(
         cls,
@@ -95,8 +110,14 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
         def visit(node: HierarchyNode, parent: np.ndarray, path: str) -> None:
             node_matrix = _transform_matrix(node.transform)
             resolved_anchor = cls._resolved_anchor(specification, node)
+            proportional_scale = cls._proportional_scale(
+                specification, resolved_anchor
+            )
+            scale_matrix = np.diag((*proportional_scale, 1.0)).astype(np.float64)
             placement_parent = (
-                resolved_anchor.matrix if resolved_anchor is not None else parent
+                resolved_anchor.matrix @ scale_matrix
+                if resolved_anchor is not None
+                else parent
             )
             mirrors = (None, node.mirror_axis) if node.mirror_axis else (None,)
             for index in range(node.repeat.count):
@@ -128,6 +149,7 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
                                 matrix=world,
                                 inverse=inverse,
                                 distance_scale=distance_scale,
+                                proportional_scale=proportional_scale,
                             )
                         )
                     for child in node.children:
@@ -137,6 +159,48 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
         for root in specification.roots:
             visit(root, identity, "root")
         return tuple(placed)
+
+    @classmethod
+    def proportional_scale_diagnostics(cls, specification) -> dict[str, object]:
+        placements = cls.placements(specification)
+        scaled = tuple(
+            item
+            for item in placements
+            if not np.allclose(item.proportional_scale, (1.0, 1.0, 1.0))
+        )
+        values = np.asarray(
+            [item.proportional_scale for item in placements], dtype=np.float64
+        )
+        return {
+            "placement_count": len(placements),
+            "scaled_placement_count": len(scaled),
+            "minimum_scale": float(values.min()),
+            "maximum_scale": float(values.max()),
+            "depth_scale_preserved": bool(np.allclose(values[:, 1], 1.0)),
+        }
+
+    @classmethod
+    def layout_report(cls, specification):
+        if specification.layout_constraints is None:
+            raise RuntimeError("Layout constraints are not enabled.")
+        return evaluate_layout(
+            cls.placements(specification),
+            specification.layout_constraints,
+            base_z_mm=specification.vessel.base_z_mm,
+            opening_start_z_mm=specification.vessel.opening_start_z_mm,
+            grid_minimum=specification.grid.minimum,
+            grid_maximum=specification.grid.maximum,
+        )
+
+    @classmethod
+    def feature_manufacturability_report(cls, specification):
+        if specification.feature_manufacturability is None:
+            raise RuntimeError("Feature manufacturability is not enabled.")
+        return evaluate_manufacturability(
+            cls.placements(specification),
+            specification.feature_manufacturability,
+            wall_mm=specification.vessel.wall_mm,
+        )
 
     @classmethod
     def surface_anchor_checks(cls, specification) -> dict[str, bool]:
