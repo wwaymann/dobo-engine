@@ -26,7 +26,12 @@ from .mesh_quality import (
     OrganicMeshQualityContract,
     OrganicMeshQualityMetrics,
 )
-from .specification import OrganicShapeParser, OrganicShapeSpecification
+from .specification import (
+    ADVANCED_FIELD_KINDS,
+    AdvancedFieldSpec,
+    OrganicShapeParser,
+    OrganicShapeSpecification,
+)
 from .surface_anchoring import (
     ResolvedSurfaceAnchor,
     SurfaceAnchorResolver,
@@ -58,6 +63,8 @@ __all__ = (
     "OrganicCatSpecification",
     "OrganicCatVesselEngine",
     "OrganicShapeParser",
+    "AdvancedFieldSpec",
+    "ADVANCED_FIELD_KINDS",
     "OrganicShapeResult",
     "OrganicShapeSpecification",
     "ResolvedSurfaceAnchor",

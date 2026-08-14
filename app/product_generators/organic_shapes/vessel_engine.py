@@ -11,8 +11,8 @@ from .engine import OrganicShapeEngine
 from .mesh_quality import LocalizedTaubinRefiner, OrganicMeshQualityMetrics
 from .fields import (
     capped_cylinder_distance,
-    ellipsoid_distance,
     elliptical_column_distance,
+    implicit_field_distance,
     smooth_intersection,
     smooth_union,
 )
@@ -206,11 +206,29 @@ class OrganicVesselEngine:
     def _outer_field(specification, x, y, z):
         by_id = {field.id: field for field in specification.fields}
         ids = specification.composition.field_ids
-        outer = ellipsoid_distance(x, y, z, by_id[ids[0]])
+        return OrganicVesselEngine._compose_fields(
+            specification, by_id, ids, x, y, z
+        )
+
+    @staticmethod
+    def _shell_outer_field(specification, x, y, z):
+        """Compose only fields that define the hollow vessel envelope."""
+        by_id = {field.id: field for field in specification.fields}
+        ids = (
+            specification.vessel.shell_field_ids
+            or specification.composition.field_ids
+        )
+        return OrganicVesselEngine._compose_fields(
+            specification, by_id, ids, x, y, z
+        )
+
+    @staticmethod
+    def _compose_fields(specification, by_id, ids, x, y, z):
+        outer = implicit_field_distance(x, y, z, by_id[ids[0]])
         for field_id in ids[1:]:
             outer = smooth_union(
                 outer,
-                ellipsoid_distance(x, y, z, by_id[field_id]),
+                implicit_field_distance(x, y, z, by_id[field_id]),
                 specification.composition.blend_mm,
             )
         return outer
@@ -218,7 +236,7 @@ class OrganicVesselEngine:
     @classmethod
     def _material_field(cls, specification, x, y, z):
         vessel = specification.vessel
-        outer = cls._outer_field(specification, x, y, z)
+        outer = cls._shell_outer_field(specification, x, y, z)
 
         offset_cavity = np.maximum(
             outer + vessel.wall_mm,
@@ -285,11 +303,45 @@ class OrganicVesselEngine:
             )
             return float(value)
 
+        def outer_sample(x: float, y: float, z: float) -> float:
+            return float(
+                cls._outer_field(
+                    specification,
+                    np.asarray(x),
+                    np.asarray(y),
+                    np.asarray(z),
+                )
+            )
+
+        def positive_x_surface(y: float, z: float) -> float:
+            lower = 0.0
+            upper = float(specification.grid.maximum[0])
+            samples = np.linspace(lower, upper, 97)
+            values = [outer_sample(float(value), y, z) for value in samples]
+            crossings = [
+                index
+                for index in range(len(samples) - 1)
+                if values[index] <= 0.0 < values[index + 1]
+            ]
+            if not crossings:
+                raise RuntimeError("Unable to resolve the positive-X vessel surface.")
+            index = crossings[-1]
+            lower = float(samples[index])
+            upper = float(samples[index + 1])
+            for _ in range(24):
+                middle = 0.5 * (lower + upper)
+                if outer_sample(middle, y, z) <= 0.0:
+                    lower = middle
+                else:
+                    upper = middle
+            return 0.5 * (lower + upper)
+
         mid_z = 0.5 * (vessel.cavity_floor_z_mm + vessel.opening_start_z_mm)
-        wall_probe_x = max(field.radii[0] for field in specification.fields) - 0.5 * vessel.wall_mm
+        surface_x = positive_x_surface(0.0, mid_z)
+        wall_probe_x = surface_x - 0.5 * vessel.wall_mm
         base_ring_x = max(vessel.drain_radius_mm + 3.0, 0.25 * wall_probe_x)
         return {
-            "outside_is_empty": sample(wall_probe_x + 2.0 * vessel.wall_mm, 0.0, mid_z) > 0.0,
+            "outside_is_empty": sample(surface_x + 2.0 * vessel.wall_mm, 0.0, mid_z) > 0.0,
             "wall_is_solid": sample(wall_probe_x, 0.0, mid_z) < 0.0,
             "cavity_is_empty": sample(0.0, 0.0, mid_z) > 0.0,
             "opening_is_clear": sample(

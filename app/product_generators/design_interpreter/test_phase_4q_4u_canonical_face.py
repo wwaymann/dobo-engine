@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from math import sqrt
 from pathlib import Path
 
 from product_generators.organic_shapes.hierarchy_engine import (
@@ -23,6 +22,7 @@ from .structural_pipeline import (
     STRUCTURAL_FUSION_VERSION,
     STRUCTURAL_PIPELINE_VERSION,
 )
+from .structural_morphogenesis import front_surface_y
 
 
 SPEC_PATH = Path(__file__).with_name("phase_3a_semantic_design.json")
@@ -63,9 +63,11 @@ def main() -> None:
 
     muzzle = fields["muzzle__compound_mass"]
     nose = fields["nose__compound_child_mass"]
-    body = fields["body"]
-    body_z_ratio = (muzzle["center"][2] - body["center"][2]) / body["radii"][2]
-    body_front = body["radii"][1] * sqrt(max(0.0, 1.0 - body_z_ratio**2))
+    body_front = -front_surface_y(
+        motor,
+        x=float(muzzle["center"][0]),
+        z=float(muzzle["center"][2]),
+    )
     muzzle_front = _front_extent(muzzle)
     nose_front = _front_extent(nose)
     nose_back = abs(float(nose["center"][1]) + float(nose["radii"][1]))

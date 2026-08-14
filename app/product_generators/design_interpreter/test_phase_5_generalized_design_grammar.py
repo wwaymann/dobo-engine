@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import numpy as np
+
+from product_generators.organic_shapes.fields import implicit_field_distance
+from product_generators.organic_shapes.hierarchy_specification import (
+    HierarchicalFeatureParser,
+)
+
 from .design_grammar import (
     ACCEPTANCE_MATRIX_VERSION,
     BODY_GRAMMAR_VERSION,
@@ -122,16 +129,25 @@ def main() -> None:
         if not motor["hierarchy_program"]["roots"]:
             raise RuntimeError(f"{case.label} lost every executable hierarchy root.")
         fields = {field["id"]: field for field in motor["fields"]}
-        body = fields["body"]
+        specification = HierarchicalFeatureParser().parse_dict(motor)
+        parsed_fields = {field.id: field for field in specification.fields}
+        morphology_ids = tuple(motor["morphogenesis"]["field_ids"])
         for feature in grammar.features:
             if feature.mass_strategy != "silhouette_mass":
                 continue
             field = fields[f"{feature.semantic_feature_id}__silhouette_mass"]
-            normalized_center = sum(
-                (float(value) / float(radius)) ** 2
-                for value, radius in zip(field["center"], body["radii"])
+            body_distance = min(
+                float(
+                    implicit_field_distance(
+                        np.asarray(field["center"][0]),
+                        np.asarray(field["center"][1]),
+                        np.asarray(field["center"][2]),
+                        parsed_fields[field_id],
+                    )
+                )
+                for field_id in morphology_ids
             )
-            if normalized_center > 0.90:
+            if body_distance >= 0.0:
                 raise RuntimeError(
                     f"{case.label} silhouette lacks robust body penetration."
                 )
@@ -179,23 +195,20 @@ def main() -> None:
                     f"{case.label} recesses lack the geometric wall reserve."
                 )
             print("geometric wall reserve", True, "OK")
-            body_radius = float(fields["body"]["radii"][0])
-            shoulder_limit = (
-                body_radius + 0.5 * program.manufacturing.minimum_wall_mm
+            middle_radius = float(fields["front_mass"]["radii"][0])
+            section_limit = (
+                middle_radius + 0.5 * program.manufacturing.minimum_wall_mm
             )
-            for shoulder_id in (
-                "body_shoulder_left",
-                "body_shoulder_right",
-            ):
-                shoulder = fields[shoulder_id]
-                shoulder_extent = abs(float(shoulder["center"][0])) + float(
-                    shoulder["radii"][0]
+            for section_id in motor["morphogenesis"]["field_ids"]:
+                section = fields[section_id]
+                section_extent = abs(float(section["center"][0])) + float(
+                    section["radii"][0]
                 )
-                if shoulder_extent > shoulder_limit:
+                if section_extent > section_limit:
                     raise RuntimeError(
-                        f"{case.label} shoulder invades the cavity reserve."
+                        f"{case.label} axial section invades the cavity reserve."
                     )
-            print("faceted shoulder cavity reserve", True, "OK")
+            print("faceted section cavity reserve", True, "OK")
         signatures.add(grammar.signature)
         body_profiles.add(grammar.body_profile)
         style_profiles.add(grammar.style.name)

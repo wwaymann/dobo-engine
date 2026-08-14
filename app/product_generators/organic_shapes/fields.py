@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from .specification import EllipsoidFieldSpec
+from .specification import AdvancedFieldSpec, EllipsoidFieldSpec, ImplicitFieldSpec
 
 
 FloatArray = NDArray[np.floating]
@@ -39,6 +39,102 @@ def ellipsoid_distance(
         out=fallback,
         where=k1 > 1e-12,
     )
+
+
+def superellipsoid_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    specification: AdvancedFieldSpec,
+) -> FloatArray:
+    """Continuous rounded-volume field controlled by a reusable exponent."""
+    px = np.abs((x - specification.center[0]) / specification.radii[0])
+    py = np.abs((y - specification.center[1]) / specification.radii[1])
+    pz = np.abs((z - specification.center[2]) / specification.radii[2])
+    exponent = specification.exponent
+    normalized = (px**exponent + py**exponent + pz**exponent) ** (
+        1.0 / exponent
+    )
+    return (normalized - 1.0) * min(specification.radii)
+
+
+def faceted_ellipsoid_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    specification: AdvancedFieldSpec,
+) -> FloatArray:
+    """Rounded regular-polygon body with ellipsoidal vertical closure."""
+    px = (x - specification.center[0]) / specification.radii[0]
+    py = (y - specification.center[1]) / specification.radii[1]
+    pz = np.abs((z - specification.center[2]) / specification.radii[2])
+    angle = np.arctan2(py, px) - np.deg2rad(specification.rotation_degrees)
+    sector = 2.0 * np.pi / specification.sides
+    local = np.mod(angle + 0.5 * sector, sector) - 0.5 * sector
+    polygon_radius = np.cos(0.5 * sector) / np.cos(local)
+    radial = np.sqrt(px * px + py * py) / polygon_radius
+    exponent = specification.exponent
+    normalized = (radial**exponent + pz**exponent) ** (1.0 / exponent)
+    return (normalized - 1.0) * min(specification.radii)
+
+
+def leaf_volume_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    specification: AdvancedFieldSpec,
+) -> FloatArray:
+    """Pointed lens in X/Z with a softly rounded finite depth."""
+    px = x - specification.center[0]
+    py = y - specification.center[1]
+    pz = z - specification.center[2]
+    half_width, half_depth, half_height = specification.radii
+    lens_radius = (half_height**2 + half_width**2) / (2.0 * half_width)
+    lens_offset = lens_radius - half_width
+    first = np.sqrt((px - lens_offset) ** 2 + pz**2) - lens_radius
+    second = np.sqrt((px + lens_offset) ** 2 + pz**2) - lens_radius
+    lens = np.maximum(first, second)
+    depth = np.abs(py) - half_depth
+    rounding = min(specification.round_mm, 0.45 * half_depth)
+    return smooth_intersection(lens, depth, rounding)
+
+
+def pointed_volume_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    specification: AdvancedFieldSpec,
+) -> FloatArray:
+    """Rounded triangular point suitable for ears, horns and crown lobes."""
+    cx, cy, cz = specification.center
+    rx, ry, rz = specification.radii
+    return rounded_triangle_prism_distance(
+        x,
+        y,
+        z,
+        vertices_xz=((cx - rx, cz - rz), (cx + rx, cz - rz), (cx, cz + rz)),
+        center_y=cy,
+        half_depth=ry,
+        round_mm=min(specification.round_mm, 0.45 * min(rx, ry, rz)),
+    )
+
+
+def implicit_field_distance(
+    x: FloatArray,
+    y: FloatArray,
+    z: FloatArray,
+    specification: ImplicitFieldSpec,
+) -> FloatArray:
+    """Dispatch legacy and Block-6 implicit fields through one stable contract."""
+    if isinstance(specification, EllipsoidFieldSpec):
+        return ellipsoid_distance(x, y, z, specification)
+    if specification.kind == "superellipsoid":
+        return superellipsoid_distance(x, y, z, specification)
+    if specification.kind == "faceted_ellipsoid":
+        return faceted_ellipsoid_distance(x, y, z, specification)
+    if specification.kind == "leaf":
+        return leaf_volume_distance(x, y, z, specification)
+    return pointed_volume_distance(x, y, z, specification)
 
 
 def smooth_union(a: FloatArray, b: FloatArray, blend_mm: float) -> FloatArray:

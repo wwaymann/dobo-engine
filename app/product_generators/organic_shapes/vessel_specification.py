@@ -7,10 +7,11 @@ from typing import Any
 
 from .mesh_quality import OrganicMeshQualityContract
 from .specification import (
-    EllipsoidFieldSpec,
+    ImplicitFieldSpec,
     OrganicBounds,
     OrganicOutputSpec,
     SmoothUnionSpec,
+    _field,
     _object,
     _vector3,
 )
@@ -30,6 +31,7 @@ class OrganicVesselContract:
     drain_radius_mm: float
     drain_start_z_mm: float
     drain_end_z_mm: float
+    shell_field_ids: tuple[str, ...] = ()
 
     def validate(self) -> None:
         if self.wall_mm <= 0.0:
@@ -52,6 +54,8 @@ class OrganicVesselContract:
             raise ValueError("Drain must overlap the cavity above its floor.")
         if self.drain_start_z_mm >= self.drain_end_z_mm:
             raise ValueError("Drain start must be below drain end.")
+        if len(set(self.shell_field_ids)) != len(self.shell_field_ids):
+            raise ValueError("vessel.shell_field_ids must be unique.")
 
     @property
     def bottom_mm(self) -> float:
@@ -62,7 +66,7 @@ class OrganicVesselContract:
 class OrganicVesselSpecification:
     id: str
     grid: OrganicBounds
-    fields: tuple[EllipsoidFieldSpec, ...]
+    fields: tuple[ImplicitFieldSpec, ...]
     composition: SmoothUnionSpec
     vessel: OrganicVesselContract
     mesh_quality: OrganicMeshQualityContract | None
@@ -88,6 +92,11 @@ class OrganicVesselSpecification:
         unknown = set(self.composition.field_ids) - ids
         if unknown:
             raise ValueError(f"Unknown composition fields: {sorted(unknown)}")
+        unknown_shell = set(self.vessel.shell_field_ids) - ids
+        if unknown_shell:
+            raise ValueError(
+                f"Unknown vessel shell fields: {sorted(unknown_shell)}"
+            )
         if self.vessel.bottom_mm < self.grid.voxel_mm * 3.0:
             raise ValueError("Vessel bottom must span at least three voxels.")
         if self.vessel.wall_mm < self.grid.voxel_mm * 3.0:
@@ -126,14 +135,7 @@ class OrganicVesselParser:
                 maximum=_vector3(grid["maximum"], "grid.maximum"),
                 voxel_mm=float(grid["voxel_mm"]),
             ),
-            fields=tuple(
-                EllipsoidFieldSpec(
-                    id=str(item["id"]),
-                    center=_vector3(item["center"], "fields[].center"),
-                    radii=_vector3(item["radii"], "fields[].radii"),
-                )
-                for item in fields
-            ),
+            fields=tuple(_field(item) for item in fields),
             composition=SmoothUnionSpec(
                 field_ids=tuple(field_ids),
                 blend_mm=float(composition["blend_mm"]),
@@ -151,6 +153,10 @@ class OrganicVesselParser:
                 drain_radius_mm=float(vessel["drain_radius_mm"]),
                 drain_start_z_mm=float(vessel["drain_start_z_mm"]),
                 drain_end_z_mm=float(vessel["drain_end_z_mm"]),
+                shell_field_ids=tuple(
+                    str(field_id)
+                    for field_id in vessel.get("shell_field_ids", [])
+                ),
             ),
             mesh_quality=(
                 OrganicMeshQualityContract(

@@ -4,6 +4,9 @@ import json
 from math import sqrt
 from pathlib import Path
 
+import numpy as np
+
+from product_generators.organic_shapes.fields import implicit_field_distance
 from product_generators.organic_shapes.hierarchy_engine import (
     HierarchicalFeatureVesselEngine,
 )
@@ -84,6 +87,9 @@ def main() -> None:
     print("volumetric mirror consistency", True, "OK")
 
     body = fields["body"]
+    specification = HierarchicalFeatureParser().parse_dict(motor)
+    parsed_fields = {field.id: field for field in specification.fields}
+    morphology_ids = tuple(motor["morphogenesis"]["field_ids"])
     for label, ear in (("left", left), ("right", right)):
         width_radius, depth_radius, height_radius = ear["radii"]
         if depth_radius < 0.22 * min(2.0 * width_radius, 2.0 * height_radius):
@@ -93,18 +99,23 @@ def main() -> None:
         protrusion = outer_x - body_x
         if protrusion < 0.07 * semantic.body.width_mm:
             raise RuntimeError(f"{label} ear does not alter the silhouette enough.")
-        center_value = sum(
-            ((ear["center"][axis] - body["center"][axis]) / body["radii"][axis])
-            ** 2
-            for axis in range(3)
+        center_value = min(
+            float(
+                implicit_field_distance(
+                    np.asarray(ear["center"][0]),
+                    np.asarray(ear["center"][1]),
+                    np.asarray(ear["center"][2]),
+                    parsed_fields[field_id],
+                )
+            )
+            for field_id in morphology_ids
         )
-        if center_value >= 1.0:
+        if center_value >= 0.0:
             raise RuntimeError(f"{label} ear lacks robust body intersection.")
     print("minimum ear volume", True, "OK")
     print("minimum silhouette protrusion", True, "OK")
     print("robust body intersection", True, "OK")
 
-    specification = HierarchicalFeatureParser().parse_dict(motor)
     anchors = HierarchicalFeatureVesselEngine.surface_anchor_checks(specification)
     layout = HierarchicalFeatureVesselEngine.layout_report(specification)
     manufacturing = HierarchicalFeatureVesselEngine.feature_manufacturability_report(

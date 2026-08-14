@@ -67,6 +67,11 @@ from .design_grammar import (
     GrammarStyleProfile,
 )
 from .structural_compiler import (
+    ADAPTIVE_QUALITY_VERSION,
+    ADVANCED_PRIMITIVE_VERSION,
+    CLEAN_COMPOSITION_VERSION,
+    STYLE_DIFFERENTIATION_VERSION,
+    VISUAL_ACCEPTANCE_VERSION,
     STRUCTURAL_COMPILER_VERSION,
     STRUCTURAL_HIERARCHY_VERSION,
     STRUCTURAL_TEMPLATE_VERSION,
@@ -80,6 +85,16 @@ from .structural_pipeline import (
     DoboStructuralPipeline,
     StructuralPipelineResult,
     StructuralPipelineTrace,
+)
+from .structural_morphogenesis import (
+    MORPHOLOGY_ACCEPTANCE_VERSION,
+    SECTION_PROFILE_VERSION,
+    STRUCTURAL_SYNTHESIS_VERSION,
+    TOPOLOGY_GRAPH_VERSION,
+    StructuralBodySynthesizer,
+    StructuralMorphogenesisResolver,
+    StructuralMorphologyPlan,
+    front_surface_y,
 )
 
 __all__ = (
@@ -135,6 +150,11 @@ __all__ = (
     "StructuralCompilationResult",
     "StructuralSemanticCompiler",
     "STRUCTURAL_COMPILER_VERSION",
+    "ADVANCED_PRIMITIVE_VERSION",
+    "CLEAN_COMPOSITION_VERSION",
+    "STYLE_DIFFERENTIATION_VERSION",
+    "ADAPTIVE_QUALITY_VERSION",
+    "VISUAL_ACCEPTANCE_VERSION",
     "STRUCTURAL_TEMPLATE_VERSION",
     "STRUCTURAL_HIERARCHY_VERSION",
     "STRUCTURAL_FUSION_VERSION",
@@ -142,6 +162,14 @@ __all__ = (
     "DoboStructuralPipeline",
     "StructuralPipelineResult",
     "StructuralPipelineTrace",
+    "TOPOLOGY_GRAPH_VERSION",
+    "SECTION_PROFILE_VERSION",
+    "STRUCTURAL_SYNTHESIS_VERSION",
+    "MORPHOLOGY_ACCEPTANCE_VERSION",
+    "StructuralMorphologyPlan",
+    "StructuralMorphogenesisResolver",
+    "StructuralBodySynthesizer",
+    "front_surface_y",
     "SemanticProgramParser",
     "SemanticRelation",
     "SourceIntent",

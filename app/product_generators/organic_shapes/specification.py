@@ -48,6 +48,47 @@ class EllipsoidFieldSpec:
             raise ValueError("fields[].radii values must be positive.")
 
 
+ADVANCED_FIELD_KINDS = frozenset(
+    {
+        "superellipsoid",
+        "faceted_ellipsoid",
+        "leaf",
+        "pointed",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AdvancedFieldSpec:
+    """Reusable non-ellipsoidal implicit field with a common envelope."""
+
+    id: str
+    kind: str
+    center: Vector3
+    radii: Vector3
+    exponent: float = 2.0
+    sides: int = 6
+    rotation_degrees: float = 0.0
+    round_mm: float = 0.6
+
+    def validate(self) -> None:
+        if not self.id.strip():
+            raise ValueError("fields[].id must not be empty.")
+        if self.kind not in ADVANCED_FIELD_KINDS:
+            raise ValueError(f"Unsupported advanced field kind '{self.kind}'.")
+        if any(radius <= 0.0 for radius in self.radii):
+            raise ValueError("fields[].radii values must be positive.")
+        if not 1.0 <= self.exponent <= 12.0:
+            raise ValueError("Advanced field exponent must be between 1 and 12.")
+        if not 3 <= self.sides <= 16:
+            raise ValueError("Advanced faceted field sides must be between 3 and 16.")
+        if self.round_mm <= 0.0 or self.round_mm >= min(self.radii):
+            raise ValueError("Advanced field round_mm must fit inside its radii.")
+
+
+ImplicitFieldSpec = EllipsoidFieldSpec | AdvancedFieldSpec
+
+
 @dataclass(frozen=True, slots=True)
 class SmoothUnionSpec:
     field_ids: tuple[str, ...]
@@ -81,7 +122,7 @@ class OrganicOutputSpec:
 class OrganicShapeSpecification:
     id: str
     grid: OrganicBounds
-    fields: tuple[EllipsoidFieldSpec, ...]
+    fields: tuple[ImplicitFieldSpec, ...]
     composition: SmoothUnionSpec
     output: OrganicOutputSpec
 
@@ -129,14 +170,7 @@ class OrganicShapeParser:
                 maximum=_vector3(grid["maximum"], "grid.maximum"),
                 voxel_mm=float(grid["voxel_mm"]),
             ),
-            fields=tuple(
-                EllipsoidFieldSpec(
-                    id=str(item["id"]),
-                    center=_vector3(item["center"], "fields[].center"),
-                    radii=_vector3(item["radii"], "fields[].radii"),
-                )
-                for item in fields
-            ),
+            fields=tuple(_field(item) for item in fields),
             composition=SmoothUnionSpec(
                 field_ids=tuple(field_ids),
                 blend_mm=float(composition["blend_mm"]),
@@ -156,3 +190,22 @@ def _object(data: dict[str, Any], key: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError(f"{key} must be a JSON object.")
     return value
+
+
+def _field(data: dict[str, Any]) -> ImplicitFieldSpec:
+    kind = str(data.get("kind", "ellipsoid"))
+    common = {
+        "id": str(data["id"]),
+        "center": _vector3(data["center"], "fields[].center"),
+        "radii": _vector3(data["radii"], "fields[].radii"),
+    }
+    if kind == "ellipsoid":
+        return EllipsoidFieldSpec(**common)
+    return AdvancedFieldSpec(
+        **common,
+        kind=kind,
+        exponent=float(data.get("exponent", 2.0)),
+        sides=int(data.get("sides", 6)),
+        rotation_degrees=float(data.get("rotation_degrees", 0.0)),
+        round_mm=float(data.get("round_mm", 0.6)),
+    )

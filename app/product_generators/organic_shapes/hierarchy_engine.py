@@ -280,7 +280,9 @@ class HierarchicalFeatureVesselEngine(OrganicVesselEngine):
     @classmethod
     def _material_field(cls, specification, x, y, z):
         vessel = specification.vessel
-        base_outer = OrganicVesselEngine._outer_field(specification, x, y, z)
+        base_outer = OrganicVesselEngine._shell_outer_field(
+            specification, x, y, z
+        )
         featured_outer = cls._outer_field(specification, x, y, z)
         offset_cavity = np.maximum(base_outer + vessel.wall_mm, vessel.cavity_floor_z_mm - z)
         opening = np.maximum(

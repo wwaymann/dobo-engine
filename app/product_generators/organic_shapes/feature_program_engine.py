@@ -9,12 +9,13 @@ from .fields import (
     capsule_distance,
     ellipsoid_distance,
     elliptical_column_distance,
+    implicit_field_distance,
     rounded_box_distance,
     rounded_triangle_prism_distance,
     smooth_intersection,
     smooth_union,
 )
-from .specification import EllipsoidFieldSpec
+from .specification import AdvancedFieldSpec, EllipsoidFieldSpec
 from .vessel_engine import OrganicVesselEngine
 
 
@@ -65,6 +66,27 @@ class FeatureProgramVesselEngine(OrganicVesselEngine):
                 center_y=feature.center_y_mm,
                 half_depth=feature.half_depth_mm,
                 round_mm=feature.round_mm,
+            )
+        if feature.kind in {
+            "superellipsoid",
+            "faceted_ellipsoid",
+            "leaf",
+            "pointed",
+        }:
+            return implicit_field_distance(
+                x,
+                y,
+                z,
+                AdvancedFieldSpec(
+                    id=feature.id,
+                    kind=feature.kind,
+                    center=feature.center,
+                    radii=feature.radii,
+                    exponent=feature.exponent,
+                    sides=feature.sides,
+                    rotation_degrees=feature.rotation_degrees,
+                    round_mm=feature.round_mm,
+                ),
             )
         return arched_prism_distance(
             x,

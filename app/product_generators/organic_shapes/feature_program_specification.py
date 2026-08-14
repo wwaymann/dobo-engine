@@ -17,6 +17,10 @@ SUPPORTED_FEATURE_KINDS = frozenset(
         "cylinder",
         "rounded_triangle_prism",
         "arched_prism",
+        "superellipsoid",
+        "faceted_ellipsoid",
+        "leaf",
+        "pointed",
     }
 )
 
@@ -47,6 +51,9 @@ class FeatureInstruction:
     bottom_z_mm: float | None = None
     spring_z_mm: float | None = None
     half_width_mm: float | None = None
+    exponent: float = 2.0
+    sides: int = 6
+    rotation_degrees: float = 0.0
 
     def validate(self) -> None:
         if not self.id.strip():
@@ -91,7 +98,7 @@ class FeatureInstruction:
                 raise ValueError("rounded_triangle_prism requires three vertices_xz.")
             if min(self.half_depth_mm, self.round_mm) <= 0.0:
                 raise ValueError("rounded_triangle_prism dimensions must be positive.")
-        else:
+        elif self.kind == "arched_prism":
             required = (
                 self.center,
                 self.bottom_z_mm,
@@ -106,6 +113,17 @@ class FeatureInstruction:
                 raise ValueError("arched_prism spring must be above its bottom.")
             if min(self.half_width_mm, self.half_depth_mm, self.round_mm) <= 0.0:
                 raise ValueError("arched_prism dimensions must be positive.")
+        else:
+            if self.center is None or self.radii is None or self.round_mm is None:
+                raise ValueError(f"{self.kind} requires center, radii and round_mm.")
+            if any(value <= 0.0 for value in self.radii):
+                raise ValueError(f"{self.kind} radii must be positive.")
+            if not 1.0 <= self.exponent <= 12.0:
+                raise ValueError("Advanced feature exponent is outside its safe range.")
+            if not 3 <= self.sides <= 16:
+                raise ValueError("Advanced feature sides are outside its safe range.")
+            if not 0.0 < self.round_mm < min(self.radii):
+                raise ValueError("Advanced feature round_mm must fit inside its radii.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,4 +212,7 @@ class FeatureProgramParser:
             half_width_mm=(
                 float(data["half_width_mm"]) if "half_width_mm" in data else None
             ),
+            exponent=float(data.get("exponent", 2.0)),
+            sides=int(data.get("sides", 6)),
+            rotation_degrees=float(data.get("rotation_degrees", 0.0)),
         )

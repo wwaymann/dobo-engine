@@ -18,9 +18,10 @@ from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
 
-STRUCTURAL_PIPELINE_VERSION = "5.9"
-STRUCTURAL_FUSION_VERSION = "5C.1"
+STRUCTURAL_PIPELINE_VERSION = "6.3"
+STRUCTURAL_FUSION_VERSION = "6B.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
+ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,10 +162,15 @@ class DoboStructuralPipeline:
             repair.program, structural
         )
         motor = compilation.motor_program
-        motor["output"]["max_generation_seconds"] = max(
-            float(motor["output"]["max_generation_seconds"]),
-            STRUCTURAL_GENERATION_BUDGET_SECONDS,
-        )
+        if compilation.report.adaptive_quality:
+            motor["output"]["max_generation_seconds"] = (
+                ADVANCED_GENERATION_BUDGET_SECONDS
+            )
+        else:
+            motor["output"]["max_generation_seconds"] = max(
+                float(motor["output"]["max_generation_seconds"]),
+                STRUCTURAL_GENERATION_BUDGET_SECONDS,
+            )
         motor_id = str(motor["id"])
         output_directory = Path(output_root).resolve() / motor_id
         motor["output"]["directory"] = str(output_directory)

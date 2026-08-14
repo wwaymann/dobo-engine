@@ -17,6 +17,15 @@ from .structural_vocabulary import (
     StructuralFeature,
     StructuralVocabularyResolver,
 )
+from .structural_morphogenesis import (
+    MORPHOLOGY_ACCEPTANCE_VERSION,
+    SECTION_PROFILE_VERSION,
+    STRUCTURAL_SYNTHESIS_VERSION,
+    TOPOLOGY_GRAPH_VERSION,
+    StructuralBodySynthesizer,
+    StructuralMorphogenesisResolver,
+    front_surface_y,
+)
 
 
 STRUCTURAL_COMPILER_VERSION = "4B.1"
@@ -34,6 +43,11 @@ MUZZLE_EXPOSURE_VERSION = "4Q.1"
 NOSE_MASS_VERSION = "4R.1"
 CANONICAL_FUSION_VERSION = "4S.1"
 SURFACE_ACCEPTANCE_VERSION = "4T.1"
+ADVANCED_PRIMITIVE_VERSION = "6A.1"
+CLEAN_COMPOSITION_VERSION = "6B.2"
+STYLE_DIFFERENTIATION_VERSION = "6C.2"
+ADAPTIVE_QUALITY_VERSION = "6D.1"
+VISUAL_ACCEPTANCE_VERSION = "6E.2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +67,10 @@ class StructuralCompilationReport:
     body_profile: str
     style_profile: str
     grammar_signature: str
+    advanced_fields: int
+    adaptive_quality: bool
+    morphology_profile: str
+    morphology_fields: int
 
     def validate(self, expected_features: int) -> None:
         if self.compiler_version != STRUCTURAL_COMPILER_VERSION:
@@ -78,6 +96,10 @@ class StructuralCompilationReport:
             raise RuntimeError("Structural compiler lost its grammar profile.")
         if not self.grammar_signature:
             raise RuntimeError("Structural compiler lost its grammar signature.")
+        if self.advanced_fields < 0:
+            raise RuntimeError("Structural compiler reported invalid advanced fields.")
+        if not self.morphology_profile or self.morphology_fields < 3:
+            raise RuntimeError("Structural compiler lost body morphogenesis.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +126,13 @@ class StructuralSemanticCompiler:
         grammar = DesignGrammarResolver.resolve(program, structural)
         semantic = SemanticToMotorCompiler.compile(program)
         motor = deepcopy(semantic.motor_program)
-        cls._apply_body_profile(motor, program, grammar)
+        morphology = StructuralMorphogenesisResolver.resolve(program, grammar)
+        morphology_ids = StructuralBodySynthesizer.apply(
+            motor,
+            program,
+            grammar,
+            morphology,
+        )
         hierarchy = motor["hierarchy_program"]
         templates = {item["id"]: item for item in hierarchy["templates"]}
         roots = {item["id"]: item for item in hierarchy["roots"]}
@@ -211,6 +239,7 @@ class StructuralSemanticCompiler:
         cls._apply_mirror_consistency(hierarchy["roots"], structural)
         cls._apply_visual_adjacency(motor, structural)
         cls._reserve_promoted_mass_grid(motor, promoted_ids)
+        advanced_fields = cls._apply_adaptive_quality(motor)
         output_id = f"structural_{semantic.report.output_program_id}"
         motor["id"] = output_id
         motor["output"]["basename"] = output_id
@@ -242,6 +271,10 @@ class StructuralSemanticCompiler:
             body_profile=grammar.body_profile,
             style_profile=grammar.style.name,
             grammar_signature=grammar.signature,
+            advanced_fields=advanced_fields,
+            adaptive_quality=advanced_fields > 0,
+            morphology_profile=morphology.profile,
+            morphology_fields=len(morphology_ids),
         )
         report.validate(len(program.features))
         return StructuralCompilationResult(
@@ -251,56 +284,6 @@ class StructuralSemanticCompiler:
             grammar=grammar,
             report=report,
         )
-
-    @staticmethod
-    def _apply_body_profile(
-        motor_program: dict[str, Any],
-        program: DesignSemanticProgram,
-        grammar: DesignGrammarPlan,
-    ) -> None:
-        """Calibrate the reusable base fields from the semantic body family."""
-        fields = {field["id"]: field for field in motor_program["fields"]}
-        body = fields["body"]
-        front = fields["front_mass"]
-        width = program.body.width_mm
-        depth = program.body.depth_mm
-        height = program.body.height_mm
-        if grammar.body_profile == "organic":
-            front["center"][1] = -0.13 * depth
-            front["radii"][0] = 0.46 * width
-            front["radii"][2] = 0.43 * height
-        elif grammar.body_profile == "column":
-            body["radii"][2] = 0.50 * height
-            front["center"][1] = -0.08 * depth
-            front["radii"] = [0.48 * width, 0.45 * depth, 0.48 * height]
-        elif grammar.body_profile == "tapered":
-            lower_id = "body_lower_profile"
-            motor_program["fields"].append(
-                {
-                    "id": lower_id,
-                    "center": [0.0, 0.02 * depth, -0.18 * height],
-                    "radii": [0.52 * width, 0.52 * depth, 0.30 * height],
-                }
-            )
-            motor_program["composition"]["field_ids"].append(lower_id)
-        elif grammar.body_profile == "faceted_proxy":
-            # The current implicit kernel is ellipsoidal. A lower blend and
-            # orthogonal shoulder masses create a deterministic geometric
-            # proxy while keeping the field schema backward compatible.
-            for side in (-1.0, 1.0):
-                field_id = f"body_shoulder_{'left' if side < 0 else 'right'}"
-                motor_program["fields"].append(
-                    {
-                        "id": field_id,
-                        "center": [side * 0.30 * width, 0.0, 0.0],
-                        "radii": [0.21 * width, 0.48 * depth, 0.45 * height],
-                    }
-                )
-                motor_program["composition"]["field_ids"].append(field_id)
-            motor_program["composition"]["blend_mm"] = min(
-                float(motor_program["composition"]["blend_mm"]),
-                grammar.style.fusion_mm,
-            )
 
     @staticmethod
     def _apply_body_anchor(
@@ -393,16 +376,31 @@ class StructuralSemanticCompiler:
             shaped_lobe = grammar_feature.shape_profile in {
                 "pointed",
                 "elongated",
+                "leaf",
                 "tapered",
             }
+            vertical_ratio = {
+                "pointed": 0.30,
+                "elongated": 0.36,
+                "leaf": 0.36,
+                "tapered": 0.30,
+            }.get(grammar_feature.shape_profile, 0.25)
+            horizontal_ratio = (
+                0.25
+                if grammar_feature.shape_profile in {"elongated", "leaf"}
+                else 0.31
+            )
             center = [
                 side
-                * (0.34 if shaped_lobe else 0.38)
+                * (horizontal_ratio if shaped_lobe else 0.38)
                 * program.body.width_mm,
-                (-0.12 if shaped_lobe else -0.16)
+                (
+                    -0.06
+                    if grammar_feature.shape_profile in {"elongated", "leaf"}
+                    else (-0.12 if shaped_lobe else -0.16)
+                )
                 * program.body.depth_mm,
-                (0.22 if shaped_lobe else 0.25)
-                * program.body.height_mm,
+                vertical_ratio * program.body.height_mm,
             ]
         else:
             region_center = {
@@ -414,19 +412,37 @@ class StructuralSemanticCompiler:
             }.get(semantic_region, 0.0)
             span = 180.0 if semantic_region == "all_around" else 45.0
             angle = radians(region_center + span * semantic_feature.anchor.horizontal)
+            radial_ratio = (
+                0.36 if grammar_feature.shape_profile == "leaf" else 0.43
+            )
             center = [
-                0.43 * program.body.width_mm * sin(angle),
-                -0.43 * program.body.depth_mm * cos(angle),
+                radial_ratio * program.body.width_mm * sin(angle),
+                -radial_ratio * program.body.depth_mm * cos(angle),
                 (semantic_feature.anchor.vertical - 0.5)
                 * 0.78
                 * program.body.height_mm,
             ]
+            if grammar_feature.shape_profile == "leaf":
+                # A radial botanical leaf is a low, fused surface lobe.  Keeping
+                # its crown below the opening prevents the arch-like handles
+                # seen when a tall leaf merely touches the rim.
+                center[2] = (
+                    0.15
+                    + 0.18 * (semantic_feature.anchor.vertical - 0.5)
+                ) * program.body.height_mm
         if grammar_feature.shape_profile == "elongated":
             half_width = min(half_width, 0.10 * program.body.width_mm)
-            half_height = max(half_height, 0.17 * program.body.height_mm)
+            half_height = max(half_height, 0.22 * program.body.height_mm)
         elif grammar_feature.shape_profile == "leaf":
-            half_width = min(half_width, 0.12 * program.body.width_mm)
-            half_height = max(half_height, 0.14 * program.body.height_mm)
+            if semantic_region in {"upper", "front"}:
+                # Long vertical leaf masses provide a rabbit silhouette that
+                # cannot collapse back into short cat-like ears.
+                half_width = min(half_width, 0.105 * program.body.width_mm)
+                half_height = max(half_height, 0.22 * program.body.height_mm)
+            else:
+                half_width = min(half_width, 0.10 * program.body.width_mm)
+                half_height = min(half_height, 0.12 * program.body.height_mm)
+                half_depth = max(half_depth, 0.08 * program.body.depth_mm)
         elif grammar_feature.shape_profile == "tapered":
             half_width *= 0.82
         field_id = f"{semantic_feature.id}__silhouette_mass"
@@ -435,27 +451,12 @@ class StructuralSemanticCompiler:
             "center": center,
             "radii": [half_width, half_depth, half_height],
         }
+        if grammar_feature.shape_profile in {"elongated", "leaf"}:
+            field.update(kind="leaf", round_mm=max(0.6, 0.18 * half_depth))
+        elif grammar_feature.shape_profile in {"pointed", "tapered"}:
+            field.update(kind="pointed", round_mm=max(0.6, 0.16 * half_width))
         motor_program["fields"].append(field)
         motor_program["composition"]["field_ids"].append(field_id)
-        if grammar_feature.shape_profile in {"pointed", "tapered"}:
-            direction = -1.0 if center[0] < 0.0 else 1.0
-            tip_id = f"{semantic_feature.id}__silhouette_tip"
-            motor_program["fields"].append(
-                {
-                    "id": tip_id,
-                    "center": [
-                        center[0] + direction * 0.10 * half_width,
-                        center[1],
-                        center[2] + 0.52 * half_height,
-                    ],
-                    "radii": [
-                        0.58 * half_width,
-                        0.82 * half_depth,
-                        0.50 * half_height,
-                    ],
-                }
-            )
-            motor_program["composition"]["field_ids"].append(tip_id)
         voxel = float(motor_program["grid"]["voxel_mm"])
         motor_program["composition"]["blend_mm"] = min(
             float(motor_program["composition"]["blend_mm"]),
@@ -486,13 +487,24 @@ class StructuralSemanticCompiler:
             2.0 * semantic_feature.size.depth_mm * grammar.style.depth_scale,
             2.0 * program.manufacturing.minimum_feature_mm,
         )
+        center_z = -0.075 * program.body.height_mm
+        body_front_y = front_surface_y(
+            motor_program,
+            x=0.0,
+            z=center_z,
+        )
+        penetration_mm = max(
+            0.75 * float(motor_program["composition"]["blend_mm"]),
+            0.75 * float(motor_program["vessel"]["wall_mm"]),
+            2.5 * float(motor_program["grid"]["voxel_mm"]),
+        )
         field_id = f"{semantic_feature.id}__compound_mass"
         field = {
             "id": field_id,
             "center": [
                 0.0,
-                -0.50 * program.body.depth_mm,
-                -0.075 * program.body.height_mm,
+                body_front_y - half_depth + penetration_mm,
+                center_z,
             ],
             "radii": [0.5 * width, half_depth, 0.5 * height],
         }
@@ -541,8 +553,22 @@ class StructuralSemanticCompiler:
             1.5 * child_feature.size.depth_mm * grammar.style.depth_scale,
             1.5 * program.manufacturing.minimum_feature_mm,
         )
-        parent_center_y = -0.50 * program.body.depth_mm
-        parent_center_z = -0.075 * program.body.height_mm
+        parent_field_id = f"{parent_feature.id}__compound_mass"
+        parent_field = next(
+            (
+                field
+                for field in motor_program["fields"]
+                if field["id"] == parent_field_id
+            ),
+            None,
+        )
+        if parent_field is None:
+            raise RuntimeError(
+                "Compound child requires its promoted parent mass."
+            )
+        parent_center_y = float(parent_field["center"][1])
+        parent_center_z = float(parent_field["center"][2])
+        parent_half_depth = float(parent_field["radii"][1])
         if grammar.style.name == "organic":
             child_exposure_factor = 0.05
         elif grammar.style.name == "childlike":
@@ -560,24 +586,35 @@ class StructuralSemanticCompiler:
         else:
             child_exposure_factor = -0.30
         field_id = f"{child_feature.id}__compound_child_mass"
-        motor_program["fields"].append(
-            {
-                "id": field_id,
-                "center": [
-                    resolved.anchor.horizontal * parent_width,
-                    parent_center_y
-                    - parent_half_depth
-                    + child_exposure_factor * child_half_depth,
-                    parent_center_z
-                    + (resolved.anchor.vertical - 0.5) * parent_height,
-                ],
-                "radii": [
-                    0.5 * child_width,
-                    child_half_depth,
-                    0.5 * child_height,
-                ],
-            }
-        )
+        field = {
+            "id": field_id,
+            "center": [
+                resolved.anchor.horizontal * parent_width,
+                parent_center_y
+                - parent_half_depth
+                + child_exposure_factor * child_half_depth,
+                parent_center_z
+                + (resolved.anchor.vertical - 0.5) * parent_height,
+            ],
+            "radii": [
+                0.5 * child_width,
+                child_half_depth,
+                0.5 * child_height,
+            ],
+        }
+        if child_feature.form_hint == "point":
+            if grammar.style.name == "childlike":
+                # A pointed semantic nose remains compact and softly rounded;
+                # the pointed primitive is reserved for silhouette masses such
+                # as ears, where its apex is visually meaningful.
+                field["radii"][0] *= 0.84
+                field["radii"][2] *= 0.72
+            else:
+                field.update(
+                    kind="pointed",
+                    round_mm=max(0.5, 0.16 * min(field["radii"])),
+                )
+        motor_program["fields"].append(field)
         motor_program["composition"]["field_ids"].append(field_id)
 
     @staticmethod
@@ -592,6 +629,35 @@ class StructuralSemanticCompiler:
         motor_program["grid"]["minimum"][1] = (
             float(motor_program["grid"]["minimum"][1]) - front_reserve
         )
+
+    @staticmethod
+    def _apply_adaptive_quality(motor_program: dict[str, Any]) -> int:
+        """Select a deterministic sub-30-second profile for advanced fields."""
+        advanced = sum(
+            str(field.get("kind", "ellipsoid")) != "ellipsoid"
+            for field in motor_program["fields"]
+            if field["id"] in set(motor_program["composition"]["field_ids"])
+        )
+        if advanced:
+            motor_program["grid"]["voxel_mm"] = max(
+                float(motor_program["grid"]["voxel_mm"]),
+                0.72,
+            )
+            voxel = float(motor_program["grid"]["voxel_mm"])
+            reserve = max(6.0, 8.0 * voxel)
+            for axis in (0, 1):
+                motor_program["grid"]["minimum"][axis] = (
+                    float(motor_program["grid"]["minimum"][axis]) - reserve
+                )
+                motor_program["grid"]["maximum"][axis] = (
+                    float(motor_program["grid"]["maximum"][axis]) + reserve
+                )
+            motor_program["grid"]["maximum"][2] = (
+                float(motor_program["grid"]["maximum"][2]) + reserve
+            )
+            motor_program.pop("mesh_quality", None)
+            motor_program["output"]["max_generation_seconds"] = 30.0
+        return advanced
 
     @staticmethod
     def _child_transform(

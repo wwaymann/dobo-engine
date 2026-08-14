@@ -283,7 +283,20 @@ class DoboDesignPipeline:
         canonical = deepcopy(motor_program)
         quality = canonical.get("mesh_quality")
         if not isinstance(quality, dict):
-            return (("canonical", canonical),)
+            has_advanced_fields = any(
+                str(field.get("kind", "ellipsoid")) != "ellipsoid"
+                for field in canonical.get("fields", [])
+            )
+            if not has_advanced_fields:
+                return (("canonical", canonical),)
+            volumetric_fused = DoboDesignPipeline._volumetric_fusion_profile(
+                canonical
+            )
+            return (
+                ("canonical", canonical),
+                ("validated_base_surface", deepcopy(canonical)),
+                ("volumetric_fused_base_surface", volumetric_fused),
+            )
         voxel_mm = float(canonical["grid"]["voxel_mm"])
         base_surface = deepcopy(canonical)
         base_surface.pop("mesh_quality", None)
