@@ -365,6 +365,7 @@ class SemanticToMotorCompiler:
                     [0.5 * width, -0.5 * height],
                     [0.0, 0.5 * height],
                 ],
+                center_y_mm=0.0,
                 half_depth_mm=depth,
                 round_mm=max(0.4, 0.25 * minimum_feature_mm),
             )

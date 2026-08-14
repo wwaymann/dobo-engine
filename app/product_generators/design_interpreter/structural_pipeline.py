@@ -18,8 +18,8 @@ from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
 
-STRUCTURAL_PIPELINE_VERSION = "4U.1"
-STRUCTURAL_FUSION_VERSION = "4S.1"
+STRUCTURAL_PIPELINE_VERSION = "5.9"
+STRUCTURAL_FUSION_VERSION = "5C.1"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 
 
@@ -33,6 +33,9 @@ class StructuralPipelineTrace:
     response_id: str
     semantic_program_id: str
     motor_program_id: str
+    body_profile: str
+    style_profile: str
+    grammar_signature: str
     silhouette_features: int
     compound_children: int
     repair_actions: int
@@ -224,6 +227,9 @@ class DoboStructuralPipeline:
             response_id=response_id,
             semantic_program_id=repair.program.id,
             motor_program_id=motor_id,
+            body_profile=compilation.report.body_profile,
+            style_profile=compilation.report.style_profile,
+            grammar_signature=compilation.report.grammar_signature,
             silhouette_features=compilation.report.silhouette_features,
             compound_children=compilation.report.compound_children,
             repair_actions=len(repair.report.actions),

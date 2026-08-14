@@ -55,6 +55,17 @@ from .structural_vocabulary import (
     StructuralVisualGroup,
     StructuralVocabularyResolver,
 )
+from .design_grammar import (
+    ACCEPTANCE_MATRIX_VERSION,
+    BODY_GRAMMAR_VERSION,
+    COMPONENT_GRAMMAR_VERSION,
+    COMPOSITION_GRAMMAR_VERSION,
+    STYLE_GRAMMAR_VERSION,
+    DesignGrammarPlan,
+    DesignGrammarResolver,
+    GrammarFeaturePlan,
+    GrammarStyleProfile,
+)
 from .structural_compiler import (
     STRUCTURAL_COMPILER_VERSION,
     STRUCTURAL_HIERARCHY_VERSION,
@@ -111,6 +122,15 @@ __all__ = (
     "StructuralFeature",
     "StructuralVisualGroup",
     "StructuralVocabularyResolver",
+    "DesignGrammarPlan",
+    "DesignGrammarResolver",
+    "GrammarFeaturePlan",
+    "GrammarStyleProfile",
+    "BODY_GRAMMAR_VERSION",
+    "COMPONENT_GRAMMAR_VERSION",
+    "COMPOSITION_GRAMMAR_VERSION",
+    "STYLE_GRAMMAR_VERSION",
+    "ACCEPTANCE_MATRIX_VERSION",
     "StructuralCompilationReport",
     "StructuralCompilationResult",
     "StructuralSemanticCompiler",

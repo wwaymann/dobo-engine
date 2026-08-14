@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from math import cos, radians, sin
 from typing import Any
 
+from .design_grammar import (
+    DesignGrammarPlan,
+    DesignGrammarResolver,
+    GrammarFeaturePlan,
+)
 from .semantic_compiler import SemanticCompilationResult, SemanticToMotorCompiler
 from .semantic_contract import DesignSemanticProgram
 from .structural_vocabulary import (
@@ -29,9 +35,6 @@ NOSE_MASS_VERSION = "4R.1"
 CANONICAL_FUSION_VERSION = "4S.1"
 SURFACE_ACCEPTANCE_VERSION = "4T.1"
 
-_VOLUMETRIC_SILHOUETTE_CONCEPTS = {"ear", "oreja"}
-_VOLUMETRIC_COMPOUND_CONCEPTS = {"muzzle", "hocico"}
-
 
 @dataclass(frozen=True, slots=True)
 class StructuralCompilationReport:
@@ -47,6 +50,9 @@ class StructuralCompilationReport:
     volumetric_silhouette_features: int
     volumetric_compound_parents: int
     volumetric_compound_children: int
+    body_profile: str
+    style_profile: str
+    grammar_signature: str
 
     def validate(self, expected_features: int) -> None:
         if self.compiler_version != STRUCTURAL_COMPILER_VERSION:
@@ -68,6 +74,10 @@ class StructuralCompilationReport:
             raise RuntimeError("Invalid volumetric-compound count.")
         if not 0 <= self.volumetric_compound_children <= self.compound_children:
             raise RuntimeError("Invalid volumetric-child count.")
+        if not self.body_profile or not self.style_profile:
+            raise RuntimeError("Structural compiler lost its grammar profile.")
+        if not self.grammar_signature:
+            raise RuntimeError("Structural compiler lost its grammar signature.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +85,7 @@ class StructuralCompilationResult:
     motor_program: dict[str, Any]
     structural_program: StructuralDesignProgram
     semantic_compilation: SemanticCompilationResult
+    grammar: DesignGrammarPlan
     report: StructuralCompilationReport
 
 
@@ -90,14 +101,19 @@ class StructuralSemanticCompiler:
         program.validate()
         structural = structural or StructuralVocabularyResolver.resolve(program)
         structural.validate(expected_features=len(program.features))
+        grammar = DesignGrammarResolver.resolve(program, structural)
         semantic = SemanticToMotorCompiler.compile(program)
         motor = deepcopy(semantic.motor_program)
+        cls._apply_body_profile(motor, program, grammar)
         hierarchy = motor["hierarchy_program"]
         templates = {item["id"]: item for item in hierarchy["templates"]}
         roots = {item["id"]: item for item in hierarchy["roots"]}
         semantic_features = {feature.id: feature for feature in program.features}
         structural_features = {
             feature.semantic_feature_id: feature for feature in structural.features
+        }
+        grammar_features = {
+            feature.semantic_feature_id: feature for feature in grammar.features
         }
         volumetric_silhouette_ids: set[str] = set()
         volumetric_compound_ids: set[str] = set()
@@ -109,43 +125,42 @@ class StructuralSemanticCompiler:
                 continue
             node = roots[feature_id]
             semantic_feature = semantic_features[feature_id]
+            grammar_feature = grammar_features[feature_id]
             cls._apply_body_anchor(node, resolved, semantic_feature, program)
             normalized += 1
-            if resolved.structural_role == "silhouette":
+            if grammar_feature.mass_strategy == "silhouette_mass":
                 template = templates[f"{feature_id}_template"]
-                if semantic_feature.concept.strip().lower() in (
-                    _VOLUMETRIC_SILHOUETTE_CONCEPTS
-                ):
-                    cls._promote_ear_to_volumetric_mass(
-                        motor,
-                        node=node,
-                        template=template,
-                        resolved=resolved,
-                        semantic_feature=semantic_feature,
-                        program=program,
-                    )
-                    volumetric_silhouette_ids.add(feature_id)
-                else:
-                    cls._apply_silhouette_template(template, motor)
-            elif (
-                semantic_feature.concept.strip().lower()
-                in _VOLUMETRIC_COMPOUND_CONCEPTS
-                and resolved.geometric_operation == "add"
-            ):
+                cls._promote_silhouette_to_volumetric_mass(
+                    motor,
+                    node=node,
+                    template=template,
+                    resolved=resolved,
+                    semantic_feature=semantic_feature,
+                    grammar_feature=grammar_feature,
+                    grammar=grammar,
+                    program=program,
+                )
+                volumetric_silhouette_ids.add(feature_id)
+            elif grammar_feature.mass_strategy == "compound_mass":
                 template = templates[f"{feature_id}_template"]
                 cls._promote_muzzle_to_volumetric_mass(
                     motor,
                     node=node,
                     template=template,
                     semantic_feature=semantic_feature,
+                    grammar=grammar,
                     program=program,
                 )
                 volumetric_compound_ids.add(feature_id)
+            elif resolved.structural_role == "silhouette":
+                template = templates[f"{feature_id}_template"]
+                cls._apply_silhouette_template(template, motor)
 
         for child_id, resolved in structural_features.items():
             if resolved.parent_feature_id is None:
                 continue
-            if resolved.parent_feature_id in volumetric_compound_ids:
+            grammar_feature = grammar_features[child_id]
+            if grammar_feature.mass_strategy == "compound_child_mass":
                 parent_feature = semantic_features[resolved.parent_feature_id]
                 child_feature = semantic_features[child_id]
                 cls._promote_compound_child_to_volumetric_mass(
@@ -153,6 +168,7 @@ class StructuralSemanticCompiler:
                     resolved=resolved,
                     parent_feature=parent_feature,
                     child_feature=child_feature,
+                    grammar=grammar,
                     program=program,
                 )
                 volumetric_child_ids.add(child_id)
@@ -223,14 +239,68 @@ class StructuralSemanticCompiler:
             volumetric_silhouette_features=len(volumetric_silhouette_ids),
             volumetric_compound_parents=len(volumetric_compound_ids),
             volumetric_compound_children=len(volumetric_child_ids),
+            body_profile=grammar.body_profile,
+            style_profile=grammar.style.name,
+            grammar_signature=grammar.signature,
         )
         report.validate(len(program.features))
         return StructuralCompilationResult(
             motor_program=motor,
             structural_program=structural,
             semantic_compilation=semantic,
+            grammar=grammar,
             report=report,
         )
+
+    @staticmethod
+    def _apply_body_profile(
+        motor_program: dict[str, Any],
+        program: DesignSemanticProgram,
+        grammar: DesignGrammarPlan,
+    ) -> None:
+        """Calibrate the reusable base fields from the semantic body family."""
+        fields = {field["id"]: field for field in motor_program["fields"]}
+        body = fields["body"]
+        front = fields["front_mass"]
+        width = program.body.width_mm
+        depth = program.body.depth_mm
+        height = program.body.height_mm
+        if grammar.body_profile == "organic":
+            front["center"][1] = -0.13 * depth
+            front["radii"][0] = 0.46 * width
+            front["radii"][2] = 0.43 * height
+        elif grammar.body_profile == "column":
+            body["radii"][2] = 0.50 * height
+            front["center"][1] = -0.08 * depth
+            front["radii"] = [0.48 * width, 0.45 * depth, 0.48 * height]
+        elif grammar.body_profile == "tapered":
+            lower_id = "body_lower_profile"
+            motor_program["fields"].append(
+                {
+                    "id": lower_id,
+                    "center": [0.0, 0.02 * depth, -0.18 * height],
+                    "radii": [0.52 * width, 0.52 * depth, 0.30 * height],
+                }
+            )
+            motor_program["composition"]["field_ids"].append(lower_id)
+        elif grammar.body_profile == "faceted_proxy":
+            # The current implicit kernel is ellipsoidal. A lower blend and
+            # orthogonal shoulder masses create a deterministic geometric
+            # proxy while keeping the field schema backward compatible.
+            for side in (-1.0, 1.0):
+                field_id = f"body_shoulder_{'left' if side < 0 else 'right'}"
+                motor_program["fields"].append(
+                    {
+                        "id": field_id,
+                        "center": [side * 0.30 * width, 0.0, 0.0],
+                        "radii": [0.21 * width, 0.48 * depth, 0.45 * height],
+                    }
+                )
+                motor_program["composition"]["field_ids"].append(field_id)
+            motor_program["composition"]["blend_mm"] = min(
+                float(motor_program["composition"]["blend_mm"]),
+                grammar.style.fusion_mm,
+            )
 
     @staticmethod
     def _apply_body_anchor(
@@ -290,58 +360,107 @@ class StructuralSemanticCompiler:
         # receive enough implicit blending to become part of the body mass.
 
     @staticmethod
-    def _promote_ear_to_volumetric_mass(
+    def _promote_silhouette_to_volumetric_mass(
         motor_program: dict[str, Any],
         *,
         node: dict[str, Any],
         template: dict[str, Any],
         resolved: StructuralFeature,
         semantic_feature,
+        grammar_feature: GrammarFeaturePlan,
+        grammar: DesignGrammarPlan,
         program: DesignSemanticProgram,
     ) -> None:
-        """Turn an ear-like silhouette feature into a fused body field.
-
-        Surface features inherit the tangent frame of the vessel. That is ideal
-        for relief, but it made ears into thin side plates. A body field is a
-        true three-dimensional mass, participates in the vessel smooth union,
-        and is not incorrectly constrained as shallow surface relief.
-        """
+        """Turn any grammar silhouette lobe into one or more fused body fields."""
         width = max(
             semantic_feature.size.width_ratio * program.body.width_mm,
             2.0 * program.manufacturing.minimum_feature_mm,
-        )
+        ) * grammar.style.silhouette_scale
         height = max(
             semantic_feature.size.height_ratio * program.body.height_mm,
             2.0 * program.manufacturing.minimum_feature_mm,
-        )
+        ) * grammar.style.silhouette_scale
         half_width = max(0.5 * width, 0.105 * program.body.width_mm)
         half_height = max(0.5 * height, 0.10 * program.body.height_mm)
         half_depth = max(
             0.32 * min(2.0 * half_width, 2.0 * half_height),
-            2.5 * semantic_feature.size.depth_mm,
+            2.5 * semantic_feature.size.depth_mm * grammar.style.depth_scale,
             2.0 * program.manufacturing.minimum_feature_mm,
         )
-        side = -1.0 if resolved.anchor.horizontal < 0.0 else 1.0
+        semantic_region = semantic_feature.anchor.region
+        if semantic_region in {"upper", "front"}:
+            side = -1.0 if resolved.anchor.horizontal < 0.0 else 1.0
+            shaped_lobe = grammar_feature.shape_profile in {
+                "pointed",
+                "elongated",
+                "tapered",
+            }
+            center = [
+                side
+                * (0.34 if shaped_lobe else 0.38)
+                * program.body.width_mm,
+                (-0.12 if shaped_lobe else -0.16)
+                * program.body.depth_mm,
+                (0.22 if shaped_lobe else 0.25)
+                * program.body.height_mm,
+            ]
+        else:
+            region_center = {
+                "left": -90.0,
+                "right": 90.0,
+                "back": 180.0,
+                "all_around": 0.0,
+                "lower": 0.0,
+            }.get(semantic_region, 0.0)
+            span = 180.0 if semantic_region == "all_around" else 45.0
+            angle = radians(region_center + span * semantic_feature.anchor.horizontal)
+            center = [
+                0.43 * program.body.width_mm * sin(angle),
+                -0.43 * program.body.depth_mm * cos(angle),
+                (semantic_feature.anchor.vertical - 0.5)
+                * 0.78
+                * program.body.height_mm,
+            ]
+        if grammar_feature.shape_profile == "elongated":
+            half_width = min(half_width, 0.10 * program.body.width_mm)
+            half_height = max(half_height, 0.17 * program.body.height_mm)
+        elif grammar_feature.shape_profile == "leaf":
+            half_width = min(half_width, 0.12 * program.body.width_mm)
+            half_height = max(half_height, 0.14 * program.body.height_mm)
+        elif grammar_feature.shape_profile == "tapered":
+            half_width *= 0.82
         field_id = f"{semantic_feature.id}__silhouette_mass"
         field = {
             "id": field_id,
-            "center": [
-                side * 0.38 * program.body.width_mm,
-                -0.16 * program.body.depth_mm,
-                0.25 * program.body.height_mm,
-            ],
+            "center": center,
             "radii": [half_width, half_depth, half_height],
         }
         motor_program["fields"].append(field)
         motor_program["composition"]["field_ids"].append(field_id)
+        if grammar_feature.shape_profile in {"pointed", "tapered"}:
+            direction = -1.0 if center[0] < 0.0 else 1.0
+            tip_id = f"{semantic_feature.id}__silhouette_tip"
+            motor_program["fields"].append(
+                {
+                    "id": tip_id,
+                    "center": [
+                        center[0] + direction * 0.10 * half_width,
+                        center[1],
+                        center[2] + 0.52 * half_height,
+                    ],
+                    "radii": [
+                        0.58 * half_width,
+                        0.82 * half_depth,
+                        0.50 * half_height,
+                    ],
+                }
+            )
+            motor_program["composition"]["field_ids"].append(tip_id)
         voxel = float(motor_program["grid"]["voxel_mm"])
         motor_program["composition"]["blend_mm"] = min(
             float(motor_program["composition"]["blend_mm"]),
-            max(3.6, 4.0 * voxel),
+            max(grammar.style.fusion_mm, 4.0 * voxel),
         )
-        # Keep the node/template arguments explicit: their removal happens only
-        # after every semantic feature has been processed, preserving stable
-        # lookup and compilation traces during this pass.
         _ = node, template
 
     @staticmethod
@@ -351,6 +470,7 @@ class StructuralSemanticCompiler:
         node: dict[str, Any],
         template: dict[str, Any],
         semantic_feature,
+        grammar: DesignGrammarPlan,
         program: DesignSemanticProgram,
     ) -> None:
         width = max(
@@ -363,7 +483,7 @@ class StructuralSemanticCompiler:
         )
         half_depth = max(
             0.18 * min(width, height),
-            2.0 * semantic_feature.size.depth_mm,
+            2.0 * semantic_feature.size.depth_mm * grammar.style.depth_scale,
             2.0 * program.manufacturing.minimum_feature_mm,
         )
         field_id = f"{semantic_feature.id}__compound_mass"
@@ -381,7 +501,7 @@ class StructuralSemanticCompiler:
         voxel = float(motor_program["grid"]["voxel_mm"])
         motor_program["composition"]["blend_mm"] = min(
             float(motor_program["composition"]["blend_mm"]),
-            max(3.6, 4.0 * voxel),
+            max(grammar.style.fusion_mm, 4.0 * voxel),
         )
         _ = node, template
 
@@ -392,6 +512,7 @@ class StructuralSemanticCompiler:
         resolved: StructuralFeature,
         parent_feature,
         child_feature,
+        grammar: DesignGrammarPlan,
         program: DesignSemanticProgram,
     ) -> None:
         parent_width = max(
@@ -404,7 +525,7 @@ class StructuralSemanticCompiler:
         )
         parent_half_depth = max(
             0.18 * min(parent_width, parent_height),
-            2.0 * parent_feature.size.depth_mm,
+            2.0 * parent_feature.size.depth_mm * grammar.style.depth_scale,
             2.0 * program.manufacturing.minimum_feature_mm,
         )
         child_width = max(
@@ -417,11 +538,27 @@ class StructuralSemanticCompiler:
         )
         child_half_depth = max(
             0.22 * min(child_width, child_height),
-            1.5 * child_feature.size.depth_mm,
+            1.5 * child_feature.size.depth_mm * grammar.style.depth_scale,
             1.5 * program.manufacturing.minimum_feature_mm,
         )
         parent_center_y = -0.50 * program.body.depth_mm
         parent_center_z = -0.075 * program.body.height_mm
+        if grammar.style.name == "organic":
+            child_exposure_factor = 0.05
+        elif grammar.style.name == "childlike":
+            minimum_visible_mm = max(
+                2.0,
+                1.95 * program.manufacturing.minimum_feature_mm,
+            )
+            child_exposure_factor = min(
+                0.45,
+                max(
+                    0.05,
+                    1.0 - minimum_visible_mm / child_half_depth,
+                ),
+            )
+        else:
+            child_exposure_factor = -0.30
         field_id = f"{child_feature.id}__compound_child_mass"
         motor_program["fields"].append(
             {
@@ -430,7 +567,7 @@ class StructuralSemanticCompiler:
                     resolved.anchor.horizontal * parent_width,
                     parent_center_y
                     - parent_half_depth
-                    - 0.30 * child_half_depth,
+                    + child_exposure_factor * child_half_depth,
                     parent_center_z
                     + (resolved.anchor.vertical - 0.5) * parent_height,
                 ],

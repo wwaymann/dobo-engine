@@ -18,6 +18,9 @@ _DISPLACEMENT_FAILURE = (
     "Localized mesh refinement exceeded its displacement limit."
 )
 _CONNECTIVITY_FAILURE = "Smooth union did not create one connected surface."
+_TOTAL_VOLUME_DRIFT_FAILURE = (
+    "Localized mesh refinement exceeded total volume drift from input."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +265,7 @@ class DoboDesignPipeline:
                 if str(error) not in {
                     _DISPLACEMENT_FAILURE,
                     _CONNECTIVITY_FAILURE,
+                    _TOTAL_VOLUME_DRIFT_FAILURE,
                 }:
                     raise
                 last_error = error
@@ -283,6 +287,10 @@ class DoboDesignPipeline:
         voxel_mm = float(canonical["grid"]["voxel_mm"])
         base_surface = deepcopy(canonical)
         base_surface.pop("mesh_quality", None)
+        volumetric_fused = DoboDesignPipeline._volumetric_fusion_profile(
+            canonical
+        )
+        volumetric_fused.pop("mesh_quality", None)
         fused = DoboDesignPipeline._fusion_profile(
             canonical,
             penetration_mm=max(0.5, 1.0 * voxel_mm),
@@ -295,12 +303,65 @@ class DoboDesignPipeline:
             blend_mm=max(1.2, 2.0 * voxel_mm),
         )
         strongly_fused.pop("mesh_quality", None)
-        return (
-            ("canonical", canonical),
-            ("validated_base_surface", base_surface),
-            ("fused_base_surface", fused),
-            ("strongly_fused_base_surface", strongly_fused),
+        has_promoted_fields = any(
+            str(field.get("id", "")) not in {"body", "front_mass"}
+            and not str(field.get("id", "")).startswith("body_")
+            for field in canonical.get("fields", [])
         )
+        profiles: list[tuple[str, dict[str, Any]]] = [("canonical", canonical)]
+        if has_promoted_fields:
+            profiles.append(
+                ("volumetric_fused_base_surface", volumetric_fused)
+            )
+        profiles.extend(
+            (
+                ("validated_base_surface", base_surface),
+                ("fused_base_surface", fused),
+                ("strongly_fused_base_surface", strongly_fused),
+            )
+        )
+        return tuple(profiles)
+
+    @staticmethod
+    def _volumetric_fusion_profile(
+        motor_program: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Recover a disconnected promoted mass without product-specific rules."""
+        candidate = deepcopy(motor_program)
+        composition = candidate.get("composition", {})
+        active_ids = {str(value) for value in composition.get("field_ids", [])}
+        for field in candidate.get("fields", []):
+            field_id = str(field.get("id", ""))
+            if (
+                field_id not in active_ids
+                or field_id in {"body", "front_mass"}
+                or field_id.startswith("body_")
+            ):
+                continue
+            center = field.get("center")
+            radii = field.get("radii")
+            compound_child = field_id.endswith("__compound_child_mass")
+            if isinstance(center, list) and len(center) == 3:
+                center[:] = [
+                    0.97 * float(center[0]),
+                    (0.97 if compound_child else 0.94) * float(center[1]),
+                    0.98 * float(center[2]),
+                ]
+            if isinstance(radii, list) and len(radii) == 3:
+                if compound_child:
+                    radii[:] = [
+                        1.02 * float(radii[0]),
+                        0.92 * float(radii[1]),
+                        1.02 * float(radii[2]),
+                    ]
+                else:
+                    radii[:] = [1.04 * float(value) for value in radii]
+        voxel = float(candidate["grid"]["voxel_mm"])
+        composition["blend_mm"] = max(
+            float(composition["blend_mm"]),
+            max(4.2, 6.0 * voxel),
+        )
+        return candidate
 
     @staticmethod
     def _fusion_profile(

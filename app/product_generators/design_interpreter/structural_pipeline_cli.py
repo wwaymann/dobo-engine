@@ -58,6 +58,9 @@ def main() -> None:
     print("pipeline", result.trace.pipeline_version, "OK")
     print("fusion", result.trace.fusion_version, "OK")
     print("source", result.trace.source_kind, "OK")
+    print("body profile", result.trace.body_profile, "OK")
+    print("style profile", result.trace.style_profile, "OK")
+    print("grammar signature", result.trace.grammar_signature, "OK")
     print("silhouette features", result.trace.silhouette_features, "OK")
     print("compound children", result.trace.compound_children, "OK")
     print("repair actions", result.trace.repair_actions, "OK")
@@ -71,7 +74,7 @@ def main() -> None:
     print("STL", result.stl_path)
     print("3MF", result.three_mf_path)
     print("manifest", result.manifest_path)
-    print("DOBO Canonical Facial Acceptance Phase 4U: Valid OK")
+    print("DOBO Generalized Structural Pipeline Block 5: Valid OK")
 
 
 if __name__ == "__main__":
