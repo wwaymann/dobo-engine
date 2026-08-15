@@ -1,0 +1,13 @@
+{
+  "cycle": "B28",
+  "goal": "close five general body-family gaps exposed by B27",
+  "families": [
+    "tapered_revolution",
+    "cuboid",
+    "rectangular_prism",
+    "ovoid",
+    "compound_multivolume"
+  ],
+  "frozen_b27_benchmark_preserved": true,
+  "product_specific_generator_branches": 0
+}
