@@ -9,6 +9,10 @@ from .production_validation import ProductionAnalyzer
 from .profile import ManufacturingProfile
 
 
+RotationStep = tuple[tuple[float, float, float], float]
+RotationSpec = tuple[str, tuple[RotationStep, ...]]
+
+
 @dataclass(frozen=True, slots=True)
 class ProductionOrientationCandidate:
     label: str
@@ -27,9 +31,6 @@ class ProductionOrientationCandidate:
 
     @property
     def ranking_key(self) -> tuple[float, ...]:
-        # Valid manufacturing orientations always win. Among valid candidates,
-        # prefer lower unsupported overhang, lower build height, and then a
-        # larger XY footprint. Labels provide deterministic final tie-breaking.
         return (
             0.0 if self.production_valid else 1.0,
             0.0 if self.size_valid else 1.0,
@@ -49,38 +50,47 @@ class ProductionOrientationPlan:
 class ProductionOrientationPlanner:
     """Choose a bounded deterministic build orientation from real geometry.
 
-    The planner does not alter manufacturing thresholds and does not claim to
-    replace slicer simulation. It evaluates a finite, explicit orientation set
-    using the same physical-size and overhang analyzers used by the 24-rule
-    manufacturing contract. Every candidate used for ranking is translated
-    onto Z=0, while ``rotate_shape`` exposes the exact shared rotation so the
-    same decision can be propagated to every material region before export.
+    The search is finite and general-purpose. It preserves the configured
+    manufacturing thresholds and evaluates every candidate with the same real
+    final-geometry overhang and machine-size checks used by the 24-rule contract.
 
-    Orthogonal poses are complemented by 30/45/60-degree X/Y poses. The denser
-    bounded set is still deterministic and general-purpose, but can resolve
-    geometries where one diagonal angle is too shallow for an embossed feature
-    and another is too steep for the vessel wall. Manufacturing thresholds are
-    never changed to make an orientation pass.
+    Single-axis 30/45/60/90-degree poses are complemented by a small set of
+    compound X/Y rotations. Compound poses are important because unsupported
+    surface normals are not generally aligned with a world axis; two sequential
+    tilts sample diagonal build directions without introducing product-specific
+    knowledge or an unbounded optimizer.
     """
 
-    _ROTATIONS = (
-        ("current", None, 0.0),
-        ("rotate-x-30", (1.0, 0.0, 0.0), 30.0),
-        ("rotate-x-minus-30", (1.0, 0.0, 0.0), -30.0),
-        ("rotate-y-30", (0.0, 1.0, 0.0), 30.0),
-        ("rotate-y-minus-30", (0.0, 1.0, 0.0), -30.0),
-        ("rotate-x-45", (1.0, 0.0, 0.0), 45.0),
-        ("rotate-x-minus-45", (1.0, 0.0, 0.0), -45.0),
-        ("rotate-y-45", (0.0, 1.0, 0.0), 45.0),
-        ("rotate-y-minus-45", (0.0, 1.0, 0.0), -45.0),
-        ("rotate-x-60", (1.0, 0.0, 0.0), 60.0),
-        ("rotate-x-minus-60", (1.0, 0.0, 0.0), -60.0),
-        ("rotate-y-60", (0.0, 1.0, 0.0), 60.0),
-        ("rotate-y-minus-60", (0.0, 1.0, 0.0), -60.0),
-        ("rotate-x-90", (1.0, 0.0, 0.0), 90.0),
-        ("rotate-x-minus-90", (1.0, 0.0, 0.0), -90.0),
-        ("rotate-y-90", (0.0, 1.0, 0.0), 90.0),
-        ("rotate-y-minus-90", (0.0, 1.0, 0.0), -90.0),
+    _ROTATIONS: tuple[RotationSpec, ...] = (
+        ("current", ()),
+        ("rotate-x-30", (((1.0, 0.0, 0.0), 30.0),)),
+        ("rotate-x-minus-30", (((1.0, 0.0, 0.0), -30.0),)),
+        ("rotate-y-30", (((0.0, 1.0, 0.0), 30.0),)),
+        ("rotate-y-minus-30", (((0.0, 1.0, 0.0), -30.0),)),
+        ("rotate-x-45", (((1.0, 0.0, 0.0), 45.0),)),
+        ("rotate-x-minus-45", (((1.0, 0.0, 0.0), -45.0),)),
+        ("rotate-y-45", (((0.0, 1.0, 0.0), 45.0),)),
+        ("rotate-y-minus-45", (((0.0, 1.0, 0.0), -45.0),)),
+        ("rotate-x-60", (((1.0, 0.0, 0.0), 60.0),)),
+        ("rotate-x-minus-60", (((1.0, 0.0, 0.0), -60.0),)),
+        ("rotate-y-60", (((0.0, 1.0, 0.0), 60.0),)),
+        ("rotate-y-minus-60", (((0.0, 1.0, 0.0), -60.0),)),
+        ("rotate-x-90", (((1.0, 0.0, 0.0), 90.0),)),
+        ("rotate-x-minus-90", (((1.0, 0.0, 0.0), -90.0),)),
+        ("rotate-y-90", (((0.0, 1.0, 0.0), 90.0),)),
+        ("rotate-y-minus-90", (((0.0, 1.0, 0.0), -90.0),)),
+        ("rotate-x-30-y-30", (((1.0, 0.0, 0.0), 30.0), ((0.0, 1.0, 0.0), 30.0))),
+        ("rotate-x-30-y-minus-30", (((1.0, 0.0, 0.0), 30.0), ((0.0, 1.0, 0.0), -30.0))),
+        ("rotate-x-minus-30-y-30", (((1.0, 0.0, 0.0), -30.0), ((0.0, 1.0, 0.0), 30.0))),
+        ("rotate-x-minus-30-y-minus-30", (((1.0, 0.0, 0.0), -30.0), ((0.0, 1.0, 0.0), -30.0))),
+        ("rotate-x-45-y-45", (((1.0, 0.0, 0.0), 45.0), ((0.0, 1.0, 0.0), 45.0))),
+        ("rotate-x-45-y-minus-45", (((1.0, 0.0, 0.0), 45.0), ((0.0, 1.0, 0.0), -45.0))),
+        ("rotate-x-minus-45-y-45", (((1.0, 0.0, 0.0), -45.0), ((0.0, 1.0, 0.0), 45.0))),
+        ("rotate-x-minus-45-y-minus-45", (((1.0, 0.0, 0.0), -45.0), ((0.0, 1.0, 0.0), -45.0))),
+        ("rotate-x-60-y-30", (((1.0, 0.0, 0.0), 60.0), ((0.0, 1.0, 0.0), 30.0))),
+        ("rotate-x-60-y-minus-30", (((1.0, 0.0, 0.0), 60.0), ((0.0, 1.0, 0.0), -30.0))),
+        ("rotate-x-minus-60-y-30", (((1.0, 0.0, 0.0), -60.0), ((0.0, 1.0, 0.0), 30.0))),
+        ("rotate-x-minus-60-y-minus-30", (((1.0, 0.0, 0.0), -60.0), ((0.0, 1.0, 0.0), -30.0))),
     )
 
     def __init__(self) -> None:
@@ -88,35 +98,23 @@ class ProductionOrientationPlanner:
         self._geometry = FinalGeometryManufacturingAnalyzer()
 
     @classmethod
-    def _rotation_by_label(
-        cls,
-        label: str,
-    ) -> tuple[tuple[float, float, float] | None, float]:
-        for candidate_label, axis, angle in cls._ROTATIONS:
+    def rotation_specs(cls) -> tuple[RotationSpec, ...]:
+        return cls._ROTATIONS
+
+    @classmethod
+    def _steps_by_label(cls, label: str) -> tuple[RotationStep, ...]:
+        for candidate_label, steps in cls._ROTATIONS:
             if candidate_label == label:
-                return axis, float(angle)
+                return steps
         raise ValueError(f"Unknown production orientation: {label!r}")
 
     @classmethod
-    def rotate_shape(
-        cls,
-        shape: cq.Shape,
-        label: str,
-    ) -> cq.Shape:
-        """Apply only the selected rotation, preserving shared CAD alignment.
-
-        Bed placement must be applied once to the complete multiregion product,
-        never independently to Body/Text/Decoration. The 3MF exporter therefore
-        receives these rotated regions and computes one shared bed transform.
-        """
-        axis, angle = cls._rotation_by_label(label)
-        if axis is None:
-            return shape
-        return shape.rotate(
-            cq.Vector(0.0, 0.0, 0.0),
-            cq.Vector(*axis),
-            angle,
-        )
+    def rotate_shape(cls, shape: cq.Shape, label: str) -> cq.Shape:
+        rotated = shape
+        origin = cq.Vector(0.0, 0.0, 0.0)
+        for axis, angle in cls._steps_by_label(label):
+            rotated = rotated.rotate(origin, cq.Vector(*axis), angle)
+        return rotated
 
     @staticmethod
     def _place_on_bed(shape: cq.Shape) -> cq.Shape:
@@ -124,11 +122,7 @@ class ProductionOrientationPlanner:
         return shape.translate(cq.Vector(0.0, 0.0, -z_min))
 
     @classmethod
-    def _oriented_shape(
-        cls,
-        shape: cq.Shape,
-        label: str,
-    ) -> cq.Shape:
+    def _oriented_shape(cls, shape: cq.Shape, label: str) -> cq.Shape:
         return cls._place_on_bed(cls.rotate_shape(shape, label))
 
     def plan(
@@ -141,7 +135,7 @@ class ProductionOrientationPlanner:
         manufacturing.validate()
 
         candidates: list[ProductionOrientationCandidate] = []
-        for label, _axis, _angle in self._ROTATIONS:
+        for label, _steps in self._ROTATIONS:
             oriented = self._oriented_shape(shape, label)
             size = self._production.physical_size(
                 shape=oriented,
