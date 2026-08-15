@@ -11,6 +11,7 @@ from .complex_composition import (
 )
 from .morphological_integration import AdvancedMorphologicalIntegration
 from .continuous_morphological_fusion import ContinuousMorphologicalFusion
+from .visible_morphological_continuity import VisibleMorphologicalContinuity
 from .design_grammar import (
     DesignGrammarPlan,
     DesignGrammarResolver,
@@ -215,6 +216,14 @@ class StructuralSemanticCompiler:
                     minimum_feature_mm=program.manufacturing.minimum_feature_mm,
                     is_child=False,
                 )
+                cls._add_visible_root_flare_template(
+                    hierarchy,
+                    node=node,
+                    template=templates[f"{feature_id}_template"],
+                    topology_role=complex_nodes[feature_id].role,
+                    style_profile=grammar.style.name,
+                    minimum_feature_mm=program.manufacturing.minimum_feature_mm,
+                )
             normalized += 1
             if grammar_feature.mass_strategy == "silhouette_mass":
                 template = templates[f"{feature_id}_template"]
@@ -294,6 +303,29 @@ class StructuralSemanticCompiler:
                     minimum_feature_mm=program.manufacturing.minimum_feature_mm,
                     is_child=True,
                 )
+                cls._add_visible_root_flare_template(
+                    hierarchy,
+                    node=child_node,
+                    template=templates[f"{child_id}_template"],
+                    topology_role=complex_nodes[child_id].role,
+                    style_profile=grammar.style.name,
+                    minimum_feature_mm=program.manufacturing.minimum_feature_mm,
+                )
+                parent_id = resolved.parent_feature_id
+                parent_topology = complex_nodes[parent_id]
+                if (
+                    parent_topology.operation == "add"
+                    and parent_topology.role in {"branch", "terminal"}
+                ):
+                    cls._add_hierarchy_bridge_template(
+                        hierarchy,
+                        parent_node=all_nodes[parent_id],
+                        child_node=child_node,
+                        child_template=templates[f"{child_id}_template"],
+                        topology_role=complex_nodes[child_id].role,
+                        style_profile=grammar.style.name,
+                        minimum_feature_mm=program.manufacturing.minimum_feature_mm,
+                    )
             hierarchy_parents[child_id] = resolved.parent_feature_id
             normalized += 1
 
@@ -555,6 +587,7 @@ class StructuralSemanticCompiler:
             return
         interface = AdvancedMorphologicalIntegration.span_interface(style_profile)
         continuity = ContinuousMorphologicalFusion.span_continuity(style_profile)
+        visibility = VisibleMorphologicalContinuity.span_visible_root(style_profile)
         half_width = float(template["half_width_mm"])
         half_depth = float(template["half_depth_mm"])
         bottom = float(template["bottom_z_mm"])
@@ -581,6 +614,7 @@ class StructuralSemanticCompiler:
         connector_ids: list[str] = []
         for side, x in (("left", -foot_x), ("right", foot_x)):
             connector_id = f"{node['id']}_{side}_fusion_foot_template"
+            flare_id = f"{node['id']}_{side}_visible_span_root_template"
             connector_ids.append(connector_id)
             base_blend = max(
                 2.2,
@@ -619,7 +653,56 @@ class StructuralSemanticCompiler:
                         min(1.5, 0.32 * min(half_sizes)),
                     ),
                 }
+            flare_y = -max(
+                0.25 * minimum_feature_mm,
+                visibility.outward_shift_scale * half_depth,
+            )
+            flare_half = [
+                max(
+                    1.05 * minimum_feature_mm,
+                    visibility.width_scale * foot_half_width,
+                ),
+                max(
+                    1.55 * minimum_feature_mm,
+                    visibility.depth_scale * foot_half_depth,
+                ),
+                max(
+                    1.15 * minimum_feature_mm,
+                    visibility.height_scale * foot_half_height,
+                ),
+            ]
+            flare_blend = min(
+                5.0,
+                max(
+                    1.6 * minimum_feature_mm,
+                    base_blend * visibility.blend_scale,
+                    0.50 * flare_half[1],
+                ),
+            )
+            if visibility.kind == "ellipsoid":
+                flare = {
+                    "id": flare_id,
+                    "operation": "add",
+                    "blend_mm": flare_blend,
+                    "probe": [0.0, 0.0, 0.0],
+                    "kind": "ellipsoid",
+                    "center": [x, flare_y, foot_z],
+                    "radii": flare_half,
+                }
+            else:
+                flare = {
+                    "id": flare_id,
+                    "operation": "add",
+                    "blend_mm": flare_blend,
+                    "probe": [0.0, 0.0, 0.0],
+                    "kind": "rounded_box",
+                    "center": [x, flare_y, foot_z],
+                    "half_sizes": flare_half,
+                    "round_mm": max(0.55, min(1.35, 0.28 * min(flare_half))),
+                }
             hierarchy["templates"].append(connector)
+            hierarchy["templates"].append(flare)
+            connector_ids.append(flare_id)
         node["template_ids"].extend(connector_ids)
 
     @staticmethod
@@ -723,6 +806,166 @@ class StructuralSemanticCompiler:
             }
         hierarchy["templates"].append(transition)
         node.setdefault("template_ids", []).append(transition_id)
+
+    @staticmethod
+    def _add_visible_root_flare_template(
+        hierarchy: dict[str, Any],
+        *,
+        node: dict[str, Any],
+        template: dict[str, Any],
+        topology_role: str,
+        style_profile: str,
+        minimum_feature_mm: float,
+    ) -> None:
+        """Add a controlled outward flare around an additive branch root."""
+        if template.get("operation") != "add":
+            return
+        if topology_role not in {"branch", "terminal"}:
+            return
+
+        def half_extents(source: dict[str, Any]) -> tuple[float, float, float]:
+            kind = str(source.get("kind"))
+            if kind in {
+                "ellipsoid",
+                "superellipsoid",
+                "faceted_ellipsoid",
+                "leaf",
+                "pointed",
+            }:
+                radii = source["radii"]
+                return float(radii[0]), float(radii[1]), float(radii[2])
+            if kind == "rounded_triangle_prism":
+                vertices = source["vertices_xz"]
+                return (
+                    max(abs(float(point[0])) for point in vertices),
+                    float(source["half_depth_mm"]),
+                    max(abs(float(point[1])) for point in vertices),
+                )
+            if kind == "rounded_box":
+                half_sizes = source["half_sizes"]
+                return (
+                    float(half_sizes[0]),
+                    float(half_sizes[1]),
+                    float(half_sizes[2]),
+                )
+            raise ValueError(f"A.4 cannot derive visible root extents for {kind!r}.")
+
+        half_x, half_y, half_z = half_extents(template)
+        policy = VisibleMorphologicalContinuity.root_flare(
+            style_name=style_profile,
+            topology_role=topology_role,
+        )
+        flare_id = f"{node['id']}_visible_root_flare_template"
+        center_y = -max(
+            0.25 * minimum_feature_mm,
+            policy.outward_shift_scale * half_y,
+        )
+        flare_half = [
+            max(0.95 * minimum_feature_mm, policy.lateral_scale * half_x),
+            max(1.35 * minimum_feature_mm, policy.depth_scale * half_y),
+            max(0.95 * minimum_feature_mm, policy.vertical_scale * half_z),
+        ]
+        blend = min(
+            5.2,
+            max(
+                1.6 * minimum_feature_mm,
+                float(template.get("blend_mm", 1.0)) * policy.blend_scale,
+                0.48 * flare_half[1],
+            ),
+        )
+        if policy.kind == "ellipsoid":
+            flare = {
+                "id": flare_id,
+                "operation": "add",
+                "blend_mm": blend,
+                "probe": [0.0, 0.0, 0.0],
+                "kind": "ellipsoid",
+                "center": [0.0, center_y, 0.0],
+                "radii": flare_half,
+            }
+        else:
+            flare = {
+                "id": flare_id,
+                "operation": "add",
+                "blend_mm": blend,
+                "probe": [0.0, 0.0, 0.0],
+                "kind": "rounded_box",
+                "center": [0.0, center_y, 0.0],
+                "half_sizes": flare_half,
+                "round_mm": max(0.55, min(1.35, 0.28 * min(flare_half))),
+            }
+        hierarchy["templates"].append(flare)
+        node.setdefault("template_ids", []).append(flare_id)
+
+    @staticmethod
+    def _add_hierarchy_bridge_template(
+        hierarchy: dict[str, Any],
+        *,
+        parent_node: dict[str, Any],
+        child_node: dict[str, Any],
+        child_template: dict[str, Any],
+        topology_role: str,
+        style_profile: str,
+        minimum_feature_mm: float,
+    ) -> None:
+        """Bridge additive parent/child branch hierarchy with a visible capsule."""
+        translate = child_node.get("transform", {}).get("translate")
+        if not isinstance(translate, list) or len(translate) != 3:
+            return
+        vector = [float(value) for value in translate]
+        length = sum(value * value for value in vector) ** 0.5
+        if length <= 2.2 * minimum_feature_mm:
+            return
+
+        kind = str(child_template.get("kind"))
+        if kind in {
+            "ellipsoid",
+            "superellipsoid",
+            "faceted_ellipsoid",
+            "leaf",
+            "pointed",
+        }:
+            radii = child_template["radii"]
+            child_cross = min(float(radii[0]), float(radii[2]))
+        elif kind == "rounded_triangle_prism":
+            vertices = child_template["vertices_xz"]
+            child_cross = min(
+                max(abs(float(point[0])) for point in vertices),
+                max(abs(float(point[1])) for point in vertices),
+            )
+        else:
+            return
+
+        policy = VisibleMorphologicalContinuity.hierarchy_bridge(
+            style_name=style_profile,
+            topology_role=topology_role,
+        )
+        start = [policy.start_fraction * value for value in vector]
+        end = [policy.end_fraction * value for value in vector]
+        radius = max(
+            0.95 * minimum_feature_mm,
+            min(0.22 * length, policy.radius_scale * child_cross),
+        )
+        bridge_id = f"{parent_node['id']}_{child_node['id']}_visible_bridge_template"
+        bridge = {
+            "id": bridge_id,
+            "operation": "add",
+            "blend_mm": min(
+                4.8,
+                max(
+                    1.5 * minimum_feature_mm,
+                    float(child_template.get("blend_mm", 1.0)) * policy.blend_scale,
+                    0.75 * radius,
+                ),
+            ),
+            "probe": [0.0, 0.0, 0.0],
+            "kind": "capsule",
+            "start": start,
+            "end": end,
+            "radius_mm": radius,
+        }
+        hierarchy["templates"].append(bridge)
+        parent_node.setdefault("template_ids", []).append(bridge_id)
 
     @staticmethod
     def _promote_silhouette_to_volumetric_mass(
