@@ -21,30 +21,17 @@ from .decoration_validation import (
     DecorationRegionVolumeAnalyzer,
 )
 from .final_geometry import FinalGeometryManufacturingAnalyzer
-from .final_product_validation import (
-    FinalProductAnalyzer,
-)
-from .product_profile import (
-    ProductManufacturingProfile,
-)
-from .production_validation import (
-    ProductionAnalyzer,
-)
+from .final_product_validation import FinalProductAnalyzer
+from .product_profile import ProductManufacturingProfile
+from .production_validation import ProductionAnalyzer
 from .profile import ManufacturingProfile
 from .report import CheckStatus
-from .source import (
-    build_structural_body_source,
-)
+from .source import build_structural_body_source
 from .stability import BaseStabilityAnalyzer
 from .structural import StructuralBodyValidator
 from .text_geometry import PrintedTextFeatureAnalyzer
-from .text_validation import (
-    TextDepthAnalyzer,
-    TextRegionVolumeAnalyzer,
-)
-from .three_mf_project_inspector import (
-    ThreeMFProjectInspector,
-)
+from .text_validation import TextDepthAnalyzer, TextRegionVolumeAnalyzer
+from .three_mf_project_inspector import ThreeMFProjectInspector
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,9 +41,7 @@ class RealProductValidationResult:
     final_volume: float
 
 
-def _status_from_check(
-    status: CheckStatus,
-) -> ValidationStatus:
+def _status_from_check(status: CheckStatus) -> ValidationStatus:
     if status is CheckStatus.OK:
         return ValidationStatus.OK
     if status is CheckStatus.WARNING:
@@ -68,6 +53,30 @@ def _status_from_check(
     raise RuntimeError(f"Unsupported structural check status: {status}")
 
 
+def _exported_placement_is_on_bed(
+    *,
+    bounds: tuple[float, float, float, float, float, float] | None,
+    profile: ManufacturingProfile,
+) -> bool:
+    """Validate the real exported 3MF bounds against the production bed.
+
+    The exporter uses machine coordinates with the K1 Max bed spanning
+    X/Y=0..max_size and Z=0 at the build plate. A small existing bed tolerance
+    is allowed only at the numerical boundary; no threshold is weakened.
+    """
+    if bounds is None:
+        return False
+    xmin, xmax, ymin, ymax, zmin, _zmax = bounds
+    tolerance = max(profile.bed_z_tolerance, profile.layer_height)
+    return bool(
+        xmin >= -tolerance
+        and ymin >= -tolerance
+        and xmax <= profile.max_size_x + tolerance
+        and ymax <= profile.max_size_y + tolerance
+        and abs(zmin) <= tolerance
+    )
+
+
 def validate_real_multicolor_product(
     specification_path: str | Path,
     *,
@@ -77,7 +86,8 @@ def validate_real_multicolor_product(
     """Build the real multicolor product and validate the full 24-rule contract.
 
     Final-product geometric rules are derived from the actual final printable
-    B-Rep/tessellation. No product-specific fixture values are injected.
+    B-Rep/tessellation. Production placement is derived from the exported 3MF
+    transform and mesh vertices. No product-specific fixture values are used.
     """
     manufacturing_profile = profile if profile is not None else ManufacturingProfile()
     product_rules = product_profile if product_profile is not None else ProductManufacturingProfile()
@@ -225,7 +235,13 @@ def validate_real_multicolor_product(
 
     project = ThreeMFProjectInspector().inspect(product.three_mf_path)
     statuses["ORIENTATION_ON_BED"] = (
-        ValidationStatus.OK if project.build_item_count == 1 else ValidationStatus.ERROR
+        ValidationStatus.OK
+        if project.build_item_count == 1
+        and _exported_placement_is_on_bed(
+            bounds=project.transformed_bounds,
+            profile=manufacturing_profile,
+        )
+        else ValidationStatus.ERROR
     )
     statuses["MULTICOLOR_3MF_INTEGRITY"] = (
         ValidationStatus.OK if project.valid else ValidationStatus.ERROR
