@@ -1,0 +1,204 @@
+name: DOBO Macroblock A4 Autonomous
+
+on:
+  push:
+    branches:
+      - macroblock-a4-autonomous
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dobo-macroblock-a4-autonomous
+  cancel-in-progress: true
+
+jobs:
+  validate-materialize-and-compare-a4:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+
+    steps:
+      - name: Checkout autonomous A4 branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: macroblock-a4-autonomous
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install geometry dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy==2.3.5 \
+            scipy==1.17.0 \
+            scikit-image==0.26.0 \
+            trimesh==4.11.1 \
+            networkx==3.6.1 \
+            shapely==2.1.2 \
+            Pillow==12.3.0
+
+      - name: Apply A4 visible continuity integration
+        shell: bash
+        run: |
+          if git apply --check patches/macroblock_a4_core.patch; then
+            git apply patches/macroblock_a4_core.patch
+            echo "A4 core patch applied."
+          elif grep -q "visible_morphological_continuity" app/product_generators/design_interpreter/structural_compiler.py; then
+            echo "A4 core patch is already present."
+          else
+            echo "A4 core patch cannot be applied cleanly and is not already present."
+            exit 1
+          fi
+
+      - name: Compile A4 and visual gate
+        run: |
+          python -m py_compile app/product_generators/design_interpreter/visible_morphological_continuity.py
+          python -m py_compile app/product_generators/design_interpreter/structural_compiler.py
+          python -m py_compile app/product_generators/design_interpreter/test_macroblock_a4_visible_continuity.py
+          python -m py_compile app/product_generators/design_interpreter/macroblock_a4_matrix_cli.py
+          python -m py_compile tools/dobo_blender_compare.py
+          python -m py_compile tools/dobo_prepare_visual_masks.py
+          python -m py_compile tools/dobo_visual_report.py
+
+      - name: Run DOBO regression suite through A4
+        run: |
+          python -m product_generators.design_interpreter.test_phase_3a_semantic_contract
+          python -m product_generators.design_interpreter.test_phase_3b_semantic_compiler
+          python -m product_generators.design_interpreter.test_phase_3c_prompt_interpreter
+          python -m product_generators.design_interpreter.test_phase_3d_image_interpreter
+          python -m product_generators.design_interpreter.test_phase_3e_proposal_repair
+          python -m product_generators.design_interpreter.test_phase_4a_structural_vocabulary
+          python -m product_generators.design_interpreter.test_phase_4g_4k_visual_acceptance
+          python -m product_generators.design_interpreter.test_phase_4l_4p_facial_volume
+          python -m product_generators.design_interpreter.test_phase_4q_4u_canonical_face
+          python -m product_generators.design_interpreter.test_phase_5_generalized_design_grammar
+          python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
+          python -m product_generators.design_interpreter.test_phase_6_advanced_visual_geometry
+          python -m product_generators.design_interpreter.test_macroblock_a_7_8
+          python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
+          python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
+          python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
+
+      - name: Generate real A4 STL and 3MF matrix
+        run: |
+          rm -rf outputs-ci/macroblock-a4
+          python -m product_generators.design_interpreter.macroblock_a4_matrix_cli \
+            --output-root outputs-ci/macroblock-a4 \
+            --case all
+
+      - name: Generate frozen A3 visual baseline
+        shell: bash
+        run: |
+          BASELINE_COMMIT=$(python -c "import json; print(json.load(open('.dobo/visual_baseline.json'))['commit'])")
+          BASELINE_MODULE=$(python -c "import json; print(json.load(open('.dobo/visual_baseline.json'))['matrix_module'])")
+          rm -rf /tmp/dobo-visual-baseline outputs-ci/macroblock-a3-baseline
+          git worktree add --detach /tmp/dobo-visual-baseline "$BASELINE_COMMIT"
+          PYTHONPATH=/tmp/dobo-visual-baseline/app python -m "$BASELINE_MODULE" \
+            --output-root "$GITHUB_WORKSPACE/outputs-ci/macroblock-a3-baseline" \
+            --case all
+          git worktree remove /tmp/dobo-visual-baseline --force
+
+      - name: Install headless Blender renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            blender \
+            xvfb \
+            xauth \
+            libegl1 \
+            libegl-mesa0 \
+            libgl1-mesa-dri \
+            libglx-mesa0
+          blender --version
+
+      - name: Render normalized A3 vs A4 visual evidence
+        shell: bash
+        run: |
+          BASELINE_LABEL=$(python -c "import json; print(json.load(open('.dobo/visual_baseline.json'))['label'])")
+          BASELINE_COMMIT=$(python -c "import json; print(json.load(open('.dobo/visual_baseline.json'))['commit'])")
+          CANDIDATE_COMMIT=$(git rev-parse HEAD)
+          rm -rf outputs-ci/visual-a3-a4
+          xvfb-run -a -s "-screen 0 1280x1024x24" blender --background \
+            --python tools/dobo_blender_compare.py -- \
+            --baseline-root outputs-ci/macroblock-a3-baseline \
+            --candidate-root outputs-ci/macroblock-a4 \
+            --output-root outputs-ci/visual-a3-a4/renders \
+            --baseline-label "$BASELINE_LABEL" \
+            --candidate-label A4 \
+            --resolution 320
+          python tools/dobo_prepare_visual_masks.py \
+            --render-root outputs-ci/visual-a3-a4/renders
+          python tools/dobo_visual_report.py \
+            --render-root outputs-ci/visual-a3-a4/renders \
+            --output-root outputs-ci/visual-a3-a4/report \
+            --baseline-label "$BASELINE_LABEL" \
+            --candidate-label A4 \
+            --baseline-commit "$BASELINE_COMMIT" \
+            --candidate-commit "$CANDIDATE_COMMIT"
+
+      - name: Enforce visible A4 delta
+        run: |
+          python - <<'PY'
+          import json
+          from collections import defaultdict
+          from pathlib import Path
+
+          report = json.loads(
+              Path('outputs-ci/visual-a3-a4/report/visual_regression_report.json').read_text()
+          )
+          grouped = defaultdict(list)
+          for item in report['views']:
+              grouped[item['case']].append(float(item['silhouette_delta']))
+          averages = {key: sum(values) / len(values) for key, values in grouped.items()}
+          print('A4 visible delta by case', averages)
+          if averages.get('architectural', 0.0) < 0.004:
+              raise SystemExit('A4 architectural change is still visually negligible.')
+          if averages.get('branching', 0.0) < 0.008:
+              raise SystemExit('A4 branching change is still visually negligible.')
+          print('DOBO A4 visible-delta gate: Valid OK')
+          PY
+
+      - name: Upload A3 vs A4 visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-a3-a4-visual-regression
+          path: outputs-ci/visual-a3-a4
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload real A4 matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-macroblock-a4-real-matrix
+          path: outputs-ci/macroblock-a4
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Commit validated A4 integration
+        if: success()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/product_generators/design_interpreter/structural_compiler.py
+          if git diff --cached --quiet; then
+            echo "No A4 core source changes to commit."
+          else
+            git commit -m "feat(a4): integrate visible morphological continuity"
+            git fetch origin macroblock-a4-autonomous
+            git rebase origin/macroblock-a4-autonomous
+            git push origin HEAD:macroblock-a4-autonomous
+          fi
