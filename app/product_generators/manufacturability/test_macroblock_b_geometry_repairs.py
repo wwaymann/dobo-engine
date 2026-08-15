@@ -60,22 +60,19 @@ def main() -> None:
         raise RuntimeError("Repair did not complete full 24-rule revalidation.")
 
     orientations = build_orientation_repair_candidates()
-    if len(orientations) != 16 or any(item.rule_code != "OVERHANG" for item in orientations):
+    if len(orientations) != 28 or any(item.rule_code != "OVERHANG" for item in orientations):
         raise RuntimeError("Deterministic overhang orientation strategy set is incomplete.")
     labels = {item.label for item in orientations}
     for required in {
         "rotate-x-30",
-        "rotate-x-minus-30",
         "rotate-y-30",
-        "rotate-y-minus-30",
         "rotate-x-45",
-        "rotate-x-minus-45",
         "rotate-y-45",
-        "rotate-y-minus-45",
         "rotate-x-60",
-        "rotate-x-minus-60",
         "rotate-y-60",
-        "rotate-y-minus-60",
+        "rotate-x-30-y-30",
+        "rotate-x-45-y-45",
+        "rotate-x-60-y-30",
     }:
         if required not in labels:
             raise RuntimeError(f"Missing overhang repair orientation {required}")
