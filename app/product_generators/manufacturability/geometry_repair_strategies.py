@@ -18,10 +18,16 @@ def build_orientation_repair_candidates() -> tuple[RepairCandidate[cq.Shape], ..
     These candidates never change manufacturing thresholds. The bounded repair
     controller is responsible for accepting one only after a full 24-rule
     revalidation proves that the warning is resolved without introducing a
-    blocking regression.
+    blocking regression. The set mirrors the planner's bounded non-current
+    production poses, including 45-degree X/Y slopes for general FDM
+    self-supporting orientation repair.
     """
 
     rotations = (
+        ("rotate-x-45", (1.0, 0.0, 0.0), 45.0),
+        ("rotate-x-minus-45", (1.0, 0.0, 0.0), -45.0),
+        ("rotate-y-45", (0.0, 1.0, 0.0), 45.0),
+        ("rotate-y-minus-45", (0.0, 1.0, 0.0), -45.0),
         ("rotate-x-90", (1.0, 0.0, 0.0), 90.0),
         ("rotate-x-minus-90", (1.0, 0.0, 0.0), -90.0),
         ("rotate-y-90", (0.0, 1.0, 0.0), 90.0),
