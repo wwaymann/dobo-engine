@@ -42,7 +42,9 @@ jobs:
         run: |
           python -m py_compile app/product_generators/manufacturability/repair_controller.py
           python -m py_compile app/product_generators/manufacturability/text_geometry.py
+          python -m py_compile app/product_generators/manufacturability/final_geometry.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_repair_controller.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_final_geometry.py
           python -m py_compile app/product_generators/manufacturability/product_integration.py
 
       - name: Preserve Macroblock A regression contract
@@ -68,6 +70,10 @@ jobs:
         run: |
           python -m product_generators.manufacturability.test_phase_7_8_color_final_production
           python -m product_generators.manufacturability.test_phase_7_9_consolidated_validator
+
+      - name: Validate real final geometry rules
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_final_geometry
 
       - name: Validate bounded automatic repair controller
         run: |
