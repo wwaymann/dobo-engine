@@ -54,6 +54,7 @@ jobs:
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_3mf_placement.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_planned_3mf_export.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_production_handoff.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_real_overhang_sources.py
           python -m py_compile app/product_generators/manufacturability/product_integration.py
           python -m py_compile app/product_generators/surface_designer/multicolor_product.py
 
@@ -101,6 +102,10 @@ jobs:
       - name: Validate real exported 3MF placement
         run: |
           python -m product_generators.manufacturability.test_macroblock_b_3mf_placement
+
+      - name: Diagnose real overhang sources
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_real_overhang_sources
 
       - name: Validate current real product manufacturing baseline
         run: |
