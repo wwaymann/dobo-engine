@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
-from typing import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -194,8 +193,6 @@ def _write_board(
             _draw_mesh(ax, mesh, view)
             if row == 0:
                 ax.set_title(view.capitalize(), fontsize=9)
-        # Keep target id in records even though evidence geometry is deliberately
-        # reused when the current engine collapses distinct target families.
         record["evidence_key"] = f"{target_id}:{source_case}"
 
     figure.suptitle(
@@ -248,7 +245,10 @@ def run_benchmark(output_root: str | Path) -> dict[str, object]:
 
     board_path = root / "b27_visual_geometry_board.png"
     _write_board(records=records, meshes=meshes, path=board_path)
-    counts = {status: sum(r["visual_status"] == status for r in records) for status in ("PASS", "PARTIAL", "FAIL")}
+    counts = {
+        status: sum(record["visual_status"] == status for record in records)
+        for status in ("PASS", "PARTIAL", "FAIL")
+    }
     payload: dict[str, object] = {
         "benchmark_version": BENCHMARK_VERSION,
         "anti_cheat": {
@@ -262,7 +262,10 @@ def run_benchmark(output_root: str | Path) -> dict[str, object]:
         "board": str(board_path),
     }
     manifest_path = root / "b27_visual_geometry_manifest.json"
-    manifest_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
     payload["manifest"] = str(manifest_path)
     return payload
 
@@ -276,7 +279,10 @@ def main() -> None:
     print("PASS", summary["PASS"])
     print("PARTIAL", summary["PARTIAL"])
     print("FAIL", summary["FAIL"])
-    print("product-specific generator branches", payload["anti_cheat"]["product_specific_generator_branches"])
+    print(
+        "product-specific generator branches",
+        payload["anti_cheat"]["product_specific_generator_branches"],
+    )
     print("board", payload["board"])
     print("manifest", payload["manifest"])
     print("-----------------------------------")
