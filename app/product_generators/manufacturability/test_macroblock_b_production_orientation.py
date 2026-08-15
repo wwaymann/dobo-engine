@@ -9,14 +9,11 @@ from .profile import ManufacturingProfile
 def main() -> None:
     planner = ProductionOrientationPlanner()
 
-    # A tall rectangular solid has equivalent overhang behavior in the tested
-    # orientations, so the deterministic planner should select a valid pose
-    # while keeping the part on the bed and within volume.
     shape = cq.Workplane("XY").box(10.0, 20.0, 30.0, centered=(True, True, False)).val()
     plan = planner.plan(shape=shape)
 
-    if len(plan.candidates) != 17:
-        raise RuntimeError(f"Expected 17 bounded orientations, got {len(plan.candidates)}")
+    if len(plan.candidates) != 29:
+        raise RuntimeError(f"Expected 29 bounded orientations, got {len(plan.candidates)}")
     if not plan.selected.production_valid:
         raise RuntimeError("Selected orientation must satisfy size and overhang gates")
     if abs(float(plan.selected.shape.BoundingBox().zmin)) > 1.0e-6:
@@ -40,12 +37,22 @@ def main() -> None:
         "rotate-x-minus-60",
         "rotate-y-60",
         "rotate-y-minus-60",
+        "rotate-x-30-y-30",
+        "rotate-x-30-y-minus-30",
+        "rotate-x-minus-30-y-30",
+        "rotate-x-minus-30-y-minus-30",
+        "rotate-x-45-y-45",
+        "rotate-x-45-y-minus-45",
+        "rotate-x-minus-45-y-45",
+        "rotate-x-minus-45-y-minus-45",
+        "rotate-x-60-y-30",
+        "rotate-x-60-y-minus-30",
+        "rotate-x-minus-60-y-30",
+        "rotate-x-minus-60-y-minus-30",
     }:
         if required not in labels:
-            raise RuntimeError(f"Missing bounded diagonal orientation {required}")
+            raise RuntimeError(f"Missing bounded orientation {required}")
 
-    # Machine-volume violations remain visible: orientation may solve an axis
-    # fit problem, but the planner may not weaken the configured bed limits.
     constrained = ManufacturingProfile(max_size_x=15.0, max_size_y=35.0, max_size_z=25.0)
     constrained_plan = planner.plan(shape=shape, profile=constrained)
     if not constrained_plan.selected.production_valid:
