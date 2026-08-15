@@ -20,6 +20,11 @@ class ProductionHandoffManifest:
     final_volume_mm3: float
     rule_counts: dict[str, int]
     blocking_error_codes: tuple[str, ...]
+    warning_codes: tuple[str, ...]
+    source_pending_codes: tuple[str, ...]
+    not_available_codes: tuple[str, ...]
+    contract_complete: bool
+    all_available_rules_passed: bool
     build_item_count: int
     component_count: int
     filament_slots: tuple[int, ...]
@@ -37,9 +42,15 @@ class ProductionHandoffBuilder:
     the consolidated 24-rule report and the final exported 3MF. It does not
     weaken any manufacturing threshold and it cannot turn a failed validation
     into a production-ready result.
+
+    Production readiness is stricter than merely having zero blocking errors:
+    every available rule must pass, no rule may remain SOURCE_PENDING, and the
+    exported 3MF must satisfy the validated production structure. Rules marked
+    NOT_AVAILABLE remain explicit in the manifest and are never silently
+    converted to OK.
     """
 
-    SCHEMA_VERSION = "dobo.production-handoff.v1"
+    SCHEMA_VERSION = "dobo.production-handoff.v2"
 
     @staticmethod
     def _file_sha256(path: Path) -> str:
@@ -58,12 +69,34 @@ class ProductionHandoffBuilder:
         project_path = Path(result.three_mf_path)
         project = ThreeMFProjectInspector().inspect(project_path)
         blocking_codes = tuple(item.code for item in result.report.blocking_errors)
+        warning_codes = tuple(
+            item.code
+            for item in result.report.results
+            if item.status is ValidationStatus.WARNING
+        )
+        source_pending_codes = tuple(
+            item.code
+            for item in result.report.results
+            if item.status is ValidationStatus.SOURCE_PENDING
+        )
+        not_available_codes = tuple(
+            item.code
+            for item in result.report.results
+            if item.status is ValidationStatus.NOT_AVAILABLE
+        )
         counts = {
             status.value: result.report.count(status)
             for status in ValidationStatus
         }
+        contract_complete = len(result.report.results) == 24
+        all_available_rules_passed = bool(
+            contract_complete
+            and not blocking_codes
+            and not warning_codes
+            and not source_pending_codes
+        )
         ready = bool(
-            not blocking_codes
+            all_available_rules_passed
             and project.valid
             and project.build_item_count == 1
             and project.transformed_bounds is not None
@@ -78,6 +111,11 @@ class ProductionHandoffBuilder:
             final_volume_mm3=float(result.final_volume),
             rule_counts=counts,
             blocking_error_codes=blocking_codes,
+            warning_codes=warning_codes,
+            source_pending_codes=source_pending_codes,
+            not_available_codes=not_available_codes,
+            contract_complete=contract_complete,
+            all_available_rules_passed=all_available_rules_passed,
             build_item_count=project.build_item_count,
             component_count=project.component_count,
             filament_slots=project.filament_slots,
