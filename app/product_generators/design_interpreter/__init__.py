@@ -103,6 +103,13 @@ from .morphological_integration import (
     ParentLocalAnchor,
     SpanInterfacePolicy,
 )
+from .continuous_morphological_fusion import (
+    CONTINUOUS_MORPHOLOGICAL_FUSION_VERSION,
+    AttachmentSpreadPolicy,
+    ContinuousMorphologicalFusion,
+    SpanContinuityPolicy,
+    TransitionMassPolicy,
+)
 from .complex_composition import (
     COMPLEX_ACCEPTANCE_VERSION,
     COMPLEX_TOPOLOGY_VERSION,
@@ -207,6 +214,11 @@ __all__ = (
     "ChildExposurePolicy",
     "SpanInterfacePolicy",
     "AdvancedMorphologicalIntegration",
+    "CONTINUOUS_MORPHOLOGICAL_FUSION_VERSION",
+    "AttachmentSpreadPolicy",
+    "TransitionMassPolicy",
+    "SpanContinuityPolicy",
+    "ContinuousMorphologicalFusion",
     "COMPLEX_TOPOLOGY_VERSION",
     "STRUCTURAL_SPAN_VERSION",
     "NEGATIVE_VOLUME_VERSION",
