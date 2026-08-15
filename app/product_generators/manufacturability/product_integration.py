@@ -9,6 +9,10 @@ from product_generators.surface_designer.composition_spec import (
 from product_generators.surface_designer.multicolor_product import (
     build_multicolor_product,
 )
+from product_generators.surface_designer.three_mf_exporter import (
+    ThreeMFExporter,
+    ThreeMFRegion,
+)
 
 from .color_validation import ColorRegionAnalyzer
 from .consolidated_validator import (
@@ -23,6 +27,7 @@ from .decoration_validation import (
 from .final_geometry import FinalGeometryManufacturingAnalyzer
 from .final_product_validation import FinalProductAnalyzer
 from .product_profile import ProductManufacturingProfile
+from .production_orientation import ProductionOrientationPlanner
 from .production_validation import ProductionAnalyzer
 from .profile import ManufacturingProfile
 from .report import CheckStatus
@@ -39,6 +44,7 @@ class RealProductValidationResult:
     report: ConsolidatedManufacturingReport
     three_mf_path: str
     final_volume: float
+    production_orientation: str
 
 
 def _status_from_check(status: CheckStatus) -> ValidationStatus:
@@ -77,6 +83,36 @@ def _exported_placement_is_on_bed(
     )
 
 
+def _export_planned_orientation(
+    *,
+    product,
+    orientation_label: str,
+) -> None:
+    """Propagate one planner decision to every physical material region.
+
+    Rotation is applied in shared CAD space. Bed translation is deliberately
+    left to ThreeMFExporter, which computes one common transform for the whole
+    compound product. This prevents Body/Text/Decoration from being dropped to
+    the plate independently and preserves the validated multicolor partition.
+    """
+    rotated_regions = tuple(
+        ThreeMFRegion(
+            name=region.name,
+            shape=ProductionOrientationPlanner.rotate_shape(
+                region.shape,
+                orientation_label,
+            ),
+            color=region.color,
+            filament_slot=region.filament_slot,
+        )
+        for region in product.export_regions
+    )
+    ThreeMFExporter().export(
+        regions=rotated_regions,
+        path=product.three_mf_path,
+    )
+
+
 def validate_real_multicolor_product(
     specification_path: str | Path,
     *,
@@ -86,8 +122,10 @@ def validate_real_multicolor_product(
     """Build the real multicolor product and validate the full 24-rule contract.
 
     Final-product geometric rules are derived from the actual final printable
-    B-Rep/tessellation. Production placement is derived from the exported 3MF
-    transform and mesh vertices. No product-specific fixture values are used.
+    B-Rep/tessellation. The deterministic production planner chooses a bounded
+    real orientation from the same geometry, and that exact rotation is then
+    propagated to all 3MF material regions before the exported project is
+    inspected. No product-specific fixture values are used.
     """
     manufacturing_profile = profile if profile is not None else ManufacturingProfile()
     product_rules = product_profile if product_profile is not None else ProductManufacturingProfile()
@@ -98,6 +136,19 @@ def validate_real_multicolor_product(
     product = build_multicolor_product(specification_path)
     structural_source = build_structural_body_source(specification_path)
     statuses: dict[str, ValidationStatus] = {}
+
+    # Select production orientation before orientation-dependent checks and
+    # propagate the exact shared rotation into the real exported 3MF.
+    orientation_plan = ProductionOrientationPlanner().plan(
+        shape=product.final_shape,
+        profile=manufacturing_profile,
+    )
+    production_shape = orientation_plan.selected.shape
+    production_orientation = orientation_plan.selected.label
+    _export_planned_orientation(
+        product=product,
+        orientation_label=production_orientation,
+    )
 
     # Final product
     final = FinalProductAnalyzer().analyze(shape=product.final_shape)
@@ -116,8 +167,10 @@ def validate_real_multicolor_product(
         else ValidationStatus.WARNING
     )
 
+    # OVERHANG is orientation-dependent. Validate the same orientation that is
+    # now physically written into the production 3MF, not the design-space pose.
     overhang = final_geometry.overhang(
-        shape=product.final_shape,
+        shape=production_shape,
         maximum_allowed_angle=manufacturing_profile.max_overhang_angle,
         bed_tolerance=max(
             manufacturing_profile.bed_z_tolerance,
@@ -223,10 +276,10 @@ def validate_real_multicolor_product(
             else ValidationStatus.WARNING
         )
 
-    # Production
+    # Production validates the same planned orientation that was exported.
     production = ProductionAnalyzer()
     size = production.physical_size(
-        shape=product.final_shape,
+        shape=production_shape,
         max_x=manufacturing_profile.max_size_x,
         max_y=manufacturing_profile.max_size_y,
         max_z=manufacturing_profile.max_size_z,
@@ -260,4 +313,5 @@ def validate_real_multicolor_product(
         report=report,
         three_mf_path=product.three_mf_path,
         final_volume=float(product.final_shape.Volume()),
+        production_orientation=production_orientation,
     )
