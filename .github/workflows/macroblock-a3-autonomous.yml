@@ -1,0 +1,112 @@
+name: DOBO Macroblock A3 Autonomous
+
+on:
+  push:
+    branches:
+      - macroblock-a3-autonomous
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-materialize-a3:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Checkout autonomous branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: macroblock-a3-autonomous
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install geometry dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy==2.3.5 \
+            scipy==1.17.0 \
+            scikit-image==0.26.0 \
+            trimesh==4.11.1 \
+            networkx==3.6.1 \
+            shapely==2.1.2 \
+            Pillow==12.3.0
+
+      - name: Apply A3 compiler integration
+        shell: bash
+        run: |
+          if git apply --check patches/macroblock_a3_core.patch; then
+            git apply patches/macroblock_a3_core.patch
+            echo "A3 core patch applied."
+          elif grep -q "continuous_morphological_fusion" app/product_generators/design_interpreter/structural_compiler.py; then
+            echo "A3 core patch is already present."
+          else
+            echo "A3 core patch cannot be applied cleanly and is not already present."
+            exit 1
+          fi
+
+      - name: Compile changed A3 modules
+        run: |
+          python -m py_compile app/product_generators/design_interpreter/continuous_morphological_fusion.py
+          python -m py_compile app/product_generators/design_interpreter/structural_compiler.py
+          python -m py_compile app/product_generators/design_interpreter/test_macroblock_a3_continuous_fusion.py
+          python -m py_compile app/product_generators/design_interpreter/macroblock_a3_matrix_cli.py
+
+      - name: Run DOBO regression suite through A3
+        run: |
+          python -m product_generators.design_interpreter.test_phase_3a_semantic_contract
+          python -m product_generators.design_interpreter.test_phase_3b_semantic_compiler
+          python -m product_generators.design_interpreter.test_phase_3c_prompt_interpreter
+          python -m product_generators.design_interpreter.test_phase_3d_image_interpreter
+          python -m product_generators.design_interpreter.test_phase_3e_proposal_repair
+          python -m product_generators.design_interpreter.test_phase_4a_structural_vocabulary
+          python -m product_generators.design_interpreter.test_phase_4g_4k_visual_acceptance
+          python -m product_generators.design_interpreter.test_phase_4l_4p_facial_volume
+          python -m product_generators.design_interpreter.test_phase_4q_4u_canonical_face
+          python -m product_generators.design_interpreter.test_phase_5_generalized_design_grammar
+          python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
+          python -m product_generators.design_interpreter.test_phase_6_advanced_visual_geometry
+          python -m product_generators.design_interpreter.test_macroblock_a_7_8
+          python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
+          python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
+
+      - name: Generate real A3 STL and 3MF matrix
+        run: |
+          rm -rf outputs-ci/macroblock-a3
+          python -m product_generators.design_interpreter.macroblock_a3_matrix_cli \
+            --output-root outputs-ci/macroblock-a3 \
+            --case all
+
+      - name: Commit validated A3 integration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            app/product_generators/design_interpreter/structural_compiler.py \
+            app/product_generators/design_interpreter/__init__.py
+          if git diff --cached --quiet; then
+            echo "No A3 core source changes to commit."
+          else
+            git commit -m "feat(a3): integrate continuous morphological fusion"
+            git push origin HEAD:macroblock-a3-autonomous
+          fi
+
+      - name: Upload real A3 matrix
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-macroblock-a3-real-matrix
+          path: outputs-ci/macroblock-a3
+          if-no-files-found: error
+          retention-days: 14
