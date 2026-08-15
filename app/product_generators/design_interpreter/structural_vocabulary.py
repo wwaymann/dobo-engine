@@ -7,6 +7,7 @@ from typing import Any
 import unicodedata
 
 from .semantic_contract import DesignSemanticProgram, FeatureIntent
+from .morphological_integration import AdvancedMorphologicalIntegration
 
 
 STRUCTURAL_VOCABULARY_VERSION = "4A.1"
@@ -295,7 +296,12 @@ class StructuralVocabularyResolver:
         horizontal = feature.anchor.horizontal
         vertical = feature.anchor.vertical
         if role == "compound_child":
-            return "mid_face", 0.0, 0.58
+            preserve_facial_center = bool(tokens & _NOSE_CONCEPTS)
+            local = AdvancedMorphologicalIntegration.parent_local_anchor(
+                feature,
+                preserve_legacy_facial_center=preserve_facial_center,
+            )
+            return "mid_face", local.horizontal, local.vertical
         if role == "silhouette":
             sign = -1.0 if horizontal < 0.0 or "left" in tokens or "izquierda" in tokens else 1.0
             if not ({"left", "right", "izquierda", "derecha"} & tokens) and abs(horizontal) < 0.1:
@@ -325,6 +331,9 @@ class StructuralVocabularyResolver:
     ) -> dict[str, str]:
         parents: dict[str, str] = {}
         for relation in program.relations:
+            if relation.kind in {"attached_to", "contained_by"}:
+                parents[relation.subject_id] = relation.object_id
+                continue
             if relation.kind != "centered_on":
                 continue
             subject = by_id[relation.subject_id]

@@ -7,6 +7,12 @@ from typing import Any
 
 from .design_pipeline import DoboDesignPipeline
 from .image_interpreter import ImageModelClient, ImageSemanticInterpreter
+from .intelligent_surfaces import (
+    IntelligentSurfaceCompiler,
+    IntelligentSurfaceProgram,
+    IntelligentSurfaceReport,
+    SurfaceLayerIntent,
+)
 from .prompt_interpreter import PromptSemanticInterpreter, SemanticModelClient
 from .proposal_repair import SemanticProposalRepairer, SemanticRepairResult
 from .semantic_contract import DesignSemanticProgram
@@ -18,8 +24,8 @@ from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
 
-STRUCTURAL_PIPELINE_VERSION = "6.3"
-STRUCTURAL_FUSION_VERSION = "6B.3"
+STRUCTURAL_PIPELINE_VERSION = "8.1"
+STRUCTURAL_FUSION_VERSION = "7C.1"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
 
@@ -45,6 +51,11 @@ class StructuralPipelineTrace:
     vertex_count: int
     face_count: int
     generation_seconds: float
+    complex_profile: str
+    hierarchy_depth: int
+    negative_volumes: int
+    surface_layers: int
+    color_zones: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +64,11 @@ class StructuralPipelineResult:
     compilation: StructuralCompilationResult
     mesh_result: Any
     three_mf: ThreeMFExportResult
+    surface_program: IntelligentSurfaceProgram
+    surface_report: IntelligentSurfaceReport
     semantic_path: str
     structural_path: str
+    surface_path: str
     motor_path: str
     repair_report_path: str
     manifest_path: str
@@ -85,6 +99,7 @@ class StructuralPipelineResult:
         for path in (
             self.semantic_path,
             self.structural_path,
+            self.surface_path,
             self.motor_path,
             self.repair_report_path,
             self.manifest_path,
@@ -148,6 +163,8 @@ class DoboStructuralPipeline:
         interpreter_version: str = "semantic-input",
         model: str = "not-used",
         response_id: str = "not-used",
+        surface_intents: tuple[SurfaceLayerIntent, ...] = (),
+        base_color: str = "#E8E1D5",
     ) -> StructuralPipelineResult:
         from product_generators.organic_shapes.hierarchy_engine import (
             HierarchicalFeatureVesselEngine,
@@ -162,7 +179,12 @@ class DoboStructuralPipeline:
             repair.program, structural
         )
         motor = compilation.motor_program
-        if compilation.report.adaptive_quality:
+        if compilation.report.complex_profile != "surface_only":
+            motor["output"]["max_generation_seconds"] = max(
+                float(motor["output"]["max_generation_seconds"]),
+                STRUCTURAL_GENERATION_BUDGET_SECONDS,
+            )
+        elif compilation.report.adaptive_quality:
             motor["output"]["max_generation_seconds"] = (
                 ADVANCED_GENERATION_BUDGET_SECONDS
             )
@@ -177,8 +199,16 @@ class DoboStructuralPipeline:
         motor["output"]["basename"] = motor_id
         output_directory.mkdir(parents=True, exist_ok=True)
 
+        surface_program, surface_report = IntelligentSurfaceCompiler.compile(
+            repair.program,
+            motor,
+            surface_intents,
+            base_color=base_color,
+        )
+
         semantic_path = output_directory / f"{motor_id}.semantic.json"
         structural_path = output_directory / f"{motor_id}.structural.json"
+        surface_path = output_directory / f"{motor_id}.surface.json"
         motor_path = output_directory / f"{motor_id}.motor.json"
         repair_path = output_directory / f"{motor_id}.repair.json"
         semantic_path.write_text(
@@ -186,6 +216,7 @@ class DoboStructuralPipeline:
             encoding="utf-8",
         )
         structural.write_json(structural_path)
+        surface_program.write_json(surface_path)
         motor_path.write_text(
             json.dumps(motor, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
@@ -223,6 +254,7 @@ class DoboStructuralPipeline:
             mesh_result.mesh,
             output_directory / f"{motor_id}.3mf",
             name=motor_id,
+            surface_program=surface_program,
         )
         trace = StructuralPipelineTrace(
             pipeline_version=STRUCTURAL_PIPELINE_VERSION,
@@ -244,6 +276,11 @@ class DoboStructuralPipeline:
             vertex_count=mesh_result.vertex_count,
             face_count=mesh_result.face_count,
             generation_seconds=mesh_result.generation_seconds,
+            complex_profile=compilation.report.complex_profile,
+            hierarchy_depth=compilation.report.hierarchy_depth,
+            negative_volumes=compilation.report.negative_volumes,
+            surface_layers=surface_report.layer_count,
+            color_zones=surface_report.color_zones,
         )
         manifest_path = output_directory / f"{motor_id}.manifest.json"
         manifest_path.write_text(
@@ -253,6 +290,7 @@ class DoboStructuralPipeline:
                     "artifacts": {
                         "semantic": str(semantic_path),
                         "structural": str(structural_path),
+                        "surface": str(surface_path),
                         "motor": str(motor_path),
                         "repair_report": str(repair_path),
                         "stl": str(mesh_result.stl_path),
@@ -265,6 +303,13 @@ class DoboStructuralPipeline:
                         "surface_anchor_checks": len(anchors),
                         "layout_checks": len(layout.checks),
                         "manufacturability_checks": len(manufacturing.checks),
+                        "complex_topology_nodes": compilation.report.complex_nodes,
+                        "complex_topology_edges": compilation.report.complex_edges,
+                        "hierarchy_depth": compilation.report.hierarchy_depth,
+                        "negative_volumes": compilation.report.negative_volumes,
+                        "surface_layers": surface_report.layer_count,
+                        "color_zones": surface_report.color_zones,
+                        "painted_triangles": three_mf.painted_triangle_count,
                     },
                 },
                 indent=2,
@@ -278,8 +323,11 @@ class DoboStructuralPipeline:
             compilation=compilation,
             mesh_result=mesh_result,
             three_mf=three_mf,
+            surface_program=surface_program,
+            surface_report=surface_report,
             semantic_path=str(semantic_path),
             structural_path=str(structural_path),
+            surface_path=str(surface_path),
             motor_path=str(motor_path),
             repair_report_path=str(repair_path),
             manifest_path=str(manifest_path),

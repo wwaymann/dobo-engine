@@ -87,7 +87,7 @@
       "additionalProperties": false,
       "required": ["kind", "subject_id", "object_id", "confidence"],
       "properties": {
-        "kind": {"enum": ["above", "aligned_with", "below", "centered_on", "grouped_with", "mirror_of", "repeated_from"]},
+        "kind": {"enum": ["attached_to", "above", "aligned_with", "below", "centered_on", "contained_by", "grouped_with", "mirror_of", "repeated_from"]},
         "subject_id": {"$ref": "#/$defs/identifier"},
         "object_id": {"$ref": "#/$defs/identifier"},
         "confidence": {"$ref": "#/$defs/confidence"}

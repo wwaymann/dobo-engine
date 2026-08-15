@@ -218,6 +218,12 @@ class HierarchicalFeatureParser:
                     ),
                     minimum_blend_mm=float(raw_manufacturing["minimum_blend_mm"]),
                     wall_reserve_mm=float(raw_manufacturing["wall_reserve_mm"]),
+                    structural_depth_feature_ids=tuple(
+                        str(value)
+                        for value in raw_manufacturing.get(
+                            "structural_depth_feature_ids", []
+                        )
+                    ),
                 )
                 if raw_manufacturing is not None
                 else None

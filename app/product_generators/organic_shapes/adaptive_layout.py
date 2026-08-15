@@ -80,6 +80,7 @@ class FeatureManufacturabilityContract:
     maximum_relief_depth_mm: float
     minimum_blend_mm: float
     wall_reserve_mm: float
+    structural_depth_feature_ids: tuple[str, ...] = ()
 
     def validate(self) -> None:
         values = (
@@ -93,6 +94,12 @@ class FeatureManufacturabilityContract:
             raise ValueError("Feature-manufacturability values must be positive.")
         if self.maximum_relief_depth_mm < self.minimum_relief_depth_mm:
             raise ValueError("Maximum relief depth must exceed its minimum.")
+        if any(not feature_id.strip() for feature_id in self.structural_depth_feature_ids):
+            raise ValueError("Structural-depth feature ids must not be empty.")
+        if len(set(self.structural_depth_feature_ids)) != len(
+            self.structural_depth_feature_ids
+        ):
+            raise ValueError("Structural-depth feature ids must be unique.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +224,9 @@ def evaluate_layout(
     clearances: list[float] = []
     for index, first in enumerate(geometry):
         for second in geometry[index + 1 :]:
-            if contract.ignores(first[1], second[1]):
+            # Multiple templates owned by one hierarchy node intentionally
+            # overlap to form a single compound structural feature.
+            if first[1] == second[1] or contract.ignores(first[1], second[1]):
                 ignored += 1
                 continue
             evaluated += 1
@@ -261,6 +270,10 @@ def evaluate_manufacturability(
         feature_sizes.append(minimum_feature)
         relief_depths.append(depth)
         prefix = placement.id
+        structural_depth = (
+            placement_node_id(placement.id)
+            in contract.structural_depth_feature_ids
+        )
         checks[f"{prefix}/minimum_feature"] = (
             minimum_feature >= contract.minimum_feature_mm
         )
@@ -268,14 +281,15 @@ def evaluate_manufacturability(
             depth >= contract.minimum_relief_depth_mm
         )
         checks[f"{prefix}/maximum_depth"] = (
-            depth <= contract.maximum_relief_depth_mm
+            structural_depth or depth <= contract.maximum_relief_depth_mm
         )
         checks[f"{prefix}/minimum_blend"] = (
             blend >= contract.minimum_blend_mm
         )
         if placement.feature.operation == "subtract":
             checks[f"{prefix}/wall_reserve"] = (
-                depth <= wall_mm - contract.wall_reserve_mm
+                structural_depth
+                or depth <= wall_mm - contract.wall_reserve_mm
             )
     return ManufacturabilityReport(
         checks=checks,

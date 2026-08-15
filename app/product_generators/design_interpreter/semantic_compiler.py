@@ -117,22 +117,57 @@ class SemanticToMotorCompiler:
                 )
             )
 
-        ignored_pairs = tuple(
-            sorted(
-                {
-                    tuple(sorted((relation.subject_id, relation.object_id)))
-                    for relation in program.relations
-                    if relation.kind
-                    in {
-                        "above",
-                        "aligned_with",
-                        "below",
-                        "centered_on",
-                        "grouped_with",
-                    }
-                }
-            )
+        ignored = {
+            tuple(sorted((relation.subject_id, relation.object_id)))
+            for relation in program.relations
+            if relation.kind
+            in {
+                "attached_to",
+                "above",
+                "aligned_with",
+                "below",
+                "centered_on",
+                "contained_by",
+                "grouped_with",
+            }
+        }
+        parents = {
+            relation.subject_id: relation.object_id
+            for relation in program.relations
+            if relation.kind in {"attached_to", "centered_on", "contained_by"}
+        }
+
+        def hierarchy_root(feature_id: str) -> str:
+            current = feature_id
+            visited = {current}
+            while current in parents:
+                current = parents[current]
+                if current in visited:
+                    raise ValueError("Semantic hierarchy contains a cycle.")
+                visited.add(current)
+            return current
+
+        uses_multilevel_relations = any(
+            relation.kind in {"attached_to", "contained_by"}
+            for relation in program.relations
         )
+        if uses_multilevel_relations:
+            ignored.update(
+                tuple(sorted((relation.subject_id, relation.object_id)))
+                for relation in program.relations
+                if relation.kind == "mirror_of"
+            )
+            members_by_root: dict[str, list[str]] = {}
+            for feature_id in set(parents) | set(parents.values()):
+                members_by_root.setdefault(hierarchy_root(feature_id), []).append(
+                    feature_id
+                )
+            for members in members_by_root.values():
+                ordered = sorted(set(members))
+                for index, first in enumerate(ordered):
+                    for second in ordered[index + 1 :]:
+                        ignored.add(tuple(sorted((first, second))))
+        ignored_pairs = tuple(sorted(ignored))
         maximum_depth = manufacturing.maximum_relief_depth_mm
         motor_id = f"compiled_{program.id}"
         motor_program: dict[str, Any] = {

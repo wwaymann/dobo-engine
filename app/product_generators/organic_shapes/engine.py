@@ -160,10 +160,43 @@ class OrganicShapeEngine:
             process=True,
             validate=True,
         )
+        mesh = OrganicShapeEngine._remove_numerical_islands(mesh, voxel)
         mesh.remove_unreferenced_vertices()
         if not mesh.is_winding_consistent or mesh.volume < 0.0:
             mesh.fix_normals(multibody=True)
         return mesh
+
+    @staticmethod
+    def _remove_numerical_islands(
+        mesh: trimesh.Trimesh,
+        voxel_mm: float,
+    ) -> trimesh.Trimesh:
+        """Discard only sub-voxel marching-cubes islands.
+
+        Smooth subtraction can leave isolated tetrahedral cells where several
+        blended fields meet.  They are numerical extraction residue, not
+        design components.  Any secondary component that is larger than the
+        conservative face or spatial threshold is retained so the normal
+        connectivity validator still rejects genuinely detached geometry.
+        """
+        components = tuple(mesh.split(only_watertight=False))
+        if len(components) <= 1:
+            return mesh
+        ordered = sorted(components, key=lambda item: len(item.faces), reverse=True)
+        primary = ordered[0]
+        maximum_faces = max(32, int(0.0002 * len(primary.faces)))
+        maximum_extent = 2.5 * float(voxel_mm)
+        residues = [
+            component
+            for component in ordered[1:]
+            if len(component.faces) <= maximum_faces
+            and float(np.max(component.extents)) <= maximum_extent
+        ]
+        if len(residues) != len(ordered) - 1:
+            return mesh
+        cleaned = primary.copy()
+        cleaned.remove_unreferenced_vertices()
+        return cleaned
 
     @staticmethod
     def _validate_mesh(mesh: trimesh.Trimesh) -> None:

@@ -9,6 +9,11 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 
+from .intelligent_surfaces import (
+    IntelligentSurfaceProgram,
+    SurfaceMaterialMapper,
+)
+
 
 CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -30,6 +35,8 @@ class ThreeMFExportResult:
     vertex_count: int
     triangle_count: int
     archive_members: tuple[str, ...]
+    material_count: int = 1
+    painted_triangle_count: int = 0
 
     def validate(self) -> None:
         target = Path(self.path)
@@ -37,6 +44,10 @@ class ThreeMFExportResult:
             raise RuntimeError("3MF export was not created.")
         if self.vertex_count <= 0 or self.triangle_count <= 0:
             raise RuntimeError("3MF export contains no mesh geometry.")
+        if not 1 <= self.material_count <= 16:
+            raise RuntimeError("3MF export material count is invalid.")
+        if not 0 <= self.painted_triangle_count <= self.triangle_count:
+            raise RuntimeError("3MF painted triangle count is invalid.")
         required = {
             "[Content_Types].xml",
             "_rels/.rels",
@@ -56,6 +67,7 @@ class ThreeMFMeshExporter:
         path: str | Path,
         *,
         name: str,
+        surface_program: IntelligentSurfaceProgram | None = None,
     ) -> ThreeMFExportResult:
         vertices = np.asarray(mesh.vertices, dtype=np.float64)
         faces = np.asarray(mesh.faces, dtype=np.int64)
@@ -68,11 +80,27 @@ class ThreeMFMeshExporter:
         if faces.min() < 0 or faces.max() >= len(vertices):
             raise ValueError("3MF mesh faces reference invalid vertices.")
 
+        triangle_materials = None
+        palette = ("#E8E1D5",)
+        if surface_program is not None:
+            surface_program.validate()
+            triangle_materials = SurfaceMaterialMapper.triangle_materials(
+                mesh, surface_program
+            )
+            palette = surface_program.palette
+
         target = Path(path).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(dir=target.parent) as directory:
             model_path = Path(directory) / "3dmodel.model"
-            cls._write_model(model_path, vertices, faces, name=name)
+            cls._write_model(
+                model_path,
+                vertices,
+                faces,
+                name=name,
+                palette=palette,
+                triangle_materials=triangle_materials,
+            )
             temporary = Path(directory) / "package.3mf"
             with ZipFile(temporary, "w", compression=ZIP_DEFLATED) as package:
                 package.writestr("[Content_Types].xml", CONTENT_TYPES)
@@ -89,6 +117,12 @@ class ThreeMFMeshExporter:
             vertex_count=len(vertices),
             triangle_count=len(faces),
             archive_members=members,
+            material_count=len(palette),
+            painted_triangle_count=(
+                int(np.count_nonzero(triangle_materials))
+                if triangle_materials is not None
+                else 0
+            ),
         )
         result.validate()
         return result
@@ -100,6 +134,8 @@ class ThreeMFMeshExporter:
         faces: np.ndarray,
         *,
         name: str,
+        palette: tuple[str, ...],
+        triangle_materials: np.ndarray | None,
     ) -> None:
         safe_name = escape(name.strip() or "DOBO model", quote=True)
         with path.open("w", encoding="utf-8", newline="\n") as stream:
@@ -111,6 +147,13 @@ class ThreeMFMeshExporter:
             stream.write(f'  <metadata name="Title">{safe_name}</metadata>\n')
             stream.write('  <metadata name="Application">DOBO</metadata>\n')
             stream.write("  <resources>\n")
+            stream.write('    <basematerials id="2">\n')
+            for index, color in enumerate(palette):
+                stream.write(
+                    f'      <base name="DOBO material {index + 1}" '
+                    f'displaycolor="{escape(color.upper(), quote=True)}FF"/>\n'
+                )
+            stream.write("    </basematerials>\n")
             stream.write('    <object id="1" type="model">\n')
             stream.write("      <mesh>\n")
             stream.write("        <vertices>\n")
@@ -124,10 +167,16 @@ class ThreeMFMeshExporter:
                 )
             stream.write("        </vertices>\n")
             stream.write("        <triangles>\n")
-            for first, second, third in faces:
+            for index, (first, second, third) in enumerate(faces):
+                material = (
+                    int(triangle_materials[index])
+                    if triangle_materials is not None
+                    else 0
+                )
                 stream.write(
                     f'          <triangle v1="{int(first)}" '
-                    f'v2="{int(second)}" v3="{int(third)}"/>\n'
+                    f'v2="{int(second)}" v3="{int(third)}" '
+                    f'pid="2" p1="{material}"/>\n'
                 )
             stream.write("        </triangles>\n")
             stream.write("      </mesh>\n")

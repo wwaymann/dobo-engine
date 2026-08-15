@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from math import cos, radians, sin
 from typing import Any
 
+from .complex_composition import (
+    ComplexCompositionCompiler,
+    ComplexCompositionResolver,
+)
+from .morphological_integration import AdvancedMorphologicalIntegration
 from .design_grammar import (
     DesignGrammarPlan,
     DesignGrammarResolver,
@@ -71,6 +76,13 @@ class StructuralCompilationReport:
     adaptive_quality: bool
     morphology_profile: str
     morphology_fields: int
+    complex_profile: str
+    complex_nodes: int
+    complex_edges: int
+    hierarchy_depth: int
+    structural_spans: int
+    branch_nodes: int
+    negative_volumes: int
 
     def validate(self, expected_features: int) -> None:
         if self.compiler_version != STRUCTURAL_COMPILER_VERSION:
@@ -100,6 +112,16 @@ class StructuralCompilationReport:
             raise RuntimeError("Structural compiler reported invalid advanced fields.")
         if not self.morphology_profile or self.morphology_fields < 3:
             raise RuntimeError("Structural compiler lost body morphogenesis.")
+        if not self.complex_profile or self.complex_nodes != expected_features:
+            raise RuntimeError("Structural compiler lost complex topology.")
+        if min(
+            self.complex_edges,
+            self.hierarchy_depth,
+            self.structural_spans,
+            self.branch_nodes,
+            self.negative_volumes,
+        ) < 0:
+            raise RuntimeError("Structural compiler reported invalid topology counts.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +145,7 @@ class StructuralSemanticCompiler:
         program.validate()
         structural = structural or StructuralVocabularyResolver.resolve(program)
         structural.validate(expected_features=len(program.features))
+        complex_plan = ComplexCompositionResolver.resolve(program)
         grammar = DesignGrammarResolver.resolve(program, structural)
         semantic = SemanticToMotorCompiler.compile(program)
         motor = deepcopy(semantic.motor_program)
@@ -143,6 +166,22 @@ class StructuralSemanticCompiler:
         grammar_features = {
             feature.semantic_feature_id: feature for feature in grammar.features
         }
+        complex_nodes = {node.id: node for node in complex_plan.nodes}
+        for feature_id, topology_node in complex_nodes.items():
+            cls._calibrate_complex_template(
+                templates[f"{feature_id}_template"],
+                topology_role=topology_node.role,
+                semantic_feature=semantic_features[feature_id],
+                program=program,
+            )
+            if topology_node.role == "span":
+                cls._add_span_connector_templates(
+                    hierarchy,
+                    node=roots[feature_id],
+                    template=templates[f"{feature_id}_template"],
+                    minimum_feature_mm=program.manufacturing.minimum_feature_mm,
+                    style_profile=grammar.style.name,
+                )
         volumetric_silhouette_ids: set[str] = set()
         volumetric_compound_ids: set[str] = set()
         volumetric_child_ids: set[str] = set()
@@ -155,6 +194,12 @@ class StructuralSemanticCompiler:
             semantic_feature = semantic_features[feature_id]
             grammar_feature = grammar_features[feature_id]
             cls._apply_body_anchor(node, resolved, semantic_feature, program)
+            cls._integrate_complex_root_anchor(
+                node,
+                topology_role=complex_nodes[feature_id].role,
+                semantic_feature=semantic_feature,
+                program=program,
+            )
             normalized += 1
             if grammar_feature.mass_strategy == "silhouette_mass":
                 template = templates[f"{feature_id}_template"]
@@ -184,6 +229,8 @@ class StructuralSemanticCompiler:
                 template = templates[f"{feature_id}_template"]
                 cls._apply_silhouette_template(template, motor)
 
+        all_nodes = dict(roots)
+        hierarchy_parents: dict[str, str] = {}
         for child_id, resolved in structural_features.items():
             if resolved.parent_feature_id is None:
                 continue
@@ -202,8 +249,7 @@ class StructuralSemanticCompiler:
                 volumetric_child_ids.add(child_id)
                 normalized += 1
                 continue
-            child_node = roots.pop(child_id)
-            parent_node = roots[resolved.parent_feature_id]
+            child_node = all_nodes[child_id]
             parent_feature = semantic_features[resolved.parent_feature_id]
             child_feature = semantic_features[child_id]
             child_node.pop("surface_anchor", None)
@@ -213,9 +259,33 @@ class StructuralSemanticCompiler:
                 child_feature=child_feature,
                 body_width_mm=program.body.width_mm,
                 body_height_mm=program.body.height_mm,
+                minimum_feature_mm=program.manufacturing.minimum_feature_mm,
+                topology_role=complex_nodes[child_id].role,
+                parent_topology_role=complex_nodes[
+                    resolved.parent_feature_id
+                ].role,
             )
-            parent_node.setdefault("children", []).append(child_node)
+            hierarchy_parents[child_id] = resolved.parent_feature_id
             normalized += 1
+
+        def hierarchy_level(feature_id: str) -> int:
+            level = 0
+            visited = {feature_id}
+            current = feature_id
+            while current in hierarchy_parents:
+                current = hierarchy_parents[current]
+                if current in visited:
+                    raise RuntimeError("Structural hierarchy contains a cycle.")
+                visited.add(current)
+                level += 1
+            return level
+
+        for child_id in sorted(hierarchy_parents, key=hierarchy_level):
+            parent_id = hierarchy_parents[child_id]
+            all_nodes[parent_id].setdefault("children", []).append(
+                all_nodes[child_id]
+            )
+            roots.pop(child_id, None)
 
         ordered_ids = [feature.id for feature in program.features]
         promoted_ids = (
@@ -238,8 +308,14 @@ class StructuralSemanticCompiler:
         ]
         cls._apply_mirror_consistency(hierarchy["roots"], structural)
         cls._apply_visual_adjacency(motor, structural)
+        cls._ignore_hierarchy_contact(motor, hierarchy_parents)
+        cls._classify_structural_depth_features(
+            motor,
+            complex_nodes=complex_nodes,
+        )
         cls._reserve_promoted_mass_grid(motor, promoted_ids)
         advanced_fields = cls._apply_adaptive_quality(motor)
+        ComplexCompositionCompiler.apply(motor, complex_plan)
         output_id = f"structural_{semantic.report.output_program_id}"
         motor["id"] = output_id
         motor["output"]["basename"] = output_id
@@ -275,6 +351,13 @@ class StructuralSemanticCompiler:
             adaptive_quality=advanced_fields > 0,
             morphology_profile=morphology.profile,
             morphology_fields=len(morphology_ids),
+            complex_profile=complex_plan.profile,
+            complex_nodes=len(complex_plan.nodes),
+            complex_edges=len(complex_plan.edges),
+            hierarchy_depth=complex_plan.maximum_depth,
+            structural_spans=complex_plan.span_count,
+            branch_nodes=complex_plan.branch_count,
+            negative_volumes=complex_plan.negative_volume_count,
         )
         report.validate(len(program.features))
         return StructuralCompilationResult(
@@ -341,6 +424,173 @@ class StructuralSemanticCompiler:
         template["blend_mm"] = max(float(template["blend_mm"]), 1.4 * voxel)
         # Silhouette pieces remain within semantic manufacturability depth, but
         # receive enough implicit blending to become part of the body mass.
+
+    @staticmethod
+    def _calibrate_complex_template(
+        template: dict[str, Any],
+        *,
+        topology_role: str,
+        semantic_feature,
+        program: DesignSemanticProgram,
+    ) -> None:
+        """Give complex components real volume before hierarchical placement."""
+        operation = str(template["operation"])
+        minimum = float(program.manufacturing.minimum_feature_mm)
+        body_depth = float(program.body.depth_mm)
+        if operation == "add" and topology_role == "span":
+            half_depth = max(
+                float(template.get("half_depth_mm", semantic_feature.size.depth_mm)),
+                0.052 * body_depth,
+                2.2 * minimum,
+            )
+            template["half_depth_mm"] = half_depth
+            template["round_mm"] = max(float(template.get("round_mm", 0.0)), 1.2)
+            template["blend_mm"] = max(
+                float(template["blend_mm"]),
+                min(4.8, 0.72 * half_depth),
+            )
+        elif operation == "add" and topology_role in {"branch", "terminal"}:
+            half_depth = max(
+                0.048 * body_depth,
+                (2.0 if topology_role == "branch" else 1.7) * minimum,
+            )
+            if template["kind"] == "ellipsoid":
+                template["radii"][1] = max(
+                    float(template["radii"][1]), half_depth
+                )
+            elif template["kind"] == "rounded_triangle_prism":
+                template["half_depth_mm"] = max(
+                    float(template["half_depth_mm"]), half_depth
+                )
+                template["round_mm"] = max(
+                    float(template.get("round_mm", 0.0)), 1.0
+                )
+            template["blend_mm"] = max(
+                float(template["blend_mm"]),
+                min(4.2, 0.62 * half_depth),
+            )
+
+    @staticmethod
+    def _integrate_complex_root_anchor(
+        node: dict[str, Any],
+        *,
+        topology_role: str,
+        semantic_feature,
+        program: DesignSemanticProgram,
+    ) -> None:
+        if topology_role not in {"span", "branch", "terminal"}:
+            return
+        if semantic_feature.surface_effect not in {"raised", "marking"}:
+            return
+        anchor = node.get("surface_anchor")
+        if not isinstance(anchor, dict):
+            return
+        if topology_role == "span":
+            anchor["offset_mm"] = -max(
+                1.2,
+                0.28 * semantic_feature.size.depth_mm,
+            )
+            if semantic_feature.anchor.region == "upper":
+                anchor["azimuth_degrees"] = (
+                    72.0 * semantic_feature.anchor.horizontal
+                )
+                anchor["height_ratio"] = min(float(anchor["height_ratio"]), 0.79)
+        else:
+            anchor["offset_mm"] = -max(
+                1.8,
+                0.65 * semantic_feature.size.depth_mm,
+                0.45 * program.manufacturing.minimum_wall_mm,
+            )
+
+    @staticmethod
+    def _add_span_connector_templates(
+        hierarchy: dict[str, Any],
+        *,
+        node: dict[str, Any],
+        template: dict[str, Any],
+        minimum_feature_mm: float,
+        style_profile: str,
+    ) -> None:
+        """Add lateral fusion feet that a central span cutout cannot sever.
+
+        A hollow arch must connect through material outside its opening.  The
+        original single arched field could be detached when its subtractive
+        child removed the narrow contact band against the vessel.  Two small
+        rounded boxes now carry that load on either side of the opening and
+        extend inward into the body field.
+        """
+        if (
+            template.get("kind") != "arched_prism"
+            or template.get("operation") != "add"
+        ):
+            return
+        interface = AdvancedMorphologicalIntegration.span_interface(style_profile)
+        half_width = float(template["half_width_mm"])
+        half_depth = float(template["half_depth_mm"])
+        bottom = float(template["bottom_z_mm"])
+        spring = float(template["spring_z_mm"])
+        leg_height = max(spring - bottom, 2.8 * minimum_feature_mm)
+        foot_half_width = max(
+            0.16 * half_width,
+            1.15 * minimum_feature_mm,
+        )
+        foot_half_height = max(
+            0.34 * leg_height,
+            1.4 * minimum_feature_mm,
+        )
+        foot_half_depth = max(
+            0.82 * half_depth,
+            2.0 * minimum_feature_mm,
+        )
+        foot_x = max(
+            0.58 * half_width,
+            half_width - 1.15 * foot_half_width,
+        )
+        foot_z = bottom + foot_half_height
+        foot_y = max(0.9, 0.42 * half_depth)
+        connector_ids: list[str] = []
+        for side, x in (("left", -foot_x), ("right", foot_x)):
+            connector_id = f"{node['id']}_{side}_fusion_foot_template"
+            connector_ids.append(connector_id)
+            base_blend = max(
+                2.2,
+                min(4.2, 0.68 * foot_half_depth),
+            ) * interface.blend_scale
+            if interface.kind == "ellipsoid":
+                connector = {
+                    "id": connector_id,
+                    "operation": "add",
+                    "blend_mm": min(4.4, base_blend),
+                    "probe": [0.0, 0.0, 0.0],
+                    "kind": "ellipsoid",
+                    "center": [x, foot_y, foot_z],
+                    "radii": [
+                        interface.width_scale * foot_half_width,
+                        interface.depth_scale * foot_half_depth,
+                        interface.height_scale * foot_half_height,
+                    ],
+                }
+            else:
+                half_sizes = [
+                    interface.width_scale * foot_half_width,
+                    interface.depth_scale * foot_half_depth,
+                    interface.height_scale * foot_half_height,
+                ]
+                connector = {
+                    "id": connector_id,
+                    "operation": "add",
+                    "blend_mm": max(2.0, min(4.0, base_blend)),
+                    "probe": [0.0, 0.0, 0.0],
+                    "kind": "rounded_box",
+                    "center": [x, foot_y, foot_z],
+                    "half_sizes": half_sizes,
+                    "round_mm": max(
+                        0.65,
+                        min(1.5, 0.32 * min(half_sizes)),
+                    ),
+                }
+            hierarchy["templates"].append(connector)
+        node["template_ids"].extend(connector_ids)
 
     @staticmethod
     def _promote_silhouette_to_volumetric_mass(
@@ -631,6 +881,36 @@ class StructuralSemanticCompiler:
         )
 
     @staticmethod
+    def _classify_structural_depth_features(
+        motor_program: dict[str, Any],
+        *,
+        complex_nodes: dict[str, Any],
+    ) -> None:
+        structural_roles = {"span", "branch", "terminal"}
+
+        def belongs_to_structure(feature_id: str) -> bool:
+            current = complex_nodes[feature_id]
+            visited = {feature_id}
+            while True:
+                if current.role in structural_roles:
+                    return True
+                if current.parent_id is None:
+                    return False
+                if current.parent_id in visited:
+                    raise RuntimeError("Complex structural depth graph contains a cycle.")
+                visited.add(current.parent_id)
+                current = complex_nodes[current.parent_id]
+
+        identifiers = sorted(
+            feature_id
+            for feature_id in complex_nodes
+            if belongs_to_structure(feature_id)
+        )
+        motor_program["hierarchy_program"]["feature_manufacturability"][
+            "structural_depth_feature_ids"
+        ] = identifiers
+
+    @staticmethod
     def _apply_adaptive_quality(motor_program: dict[str, Any]) -> int:
         """Select a deterministic sub-30-second profile for advanced fields."""
         advanced = sum(
@@ -667,19 +947,48 @@ class StructuralSemanticCompiler:
         child_feature,
         body_width_mm: float,
         body_height_mm: float,
+        minimum_feature_mm: float,
+        topology_role: str,
+        parent_topology_role: str,
     ) -> dict[str, Any]:
         parent_height = parent_feature.size.height_ratio * body_height_mm
         parent_depth = parent_feature.size.depth_mm
         child_depth = child_feature.size.depth_mm
+        translate_y = -max(0.2, parent_depth - 0.55 * child_depth)
+        depth_scale = 1.0
+        if (
+            resolved.geometric_operation == "subtract"
+            or child_feature.surface_effect in {"cutout", "recessed"}
+        ):
+            translate_y = -max(1.2, parent_depth)
+            if parent_topology_role == "terminal":
+                translate_y = -max(
+                    1.2,
+                    2.0 * parent_depth + 0.55 * child_depth,
+                )
+            depth_scale = 1.0
+        elif child_feature.surface_effect in {"raised", "marking"} and topology_role in {
+            "branch",
+            "terminal",
+            "span",
+        }:
+            exposure = AdvancedMorphologicalIntegration.raised_child_exposure(
+                parent_depth_mm=parent_depth,
+                child_depth_mm=child_depth,
+                minimum_feature_mm=minimum_feature_mm,
+            )
+            translate_y = exposure.translate_y_mm
+            depth_scale = exposure.depth_scale
         return {
             "translate": [
                 resolved.anchor.horizontal
                 * parent_feature.size.width_ratio
                 * body_width_mm,
-                -max(0.2, parent_depth - 0.55 * child_depth),
+                translate_y,
                 (resolved.anchor.vertical - 0.5) * parent_height,
             ],
             "rotate_degrees": [0.0, 0.0, resolved.anchor.roll_degrees],
+            "scale": [1.0, depth_scale, 1.0],
         }
 
     @staticmethod
@@ -751,4 +1060,35 @@ class StructuralSemanticCompiler:
                             )
                         )
                     )
+        constraints["ignored_pairs"] = [list(pair) for pair in sorted(ignored)]
+
+    @staticmethod
+    def _ignore_hierarchy_contact(
+        motor_program: dict[str, Any], parents: dict[str, str]
+    ) -> None:
+        """Allow the deliberate overlap that joins or carves parent features."""
+        constraints = motor_program["hierarchy_program"]["layout_constraints"]
+        ignored = {
+            tuple(sorted((str(pair[0]), str(pair[1]))))
+            for pair in constraints.get("ignored_pairs", [])
+        }
+        for child_id, parent_id in parents.items():
+            ignored.add(tuple(sorted((child_id, parent_id))))
+        def root_of(feature_id: str) -> str:
+            visited = {feature_id}
+            current = feature_id
+            while current in parents:
+                current = parents[current]
+                if current in visited:
+                    raise RuntimeError("Structural hierarchy contains a cycle.")
+                visited.add(current)
+            return current
+
+        members_by_root: dict[str, list[str]] = {}
+        for feature_id in set(parents) | set(parents.values()):
+            members_by_root.setdefault(root_of(feature_id), []).append(feature_id)
+        for members in members_by_root.values():
+            for index, first in enumerate(sorted(set(members))):
+                for second in sorted(set(members))[index + 1 :]:
+                    ignored.add(tuple(sorted((first, second))))
         constraints["ignored_pairs"] = [list(pair) for pair in sorted(ignored)]

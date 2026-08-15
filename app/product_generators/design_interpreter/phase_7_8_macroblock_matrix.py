@@ -1,0 +1,396 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .intelligent_surfaces import SurfaceLayerIntent
+from .phase_5_design_matrix import _feature, _program, _relation
+from .semantic_contract import DesignSemanticProgram
+
+
+@dataclass(frozen=True, slots=True)
+class MacroblockACase:
+    id: str
+    label: str
+    expected_profile: str
+    minimum_depth: int
+    program: DesignSemanticProgram
+    surfaces: tuple[SurfaceLayerIntent, ...]
+
+
+def _architectural() -> DesignSemanticProgram:
+    features = [
+        _feature(
+            "left_handle",
+            "handle",
+            "arch",
+            "raised",
+            region="upper",
+            horizontal=-0.70,
+            vertical=0.77,
+            width=0.28,
+            height=0.30,
+            depth=4.2,
+            roll=-6.0,
+        ),
+        _feature(
+            "left_handle_void",
+            "cavity",
+            "arch",
+            "cutout",
+            region="upper",
+            horizontal=0.0,
+            vertical=0.52,
+            width=0.13,
+            height=0.19,
+            depth=3.2,
+        ),
+        _feature(
+            "right_handle",
+            "handle",
+            "arch",
+            "raised",
+            region="upper",
+            horizontal=0.70,
+            vertical=0.77,
+            width=0.28,
+            height=0.30,
+            depth=4.2,
+            roll=6.0,
+        ),
+        _feature(
+            "right_handle_void",
+            "cavity",
+            "arch",
+            "cutout",
+            region="upper",
+            horizontal=0.0,
+            vertical=0.52,
+            width=0.13,
+            height=0.19,
+            depth=3.2,
+        ),
+        _feature(
+            "front_bridge",
+            "bridge",
+            "arch",
+            "raised",
+            region="front",
+            horizontal=0.0,
+            vertical=0.48,
+            width=0.28,
+            height=0.18,
+            depth=4.0,
+        ),
+        _feature(
+            "bridge_void",
+            "cavity",
+            "arch",
+            "cutout",
+            region="front",
+            horizontal=0.0,
+            vertical=0.53,
+            width=0.17,
+            height=0.10,
+            depth=3.2,
+        ),
+    ]
+    relations = [
+        _relation("contained_by", "left_handle_void", "left_handle"),
+        _relation("contained_by", "right_handle_void", "right_handle"),
+        _relation("contained_by", "bridge_void", "front_bridge"),
+        _relation("mirror_of", "left_handle", "right_handle"),
+        _relation("mirror_of", "left_handle_void", "right_handle_void"),
+    ]
+    return _program(
+        "macro_architectural_planter",
+        "Maceta arquitectónica con asas huecas y puente frontal integrado.",
+        family="organic",
+        height=126.0,
+        width=116.0,
+        depth=108.0,
+        opening_shape="elliptical",
+        opening_width=0.52,
+        opening_depth=0.48,
+        style_tags=["organic", "architectural"],
+        features=features,
+        relations=relations,
+    )
+
+
+def _branching() -> DesignSemanticProgram:
+    features = [
+        _feature(
+            "central_trunk",
+            "trunk",
+            "oval",
+            "raised",
+            region="front",
+            horizontal=0.0,
+            vertical=0.47,
+            width=0.18,
+            height=0.44,
+            depth=4.2,
+            roll=0.0,
+        ),
+        _feature(
+            "left_branch",
+            "branch",
+            "oval",
+            "raised",
+            region="front",
+            horizontal=-0.34,
+            vertical=0.66,
+            width=0.27,
+            height=0.11,
+            depth=3.8,
+            roll=-34.0,
+        ),
+        _feature(
+            "right_branch",
+            "branch",
+            "oval",
+            "raised",
+            region="front",
+            horizontal=0.34,
+            vertical=0.66,
+            width=0.27,
+            height=0.11,
+            depth=3.8,
+            roll=34.0,
+        ),
+        _feature(
+            "left_bud",
+            "bud",
+            "leaf",
+            "raised",
+            region="front",
+            horizontal=-0.35,
+            vertical=0.72,
+            width=0.15,
+            height=0.18,
+            depth=3.4,
+            roll=-22.0,
+        ),
+        _feature(
+            "right_bud",
+            "bud",
+            "leaf",
+            "raised",
+            region="front",
+            horizontal=0.35,
+            vertical=0.72,
+            width=0.15,
+            height=0.18,
+            depth=3.4,
+            roll=22.0,
+        ),
+        _feature(
+            "bud_inset",
+            "cavity",
+            "oval",
+            "recessed",
+            region="front",
+            horizontal=0.0,
+            vertical=0.50,
+            width=0.055,
+            height=0.07,
+            depth=1.4,
+        ),
+    ]
+    relations = [
+        _relation("attached_to", "left_branch", "central_trunk"),
+        _relation("attached_to", "right_branch", "central_trunk"),
+        _relation("attached_to", "left_bud", "left_branch"),
+        _relation("attached_to", "right_bud", "right_branch"),
+        _relation("contained_by", "bud_inset", "left_bud"),
+        _relation("mirror_of", "left_branch", "right_branch"),
+        _relation("mirror_of", "left_bud", "right_bud"),
+    ]
+    return _program(
+        "macro_branching_planter",
+        "Maceta de red botánica ramificada con brotes y cavidad anidada.",
+        family="organic",
+        height=124.0,
+        width=112.0,
+        depth=108.0,
+        opening_shape="circular",
+        opening_width=0.54,
+        opening_depth=0.54,
+        style_tags=["organic", "botanical", "branching"],
+        features=features,
+        relations=relations,
+    )
+
+
+def _perforated() -> DesignSemanticProgram:
+    features = [
+        _feature(
+            "portal_frame",
+            "bridge",
+            "arch",
+            "raised",
+            region="front",
+            horizontal=0.0,
+            vertical=0.48,
+            width=0.40,
+            height=0.34,
+            depth=4.4,
+        ),
+        _feature(
+            "portal_cavity",
+            "cavity",
+            "arch",
+            "cutout",
+            region="front",
+            horizontal=0.0,
+            vertical=0.52,
+            width=0.27,
+            height=0.21,
+            depth=3.5,
+        ),
+        _feature(
+            "inner_recess",
+            "cavity",
+            "oval",
+            "recessed",
+            region="front",
+            horizontal=0.0,
+            vertical=0.50,
+            width=0.15,
+            height=0.12,
+            depth=1.5,
+        ),
+        _feature(
+            "left_vent",
+            "cavity",
+            "capsule",
+            "recessed",
+            region="left",
+            horizontal=0.0,
+            vertical=0.54,
+            width=0.20,
+            height=0.06,
+            depth=1.3,
+        ),
+        _feature(
+            "right_vent",
+            "cavity",
+            "capsule",
+            "recessed",
+            region="right",
+            horizontal=0.0,
+            vertical=0.54,
+            width=0.20,
+            height=0.06,
+            depth=1.3,
+        ),
+    ]
+    relations = [
+        _relation("contained_by", "portal_cavity", "portal_frame"),
+        _relation("contained_by", "inner_recess", "portal_cavity"),
+        _relation("mirror_of", "left_vent", "right_vent"),
+    ]
+    return _program(
+        "macro_perforated_planter",
+        "Maceta geométrica con portal, cavidades anidadas y ventilación lateral.",
+        family="hexagonal",
+        height=120.0,
+        width=112.0,
+        depth=108.0,
+        opening_shape="polygonal",
+        opening_width=0.53,
+        opening_depth=0.50,
+        style_tags=["geometric", "architectural"],
+        features=features,
+        relations=relations,
+    )
+
+
+def _surfaces(prefix: str) -> tuple[SurfaceLayerIntent, ...]:
+    return (
+        SurfaceLayerIntent(
+            id=f"{prefix}_name",
+            kind="text",
+            payload="PLANTA UNA IDEA",
+            region="front",
+            u_center=0.50,
+            v_center=0.31,
+            width_fraction=0.42,
+            height_fraction=0.10,
+            effect="raised",
+            depth_mm=0.8,
+            color="#6B3E26",
+            filament_slot=2,
+        ),
+        SurfaceLayerIntent(
+            id=f"{prefix}_symbol",
+            kind="svg",
+            payload='<svg viewBox="0 0 20 20"><path d="M10 1L19 19H1Z"/></svg>',
+            region="right",
+            u_center=0.50,
+            v_center=0.55,
+            width_fraction=0.22,
+            height_fraction=0.18,
+            effect="recessed",
+            depth_mm=0.7,
+            color="#2F6B4F",
+            filament_slot=3,
+        ),
+        SurfaceLayerIntent(
+            id=f"{prefix}_reference",
+            kind="image",
+            payload="image-reference://macroblock-a/leaf-emblem",
+            region="left",
+            u_center=0.50,
+            v_center=0.55,
+            width_fraction=0.24,
+            height_fraction=0.20,
+            effect="color_only",
+            depth_mm=0.0,
+            color="#D79A3B",
+            filament_slot=4,
+        ),
+        SurfaceLayerIntent(
+            id=f"{prefix}_band",
+            kind="procedural_relief",
+            payload="wave-frequency=8;amplitude=0.7",
+            region="all_around",
+            u_center=0.50,
+            v_center=0.70,
+            width_fraction=0.92,
+            height_fraction=0.08,
+            effect="marking",
+            depth_mm=0.0,
+            color="#355C7D",
+            filament_slot=5,
+        ),
+    )
+
+
+def macroblock_a_matrix() -> tuple[MacroblockACase, ...]:
+    return (
+        MacroblockACase(
+            "architectural",
+            "Architectural spans",
+            "spanning_frame",
+            1,
+            _architectural(),
+            _surfaces("architectural"),
+        ),
+        MacroblockACase(
+            "branching",
+            "Branching network",
+            "branching_network",
+            3,
+            _branching(),
+            _surfaces("branching"),
+        ),
+        MacroblockACase(
+            "perforated",
+            "Nested negative volumes",
+            "nested_negative",
+            2,
+            _perforated(),
+            _surfaces("perforated"),
+        ),
+    )

@@ -64,6 +64,7 @@ class GrammarFeaturePlan:
             "botanical_lobe",
             "compound_parent",
             "compound_child",
+            "structural_frame",
             "surface_feature",
         }:
             raise ValueError("Unknown grammar component kind.")
@@ -80,6 +81,7 @@ class GrammarFeaturePlan:
             "elongated",
             "leaf",
             "tapered",
+            "arch",
             "relief",
         }:
             raise ValueError("Unknown grammar shape profile.")
@@ -137,6 +139,7 @@ class DesignGrammarResolver:
     _BOTANICAL = frozenset({"hoja", "leaf", "petal", "petalo"})
     _EAR = frozenset({"ear", "oreja"})
     _TAPERED = frozenset({"antler", "asta", "horn", "cuerno"})
+    _FRAME = frozenset({"handle", "asa", "bridge", "puente", "arch", "arco"})
 
     @classmethod
     def resolve(
@@ -200,6 +203,14 @@ class DesignGrammarResolver:
         group_ids: tuple[str, ...],
     ) -> GrammarFeaturePlan:
         tokens = _tokens(feature)
+        if tokens & cls._FRAME and feature.form_hint == "arch":
+            return GrammarFeaturePlan(
+                feature.id,
+                "structural_frame",
+                "surface",
+                "arch",
+                group_ids,
+            )
         if structural_role == "compound_child" and tokens & cls._NOSE:
             return GrammarFeaturePlan(
                 feature.id,

@@ -37,10 +37,12 @@ SURFACE_EFFECTS = frozenset({"raised", "recessed", "cutout", "marking"})
 PRIORITIES = frozenset({"required", "preferred", "optional"})
 RELATION_KINDS = frozenset(
     {
+        "attached_to",
         "above",
         "aligned_with",
         "below",
         "centered_on",
+        "contained_by",
         "grouped_with",
         "mirror_of",
         "repeated_from",
