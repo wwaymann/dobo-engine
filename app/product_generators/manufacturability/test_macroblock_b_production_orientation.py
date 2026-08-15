@@ -15,8 +15,8 @@ def main() -> None:
     shape = cq.Workplane("XY").box(10.0, 20.0, 30.0, centered=(True, True, False)).val()
     plan = planner.plan(shape=shape)
 
-    if len(plan.candidates) != 9:
-        raise RuntimeError(f"Expected 9 bounded orientations, got {len(plan.candidates)}")
+    if len(plan.candidates) != 17:
+        raise RuntimeError(f"Expected 17 bounded orientations, got {len(plan.candidates)}")
     if not plan.selected.production_valid:
         raise RuntimeError("Selected orientation must satisfy size and overhang gates")
     if abs(float(plan.selected.shape.BoundingBox().zmin)) > 1.0e-6:
@@ -28,10 +28,18 @@ def main() -> None:
 
     labels = {candidate.label for candidate in plan.candidates}
     for required in {
+        "rotate-x-30",
+        "rotate-x-minus-30",
+        "rotate-y-30",
+        "rotate-y-minus-30",
         "rotate-x-45",
         "rotate-x-minus-45",
         "rotate-y-45",
         "rotate-y-minus-45",
+        "rotate-x-60",
+        "rotate-x-minus-60",
+        "rotate-y-60",
+        "rotate-y-minus-60",
     }:
         if required not in labels:
             raise RuntimeError(f"Missing bounded diagonal orientation {required}")
