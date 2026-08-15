@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-VISIBLE_MORPHOLOGICAL_CONTINUITY_VERSION = "A4.1"
+VISIBLE_MORPHOLOGICAL_CONTINUITY_VERSION = "A4.2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,17 +72,10 @@ class VisibleMorphologicalContinuity:
     """A.4 rules that make structural continuity visible, not merely valid.
 
     A.3 added deep collars that strengthened fusion but intentionally stayed
-    inside the source silhouette. The automated A2/A3 visual gate proved that
-    this changed the visible outline only marginally. A.4 therefore adds a
-    controlled *external* transition layer while preserving the semantic
-    component itself:
-
-    * a root flare around additive branches and terminals;
-    * a short capsule bridge across parent/child branch hierarchy;
-    * visible span shoulders near the vessel skin.
-
-    These are topology-role and style rules. They are not product-specific
-    branches and do not modify subtractive volumes.
+    inside the source silhouette. A.4 adds a controlled external transition
+    layer while preserving the semantic component itself. A4.2 strengthens
+    branch and terminal exposure after the automated A3/A4 visual gate showed
+    that the first A4 calibration was still too subtle on branching topology.
     """
 
     @staticmethod
@@ -99,20 +92,20 @@ class VisibleMorphologicalContinuity:
         elif topology_role == "terminal":
             result = VisibleRootFlarePolicy(
                 kind="ellipsoid",
-                lateral_scale=0.86,
-                depth_scale=0.92,
-                vertical_scale=0.82,
-                outward_shift_scale=0.18,
-                blend_scale=1.30,
+                lateral_scale=1.02,
+                depth_scale=1.02,
+                vertical_scale=0.98,
+                outward_shift_scale=0.24,
+                blend_scale=1.42,
             )
         else:
             result = VisibleRootFlarePolicy(
                 kind="ellipsoid",
-                lateral_scale=0.96,
-                depth_scale=0.98,
-                vertical_scale=0.90,
-                outward_shift_scale=0.14,
-                blend_scale=1.34,
+                lateral_scale=1.10,
+                depth_scale=1.06,
+                vertical_scale=1.08,
+                outward_shift_scale=0.28,
+                blend_scale=1.52,
             )
         result.validate()
         return result
@@ -132,17 +125,17 @@ class VisibleMorphologicalContinuity:
             )
         elif topology_role == "terminal":
             result = HierarchyBridgePolicy(
-                start_fraction=0.20,
-                end_fraction=0.86,
-                radius_scale=0.30,
-                blend_scale=1.30,
+                start_fraction=0.16,
+                end_fraction=0.90,
+                radius_scale=0.38,
+                blend_scale=1.42,
             )
         else:
             result = HierarchyBridgePolicy(
-                start_fraction=0.18,
-                end_fraction=0.84,
-                radius_scale=0.34,
-                blend_scale=1.36,
+                start_fraction=0.12,
+                end_fraction=0.90,
+                radius_scale=0.46,
+                blend_scale=1.50,
             )
         result.validate()
         return result
