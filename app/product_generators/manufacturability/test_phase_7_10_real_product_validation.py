@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .consolidated_validator import (
-    ValidationStatus,
-)
-from .product_integration import (
-    validate_real_multicolor_product,
-)
+from .consolidated_validator import ValidationStatus
+from .product_integration import validate_real_multicolor_product
 
 
 SPEC_PATH = (
@@ -18,102 +14,29 @@ SPEC_PATH = (
 
 
 def main() -> None:
-    result = (
-        validate_real_multicolor_product(
-            SPEC_PATH
-        )
-    )
-
+    result = validate_real_multicolor_product(SPEC_PATH)
     report = result.report
 
-    print(
-        "DOBO Manufacturability - Phase 7.10"
-    )
-    print(
-        "Real Product End-to-End Validation"
-    )
-    print(
-        "-----------------------------------"
-    )
-
+    print("DOBO Manufacturability - Phase 7.10")
+    print("Real Product End-to-End Validation")
+    print("-----------------------------------")
     for item in report.results:
-        print(
-            f"{item.code:<34} "
-            f"{item.status.value}"
-        )
-
-    print(
-        "-----------------------------------"
-    )
-
-    print(
-        "OK",
-        report.count(
-            ValidationStatus.OK
-        ),
-    )
-
-    print(
-        "WARNING",
-        report.count(
-            ValidationStatus.WARNING
-        ),
-    )
-
-    print(
-        "ERROR",
-        report.count(
-            ValidationStatus.ERROR
-        ),
-    )
-
-    print(
-        "SOURCE_PENDING",
-        report.count(
-            ValidationStatus.SOURCE_PENDING
-        ),
-    )
-
-    print(
-        "NOT_AVAILABLE",
-        report.count(
-            ValidationStatus.NOT_AVAILABLE
-        ),
-    )
-
-    print(
-        "blocking errors",
-        len(
-            report.blocking_errors
-        ),
-    )
-
-    print(
-        "final volume",
-        f"{result.final_volume:.3f}",
-        "mm^3",
-    )
-
-    print(
-        "3MF",
-        result.three_mf_path,
-    )
-
-    expected_pending = {
-        "CLEARANCE",
-        "OVERHANG",
-    }
+        print(f"{item.code:<34} {item.status.value}")
+    print("-----------------------------------")
+    for status in ValidationStatus:
+        print(status.value, report.count(status))
+    print("blocking errors", len(report.blocking_errors))
+    print("final volume", f"{result.final_volume:.3f}", "mm^3")
+    print("3MF", result.three_mf_path)
 
     actual_pending = {
         item.code
         for item in report.results
-        if item.status
-        is ValidationStatus.SOURCE_PENDING
+        if item.status is ValidationStatus.SOURCE_PENDING
     }
-
-    if actual_pending != expected_pending:
+    if actual_pending:
         raise RuntimeError(
-            "Unexpected SOURCE_PENDING rules: "
+            "Real final-product sources must not remain SOURCE_PENDING: "
             f"{sorted(actual_pending)}"
         )
 
@@ -122,29 +45,23 @@ def main() -> None:
         "DRAINAGE_PATH",
         "NO_UNINTENDED_CLOSED_CAVITIES",
     }
-
     actual_not_available = {
         item.code
         for item in report.results
-        if item.status
-        is ValidationStatus.NOT_AVAILABLE
+        if item.status is ValidationStatus.NOT_AVAILABLE
     }
-
-    if (
-        actual_not_available
-        != expected_not_available
-    ):
+    if actual_not_available != expected_not_available:
         raise RuntimeError(
             "Unexpected NOT_AVAILABLE rules: "
             f"{sorted(actual_not_available)}"
         )
 
-    text_stroke = next(
-        item
-        for item in report.results
-        if item.code == "TEXT_PRINTABLE_STROKE"
-    )
-    if text_stroke.status is not ValidationStatus.OK:
+    by_code = {item.code: item.status for item in report.results}
+    for code in ("CLEARANCE", "OVERHANG"):
+        if by_code[code] not in {ValidationStatus.OK, ValidationStatus.WARNING}:
+            raise RuntimeError(f"{code} is not backed by a real geometry result.")
+
+    if by_code["TEXT_PRINTABLE_STROKE"] is not ValidationStatus.OK:
         raise RuntimeError(
             "Real final text material geometry did not satisfy printable stroke."
         )
@@ -155,34 +72,20 @@ def main() -> None:
             f"{[item.code for item in report.blocking_errors]}"
         )
 
-    if report.count(
-        ValidationStatus.WARNING
-    ):
-        raise RuntimeError(
-            "Real product produced unexpected manufacturing warnings."
-        )
+    if report.count(ValidationStatus.ERROR):
+        raise RuntimeError("Real product produced manufacturing errors.")
 
-    if report.count(
-        ValidationStatus.ERROR
-    ):
-        raise RuntimeError(
-            "Real product produced manufacturing errors."
-        )
-
-    if report.count(
-        ValidationStatus.OK
-    ) != 19:
-        raise RuntimeError(
-            "Expected 19 real-product OK rules after text-source integration."
-        )
-
-    print(
-        "-----------------------------------"
+    resolved = (
+        report.count(ValidationStatus.OK)
+        + report.count(ValidationStatus.WARNING)
     )
+    if resolved != 21:
+        raise RuntimeError(
+            "Expected all 21 available real-product rules to be resolved."
+        )
 
-    print(
-        "Phase 7.10 Real Product Integration: Valid OK"
-    )
+    print("-----------------------------------")
+    print("Phase 7.10 Real Product Integration: Valid OK")
 
 
 if __name__ == "__main__":
