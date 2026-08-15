@@ -1,6 +1,6 @@
 {
   "schema": "dobo.visual_baseline.1",
-  "label": "A2",
-  "commit": "57464adc7d985b4a6b1e44b7eaca2a2231bf3996",
-  "matrix_module": "product_generators.design_interpreter.macroblock_a2_matrix_cli"
+  "label": "A3",
+  "commit": "f6b44283a0d7bbd56252bc9e10109aeb751f1998",
+  "matrix_module": "product_generators.design_interpreter.macroblock_a3_matrix_cli"
 }
