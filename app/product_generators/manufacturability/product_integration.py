@@ -36,6 +36,7 @@ from .source import (
 )
 from .stability import BaseStabilityAnalyzer
 from .structural import StructuralBodyValidator
+from .text_geometry import PrintedTextFeatureAnalyzer
 from .text_validation import (
     TextDepthAnalyzer,
     TextRegionVolumeAnalyzer,
@@ -88,7 +89,6 @@ def validate_real_multicolor_product(
       SOURCE_PENDING:
         CLEARANCE
         OVERHANG
-        TEXT_PRINTABLE_STROKE
 
       NOT_AVAILABLE:
         INTERNAL_VOLUME
@@ -215,12 +215,28 @@ def validate_real_multicolor_product(
     # ---------------------------------------------------------
     # Text
     # ---------------------------------------------------------
-    # The current NativeTextFaceDecorator does not expose the
-    # UV-scaled planar text source. Do not measure the unscaled
-    # font shape and pretend it is the printed stroke.
+    # Validate the actual post-mapping, post-boolean material geometry that
+    # will be exported to 3MF. This closes the former SOURCE_PENDING state
+    # without reconstructing or guessing the planar font source.
+    text_feature = (
+        PrintedTextFeatureAnalyzer()
+        .analyze(
+            text_region=product.text_region,
+            minimum_required=(
+                manufacturing_profile
+                .min_text_stroke
+            ),
+        )
+    )
+
     statuses[
         "TEXT_PRINTABLE_STROKE"
-    ] = ValidationStatus.SOURCE_PENDING
+    ] = (
+        ValidationStatus.OK
+        if text_feature.available
+        and text_feature.printable
+        else ValidationStatus.WARNING
+    )
 
     text_depth = (
         specification.text.depth
