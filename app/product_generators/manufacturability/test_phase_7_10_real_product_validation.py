@@ -102,7 +102,6 @@ def main() -> None:
     expected_pending = {
         "CLEARANCE",
         "OVERHANG",
-        "TEXT_PRINTABLE_STROKE",
     }
 
     actual_pending = {
@@ -140,6 +139,16 @@ def main() -> None:
             f"{sorted(actual_not_available)}"
         )
 
+    text_stroke = next(
+        item
+        for item in report.results
+        if item.code == "TEXT_PRINTABLE_STROKE"
+    )
+    if text_stroke.status is not ValidationStatus.OK:
+        raise RuntimeError(
+            "Real final text material geometry did not satisfy printable stroke."
+        )
+
     if report.blocking_errors:
         raise RuntimeError(
             "Real product has blocking manufacturing errors: "
@@ -162,9 +171,9 @@ def main() -> None:
 
     if report.count(
         ValidationStatus.OK
-    ) != 18:
+    ) != 19:
         raise RuntimeError(
-            "Expected 18 real-product OK rules."
+            "Expected 19 real-product OK rules after text-source integration."
         )
 
     print(
