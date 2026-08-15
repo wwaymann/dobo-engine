@@ -12,8 +12,8 @@ def main() -> None:
     shape = cq.Workplane("XY").box(10.0, 20.0, 30.0, centered=(True, True, False)).val()
     plan = planner.plan(shape=shape)
 
-    if len(plan.candidates) != 29:
-        raise RuntimeError(f"Expected 29 bounded orientations, got {len(plan.candidates)}")
+    if len(plan.candidates) != 57:
+        raise RuntimeError(f"Expected 57 bounded orientations, got {len(plan.candidates)}")
     if not plan.selected.production_valid:
         raise RuntimeError("Selected orientation must satisfy size and overhang gates")
     if abs(float(plan.selected.shape.BoundingBox().zmin)) > 1.0e-6:
@@ -25,30 +25,28 @@ def main() -> None:
 
     labels = {candidate.label for candidate in plan.candidates}
     for required in {
+        "rotate-x-15",
+        "rotate-x-minus-15",
+        "rotate-y-15",
+        "rotate-y-minus-15",
         "rotate-x-30",
-        "rotate-x-minus-30",
         "rotate-y-30",
-        "rotate-y-minus-30",
         "rotate-x-45",
-        "rotate-x-minus-45",
         "rotate-y-45",
-        "rotate-y-minus-45",
         "rotate-x-60",
-        "rotate-x-minus-60",
         "rotate-y-60",
-        "rotate-y-minus-60",
+        "rotate-x-75",
+        "rotate-y-75",
+        "rotate-x-90",
+        "rotate-y-90",
+        "rotate-x-15-y-15",
         "rotate-x-30-y-30",
-        "rotate-x-30-y-minus-30",
-        "rotate-x-minus-30-y-30",
-        "rotate-x-minus-30-y-minus-30",
         "rotate-x-45-y-45",
-        "rotate-x-45-y-minus-45",
-        "rotate-x-minus-45-y-45",
-        "rotate-x-minus-45-y-minus-45",
+        "rotate-x-60-y-60",
+        "rotate-x-75-y-75",
         "rotate-x-60-y-30",
-        "rotate-x-60-y-minus-30",
-        "rotate-x-minus-60-y-30",
-        "rotate-x-minus-60-y-minus-30",
+        "rotate-x-75-y-30",
+        "rotate-x-75-y-45",
     }:
         if required not in labels:
             raise RuntimeError(f"Missing bounded orientation {required}")
