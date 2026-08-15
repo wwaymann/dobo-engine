@@ -19,15 +19,22 @@ def build_orientation_repair_candidates() -> tuple[RepairCandidate[cq.Shape], ..
     controller is responsible for accepting one only after a full 24-rule
     revalidation proves that the warning is resolved without introducing a
     blocking regression. The set mirrors the planner's bounded non-current
-    production poses, including 45-degree X/Y slopes for general FDM
-    self-supporting orientation repair.
+    production poses at 30/45/60/90 degrees around X/Y.
     """
 
     rotations = (
+        ("rotate-x-30", (1.0, 0.0, 0.0), 30.0),
+        ("rotate-x-minus-30", (1.0, 0.0, 0.0), -30.0),
+        ("rotate-y-30", (0.0, 1.0, 0.0), 30.0),
+        ("rotate-y-minus-30", (0.0, 1.0, 0.0), -30.0),
         ("rotate-x-45", (1.0, 0.0, 0.0), 45.0),
         ("rotate-x-minus-45", (1.0, 0.0, 0.0), -45.0),
         ("rotate-y-45", (0.0, 1.0, 0.0), 45.0),
         ("rotate-y-minus-45", (0.0, 1.0, 0.0), -45.0),
+        ("rotate-x-60", (1.0, 0.0, 0.0), 60.0),
+        ("rotate-x-minus-60", (1.0, 0.0, 0.0), -60.0),
+        ("rotate-y-60", (0.0, 1.0, 0.0), 60.0),
+        ("rotate-y-minus-60", (0.0, 1.0, 0.0), -60.0),
         ("rotate-x-90", (1.0, 0.0, 0.0), 90.0),
         ("rotate-x-minus-90", (1.0, 0.0, 0.0), -90.0),
         ("rotate-y-90", (0.0, 1.0, 0.0), 90.0),
