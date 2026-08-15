@@ -55,10 +55,19 @@ class ProductionOrientationPlanner:
     manufacturing contract. Every candidate used for ranking is translated
     onto Z=0, while ``rotate_shape`` exposes the exact shared rotation so the
     same decision can be propagated to every material region before export.
+
+    In addition to orthogonal poses, the bounded set contains 45-degree X/Y
+    poses. These are general FDM production candidates: they can turn a short
+    horizontal underside (for example on an embossed surface feature) into a
+    self-supporting slope without changing the configured overhang threshold.
     """
 
     _ROTATIONS = (
         ("current", None, 0.0),
+        ("rotate-x-45", (1.0, 0.0, 0.0), 45.0),
+        ("rotate-x-minus-45", (1.0, 0.0, 0.0), -45.0),
+        ("rotate-y-45", (0.0, 1.0, 0.0), 45.0),
+        ("rotate-y-minus-45", (0.0, 1.0, 0.0), -45.0),
         ("rotate-x-90", (1.0, 0.0, 0.0), 90.0),
         ("rotate-x-minus-90", (1.0, 0.0, 0.0), -90.0),
         ("rotate-y-90", (0.0, 1.0, 0.0), 90.0),
