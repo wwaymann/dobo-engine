@@ -4,6 +4,7 @@ from collections.abc import Iterable
 
 import cadquery as cq
 
+from .production_orientation import ProductionOrientationPlanner
 from .repair_controller import RepairCandidate
 
 
@@ -15,45 +16,24 @@ def _place_on_bed(shape: cq.Shape) -> cq.Shape:
 def build_orientation_repair_candidates() -> tuple[RepairCandidate[cq.Shape], ...]:
     """Deterministic candidate orientations for a real overhang warning.
 
-    These candidates never change manufacturing thresholds. The bounded repair
-    controller is responsible for accepting one only after a full 24-rule
-    revalidation proves that the warning is resolved without introducing a
-    blocking regression. The set mirrors the planner's bounded non-current
-    production poses at 30/45/60/90 degrees around X/Y.
+    The repair space is intentionally identical to the planner's finite search,
+    excluding the unchanged ``current`` pose. No manufacturing threshold is
+    modified. A candidate is accepted only after the bounded repair controller
+    performs complete 24-rule revalidation and proves that the target warning
+    is resolved without introducing a blocking regression.
     """
 
-    rotations = (
-        ("rotate-x-30", (1.0, 0.0, 0.0), 30.0),
-        ("rotate-x-minus-30", (1.0, 0.0, 0.0), -30.0),
-        ("rotate-y-30", (0.0, 1.0, 0.0), 30.0),
-        ("rotate-y-minus-30", (0.0, 1.0, 0.0), -30.0),
-        ("rotate-x-45", (1.0, 0.0, 0.0), 45.0),
-        ("rotate-x-minus-45", (1.0, 0.0, 0.0), -45.0),
-        ("rotate-y-45", (0.0, 1.0, 0.0), 45.0),
-        ("rotate-y-minus-45", (0.0, 1.0, 0.0), -45.0),
-        ("rotate-x-60", (1.0, 0.0, 0.0), 60.0),
-        ("rotate-x-minus-60", (1.0, 0.0, 0.0), -60.0),
-        ("rotate-y-60", (0.0, 1.0, 0.0), 60.0),
-        ("rotate-y-minus-60", (0.0, 1.0, 0.0), -60.0),
-        ("rotate-x-90", (1.0, 0.0, 0.0), 90.0),
-        ("rotate-x-minus-90", (1.0, 0.0, 0.0), -90.0),
-        ("rotate-y-90", (0.0, 1.0, 0.0), 90.0),
-        ("rotate-y-minus-90", (0.0, 1.0, 0.0), -90.0),
-    )
-
     candidates: list[RepairCandidate[cq.Shape]] = []
-    for label, axis, angle in rotations:
+    for label, _steps in ProductionOrientationPlanner.rotation_specs():
+        if label == "current":
+            continue
+
         def apply(
             shape: cq.Shape,
             *,
-            axis: tuple[float, float, float] = axis,
-            angle: float = angle,
+            label: str = label,
         ) -> cq.Shape:
-            rotated = shape.rotate(
-                cq.Vector(0.0, 0.0, 0.0),
-                cq.Vector(*axis),
-                angle,
-            )
+            rotated = ProductionOrientationPlanner.rotate_shape(shape, label)
             return _place_on_bed(rotated)
 
         candidates.append(
