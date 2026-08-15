@@ -88,6 +88,14 @@ jobs:
             --output-root outputs-ci/macroblock-a3 \
             --case all
 
+      - name: Upload real A3 matrix
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-macroblock-a3-real-matrix
+          path: outputs-ci/macroblock-a3
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Commit validated A3 integration
         shell: bash
         run: |
@@ -100,13 +108,7 @@ jobs:
             echo "No A3 core source changes to commit."
           else
             git commit -m "feat(a3): integrate continuous morphological fusion"
+            git fetch origin macroblock-a3-autonomous
+            git rebase origin/macroblock-a3-autonomous
             git push origin HEAD:macroblock-a3-autonomous
           fi
-
-      - name: Upload real A3 matrix
-        uses: actions/upload-artifact@v4
-        with:
-          name: dobo-macroblock-a3-real-matrix
-          path: outputs-ci/macroblock-a3
-          if-no-files-found: error
-          retention-days: 14
