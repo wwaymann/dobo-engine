@@ -51,8 +51,8 @@ jobs:
       - name: Apply A4 visible continuity integration
         shell: bash
         run: |
-          if git apply --check patches/macroblock_a4_core.patch; then
-            git apply patches/macroblock_a4_core.patch
+          if git apply --recount --check patches/macroblock_a4_core.patch; then
+            git apply --recount patches/macroblock_a4_core.patch
             echo "A4 core patch applied."
           elif grep -q "visible_morphological_continuity" app/product_generators/design_interpreter/structural_compiler.py; then
             echo "A4 core patch is already present."
