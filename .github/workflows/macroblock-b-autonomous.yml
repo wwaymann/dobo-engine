@@ -51,7 +51,9 @@ jobs:
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_geometry_repairs.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_production_orientation.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_3mf_placement.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_planned_3mf_export.py
           python -m py_compile app/product_generators/manufacturability/product_integration.py
+          python -m py_compile app/product_generators/surface_designer/multicolor_product.py
 
       - name: Preserve Macroblock A regression contract
         run: |
@@ -89,6 +91,10 @@ jobs:
       - name: Validate advanced production orientation
         run: |
           python -m product_generators.manufacturability.test_macroblock_b_production_orientation
+
+      - name: Validate planned orientation reaches exported 3MF
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_planned_3mf_export
 
       - name: Validate real exported 3MF placement
         run: |
