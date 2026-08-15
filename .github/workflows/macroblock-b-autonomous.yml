@@ -45,6 +45,7 @@ jobs:
           python -m py_compile app/product_generators/manufacturability/final_geometry.py
           python -m py_compile app/product_generators/manufacturability/geometry_repair_strategies.py
           python -m py_compile app/product_generators/manufacturability/production_orientation.py
+          python -m py_compile app/product_generators/manufacturability/production_handoff.py
           python -m py_compile app/product_generators/manufacturability/three_mf_project_inspector.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_repair_controller.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_final_geometry.py
@@ -52,6 +53,7 @@ jobs:
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_production_orientation.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_3mf_placement.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_planned_3mf_export.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_production_handoff.py
           python -m py_compile app/product_generators/manufacturability/product_integration.py
           python -m py_compile app/product_generators/surface_designer/multicolor_product.py
 
@@ -103,6 +105,10 @@ jobs:
       - name: Validate current real product manufacturing baseline
         run: |
           python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
+
+      - name: Build auditable production handoff manifest
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_production_handoff
 
       - name: Upload current production evidence
         if: always()
