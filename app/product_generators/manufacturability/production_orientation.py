@@ -52,7 +52,9 @@ class ProductionOrientationPlanner:
     The planner does not alter manufacturing thresholds and does not claim to
     replace slicer simulation. It evaluates a small, explicit orientation set
     using the same physical-size and overhang analyzers used by the 24-rule
-    manufacturing contract. Every returned shape is translated onto Z=0.
+    manufacturing contract. Every candidate used for ranking is translated
+    onto Z=0, while ``rotate_shape`` exposes the exact shared rotation so the
+    same decision can be propagated to every material region before export.
     """
 
     _ROTATIONS = (
@@ -67,26 +69,51 @@ class ProductionOrientationPlanner:
         self._production = ProductionAnalyzer()
         self._geometry = FinalGeometryManufacturingAnalyzer()
 
+    @classmethod
+    def _rotation_by_label(
+        cls,
+        label: str,
+    ) -> tuple[tuple[float, float, float] | None, float]:
+        for candidate_label, axis, angle in cls._ROTATIONS:
+            if candidate_label == label:
+                return axis, float(angle)
+        raise ValueError(f"Unknown production orientation: {label!r}")
+
+    @classmethod
+    def rotate_shape(
+        cls,
+        shape: cq.Shape,
+        label: str,
+    ) -> cq.Shape:
+        """Apply only the selected rotation, preserving shared CAD alignment.
+
+        Bed placement must be applied once to the complete multiregion product,
+        never independently to Body/Text/Decoration. The 3MF exporter therefore
+        receives these rotated regions and computes one shared bed transform.
+        """
+        axis, angle = cls._rotation_by_label(label)
+        if axis is None:
+            return shape
+        return shape.rotate(
+            cq.Vector(0.0, 0.0, 0.0),
+            cq.Vector(*axis),
+            angle,
+        )
+
     @staticmethod
     def _place_on_bed(shape: cq.Shape) -> cq.Shape:
         z_min = float(shape.BoundingBox().zmin)
         return shape.translate(cq.Vector(0.0, 0.0, -z_min))
 
+    @classmethod
     def _oriented_shape(
-        self,
+        cls,
         shape: cq.Shape,
-        axis: tuple[float, float, float] | None,
-        angle: float,
+        label: str,
     ) -> cq.Shape:
-        if axis is None:
-            oriented = shape
-        else:
-            oriented = shape.rotate(
-                cq.Vector(0.0, 0.0, 0.0),
-                cq.Vector(*axis),
-                float(angle),
-            )
-        return self._place_on_bed(oriented)
+        return cls._place_on_bed(
+            cls.rotate_shape(shape, label)
+        )
 
     def plan(
         self,
@@ -98,8 +125,8 @@ class ProductionOrientationPlanner:
         manufacturing.validate()
 
         candidates: list[ProductionOrientationCandidate] = []
-        for label, axis, angle in self._ROTATIONS:
-            oriented = self._oriented_shape(shape, axis, angle)
+        for label, _axis, _angle in self._ROTATIONS:
+            oriented = self._oriented_shape(shape, label)
             size = self._production.physical_size(
                 shape=oriented,
                 max_x=manufacturing.max_size_x,
