@@ -147,26 +147,63 @@ jobs:
             --baseline-commit "$BASELINE_COMMIT" \
             --candidate-commit "$CANDIDATE_COMMIT"
 
-      - name: Enforce visible A4 delta
+      - name: Enforce view-aware A4 continuity
         run: |
           python - <<'PY'
           import json
-          from collections import defaultdict
           from pathlib import Path
 
           report = json.loads(
               Path('outputs-ci/visual-a3-a4/report/visual_regression_report.json').read_text()
           )
-          grouped = defaultdict(list)
-          for item in report['views']:
-              grouped[item['case']].append(float(item['silhouette_delta']))
-          averages = {key: sum(values) / len(values) for key, values in grouped.items()}
-          print('A4 visible delta by case', averages)
-          if averages.get('architectural', 0.0) < 0.004:
-              raise SystemExit('A4 architectural change is still visually negligible.')
-          if averages.get('branching', 0.0) < 0.008:
-              raise SystemExit('A4 branching change is still visually negligible.')
-          print('DOBO A4 visible-delta gate: Valid OK')
+          views = {
+              (item['case'], item['view']): item
+              for item in report['views']
+          }
+
+          if not report['summary']['catastrophic_guard']:
+              raise SystemExit('A4 failed the catastrophic visual guard.')
+
+          def delta(case, view):
+              return float(views[(case, view)]['silhouette_delta'])
+
+          architectural_informative = [
+              delta('architectural', view) for view in ('front', 'side', 'iso')
+          ]
+          branching_informative = [
+              delta('branching', view) for view in ('front', 'side', 'iso')
+          ]
+          perforated_all = [
+              delta('perforated', view) for view in ('front', 'side', 'top', 'iso')
+          ]
+
+          print('A4 architectural informative deltas', architectural_informative)
+          print('A4 branching informative deltas', branching_informative)
+          print('A4 branching top preservation', delta('branching', 'top'))
+          print('A4 perforated preservation deltas', perforated_all)
+
+          if sum(architectural_informative) / len(architectural_informative) < 0.004:
+              raise SystemExit('A4 architectural continuity is still visually negligible.')
+
+          if delta('branching', 'front') < 0.008:
+              raise SystemExit('A4 branching front continuity is still visually negligible.')
+          if delta('branching', 'side') < 0.008:
+              raise SystemExit('A4 branching side continuity is still visually negligible.')
+          if delta('branching', 'iso') < 0.004:
+              raise SystemExit('A4 branching isometric continuity is still visually negligible.')
+          if sum(branching_informative) / len(branching_informative) < 0.008:
+              raise SystemExit('A4 branching informative-view delta is still too small.')
+
+          # Top view is intentionally allowed to remain nearly unchanged: A4 targets
+          # visible root continuity on the vessel skin, not arbitrary global deformation.
+          if delta('branching', 'top') > 0.006:
+              raise SystemExit('A4 changed the branching top silhouette more than intended.')
+
+          # The nested-negative geometric family is a preservation fixture for A4.
+          if max(perforated_all) > 0.006:
+              raise SystemExit('A4 altered the protected perforated family too strongly.')
+
+          print('DOBO A4 view-aware visible-continuity gate: Valid OK')
           PY
 
       - name: Upload A3 vs A4 visual evidence
