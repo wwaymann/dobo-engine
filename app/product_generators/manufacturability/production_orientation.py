@@ -50,47 +50,65 @@ class ProductionOrientationPlan:
 class ProductionOrientationPlanner:
     """Choose a bounded deterministic build orientation from real geometry.
 
-    The search is finite and general-purpose. It preserves the configured
-    manufacturing thresholds and evaluates every candidate with the same real
-    final-geometry overhang and machine-size checks used by the 24-rule contract.
-
-    Single-axis 30/45/60/90-degree poses are complemented by a small set of
-    compound X/Y rotations. Compound poses are important because unsupported
-    surface normals are not generally aligned with a world axis; two sequential
-    tilts sample diagonal build directions without introducing product-specific
-    knowledge or an unbounded optimizer.
+    Candidate poses are shared by the production planner and the bounded repair
+    controller.  The set is finite, deterministic and product-agnostic.  It
+    samples single-axis poses plus diagonal build directions that cannot be
+    represented by one X/Y rotation alone.  Manufacturing thresholds are never
+    altered; every pose is measured by the same real tessellated OVERHANG and
+    physical-size analyzers used by the 24-rule contract.
     """
+
+    @staticmethod
+    def _single_axis_rotations() -> tuple[RotationSpec, ...]:
+        items: list[RotationSpec] = []
+        for axis_name, axis in (("x", (1.0, 0.0, 0.0)), ("y", (0.0, 1.0, 0.0))):
+            for magnitude in (15, 30, 45, 60, 75, 90):
+                for sign, suffix in ((1, ""), (-1, "minus-")):
+                    angle = float(sign * magnitude)
+                    label = f"rotate-{axis_name}-{suffix}{magnitude}"
+                    items.append((label, ((axis, angle),)))
+        return tuple(items)
+
+    @staticmethod
+    def _compound_rotations() -> tuple[RotationSpec, ...]:
+        # Same-magnitude diagonals plus a small number of asymmetric diagonal
+        # directions.  This expands directional coverage without an unbounded
+        # optimiser and keeps CI cost predictable.
+        pairs = (
+            (15, 15),
+            (30, 30),
+            (45, 45),
+            (60, 60),
+            (75, 75),
+            (60, 30),
+            (75, 30),
+            (75, 45),
+        )
+        items: list[RotationSpec] = []
+        for x_mag, y_mag in pairs:
+            for x_sign in (1, -1):
+                for y_sign in (1, -1):
+                    x_suffix = "" if x_sign > 0 else "minus-"
+                    y_suffix = "" if y_sign > 0 else "minus-"
+                    label = (
+                        f"rotate-x-{x_suffix}{x_mag}-"
+                        f"y-{y_suffix}{y_mag}"
+                    )
+                    items.append(
+                        (
+                            label,
+                            (
+                                ((1.0, 0.0, 0.0), float(x_sign * x_mag)),
+                                ((0.0, 1.0, 0.0), float(y_sign * y_mag)),
+                            ),
+                        )
+                    )
+        return tuple(items)
 
     _ROTATIONS: tuple[RotationSpec, ...] = (
         ("current", ()),
-        ("rotate-x-30", (((1.0, 0.0, 0.0), 30.0),)),
-        ("rotate-x-minus-30", (((1.0, 0.0, 0.0), -30.0),)),
-        ("rotate-y-30", (((0.0, 1.0, 0.0), 30.0),)),
-        ("rotate-y-minus-30", (((0.0, 1.0, 0.0), -30.0),)),
-        ("rotate-x-45", (((1.0, 0.0, 0.0), 45.0),)),
-        ("rotate-x-minus-45", (((1.0, 0.0, 0.0), -45.0),)),
-        ("rotate-y-45", (((0.0, 1.0, 0.0), 45.0),)),
-        ("rotate-y-minus-45", (((0.0, 1.0, 0.0), -45.0),)),
-        ("rotate-x-60", (((1.0, 0.0, 0.0), 60.0),)),
-        ("rotate-x-minus-60", (((1.0, 0.0, 0.0), -60.0),)),
-        ("rotate-y-60", (((0.0, 1.0, 0.0), 60.0),)),
-        ("rotate-y-minus-60", (((0.0, 1.0, 0.0), -60.0),)),
-        ("rotate-x-90", (((1.0, 0.0, 0.0), 90.0),)),
-        ("rotate-x-minus-90", (((1.0, 0.0, 0.0), -90.0),)),
-        ("rotate-y-90", (((0.0, 1.0, 0.0), 90.0),)),
-        ("rotate-y-minus-90", (((0.0, 1.0, 0.0), -90.0),)),
-        ("rotate-x-30-y-30", (((1.0, 0.0, 0.0), 30.0), ((0.0, 1.0, 0.0), 30.0))),
-        ("rotate-x-30-y-minus-30", (((1.0, 0.0, 0.0), 30.0), ((0.0, 1.0, 0.0), -30.0))),
-        ("rotate-x-minus-30-y-30", (((1.0, 0.0, 0.0), -30.0), ((0.0, 1.0, 0.0), 30.0))),
-        ("rotate-x-minus-30-y-minus-30", (((1.0, 0.0, 0.0), -30.0), ((0.0, 1.0, 0.0), -30.0))),
-        ("rotate-x-45-y-45", (((1.0, 0.0, 0.0), 45.0), ((0.0, 1.0, 0.0), 45.0))),
-        ("rotate-x-45-y-minus-45", (((1.0, 0.0, 0.0), 45.0), ((0.0, 1.0, 0.0), -45.0))),
-        ("rotate-x-minus-45-y-45", (((1.0, 0.0, 0.0), -45.0), ((0.0, 1.0, 0.0), 45.0))),
-        ("rotate-x-minus-45-y-minus-45", (((1.0, 0.0, 0.0), -45.0), ((0.0, 1.0, 0.0), -45.0))),
-        ("rotate-x-60-y-30", (((1.0, 0.0, 0.0), 60.0), ((0.0, 1.0, 0.0), 30.0))),
-        ("rotate-x-60-y-minus-30", (((1.0, 0.0, 0.0), 60.0), ((0.0, 1.0, 0.0), -30.0))),
-        ("rotate-x-minus-60-y-30", (((1.0, 0.0, 0.0), -60.0), ((0.0, 1.0, 0.0), 30.0))),
-        ("rotate-x-minus-60-y-minus-30", (((1.0, 0.0, 0.0), -60.0), ((0.0, 1.0, 0.0), -30.0))),
+        *_single_axis_rotations.__func__(),
+        *_compound_rotations.__func__(),
     )
 
     def __init__(self) -> None:
