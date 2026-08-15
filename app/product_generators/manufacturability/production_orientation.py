@@ -50,24 +50,33 @@ class ProductionOrientationPlanner:
     """Choose a bounded deterministic build orientation from real geometry.
 
     The planner does not alter manufacturing thresholds and does not claim to
-    replace slicer simulation. It evaluates a small, explicit orientation set
+    replace slicer simulation. It evaluates a finite, explicit orientation set
     using the same physical-size and overhang analyzers used by the 24-rule
     manufacturing contract. Every candidate used for ranking is translated
     onto Z=0, while ``rotate_shape`` exposes the exact shared rotation so the
     same decision can be propagated to every material region before export.
 
-    In addition to orthogonal poses, the bounded set contains 45-degree X/Y
-    poses. These are general FDM production candidates: they can turn a short
-    horizontal underside (for example on an embossed surface feature) into a
-    self-supporting slope without changing the configured overhang threshold.
+    Orthogonal poses are complemented by 30/45/60-degree X/Y poses. The denser
+    bounded set is still deterministic and general-purpose, but can resolve
+    geometries where one diagonal angle is too shallow for an embossed feature
+    and another is too steep for the vessel wall. Manufacturing thresholds are
+    never changed to make an orientation pass.
     """
 
     _ROTATIONS = (
         ("current", None, 0.0),
+        ("rotate-x-30", (1.0, 0.0, 0.0), 30.0),
+        ("rotate-x-minus-30", (1.0, 0.0, 0.0), -30.0),
+        ("rotate-y-30", (0.0, 1.0, 0.0), 30.0),
+        ("rotate-y-minus-30", (0.0, 1.0, 0.0), -30.0),
         ("rotate-x-45", (1.0, 0.0, 0.0), 45.0),
         ("rotate-x-minus-45", (1.0, 0.0, 0.0), -45.0),
         ("rotate-y-45", (0.0, 1.0, 0.0), 45.0),
         ("rotate-y-minus-45", (0.0, 1.0, 0.0), -45.0),
+        ("rotate-x-60", (1.0, 0.0, 0.0), 60.0),
+        ("rotate-x-minus-60", (1.0, 0.0, 0.0), -60.0),
+        ("rotate-y-60", (0.0, 1.0, 0.0), 60.0),
+        ("rotate-y-minus-60", (0.0, 1.0, 0.0), -60.0),
         ("rotate-x-90", (1.0, 0.0, 0.0), 90.0),
         ("rotate-x-minus-90", (1.0, 0.0, 0.0), -90.0),
         ("rotate-y-90", (0.0, 1.0, 0.0), 90.0),
@@ -120,9 +129,7 @@ class ProductionOrientationPlanner:
         shape: cq.Shape,
         label: str,
     ) -> cq.Shape:
-        return cls._place_on_bed(
-            cls.rotate_shape(shape, label)
-        )
+        return cls._place_on_bed(cls.rotate_shape(shape, label))
 
     def plan(
         self,
