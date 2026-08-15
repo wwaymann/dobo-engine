@@ -2,17 +2,13 @@ name: DOBO Macroblock B28 Capability Gap Closure
 
 on:
   push:
-    branches:
-      - macroblock-b28-capability-gap
+    branches: [macroblock-b28-capability-gap]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: dobo-macroblock-b28-capability-gap
   cancel-in-progress: true
-
 jobs:
   validate-general-body-families:
     runs-on: ubuntu-latest
@@ -21,28 +17,25 @@ jobs:
       PYTHONPATH: app
       PYTHONUNBUFFERED: '1'
       MPLBACKEND: Agg
-
     steps:
       - name: Checkout B28 branch
         uses: actions/checkout@v4
-
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-
       - name: Install geometry dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
-
       - name: Compile B28 capability layer
         run: |
           python -m py_compile app/product_generators/design_interpreter/body_family_expansion.py
           python -m py_compile app/product_generators/design_interpreter/phase_b28_capability_matrix.py
           python -m py_compile app/product_generators/design_interpreter/test_b28_body_family_expansion.py
-
+          python -m py_compile app/product_generators/design_interpreter/visual_geometry_benchmark_b28.py
+          python -m py_compile app/product_generators/design_interpreter/structural_pipeline.py
       - name: Preserve structural morphogenesis baseline
         run: |
           python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
@@ -51,20 +44,19 @@ jobs:
           python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
           python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
           python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
-
       - name: Validate five missing general body families
-        run: |
-          python -m product_generators.design_interpreter.test_b28_body_family_expansion
-
+        run: python -m product_generators.design_interpreter.test_b28_body_family_expansion
       - name: Preserve frozen B27 benchmark baseline
-        run: |
-          python -m product_generators.design_interpreter.visual_geometry_benchmark
-
-      - name: Upload B28 and B27 evidence
+        run: python -m product_generators.design_interpreter.visual_geometry_benchmark
+      - name: Generate B28 physical geometry benchmark
+        run: python -m product_generators.design_interpreter.visual_geometry_benchmark_b28
+      - name: Upload B28 physical visual evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dobo-b28-capability-gap-evidence
-          path: outputs/visual_geometry_benchmark
+          name: dobo-b28-physical-geometry-evidence
+          path: |
+            outputs/visual_geometry_benchmark
+            outputs/visual_geometry_benchmark_b28
           if-no-files-found: warn
           retention-days: 30
