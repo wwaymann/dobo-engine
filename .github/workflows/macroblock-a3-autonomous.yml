@@ -17,6 +17,8 @@ jobs:
     env:
       PYTHONPATH: app
       PYTHONUNBUFFERED: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      EGL_PLATFORM: surfaceless
 
     steps:
       - name: Checkout autonomous branch
@@ -105,7 +107,12 @@ jobs:
       - name: Install headless Blender renderer
         run: |
           sudo apt-get update
-          sudo apt-get install -y blender
+          sudo apt-get install -y \
+            blender \
+            libegl1 \
+            libegl-mesa0 \
+            libgl1-mesa-dri
+          ldconfig -p | grep -E 'libEGL\.so\.1|libGL\.so\.1'
           blender --version
 
       - name: Render normalized A2 vs A3 visual evidence
