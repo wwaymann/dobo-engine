@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: dobo-macroblock-a3-autonomous
+  cancel-in-progress: true
+
 jobs:
   validate-materialize-and-compare-a3:
     if: github.actor != 'github-actions[bot]'
@@ -18,7 +22,6 @@ jobs:
       PYTHONPATH: app
       PYTHONUNBUFFERED: '1'
       LIBGL_ALWAYS_SOFTWARE: '1'
-      EGL_PLATFORM: surfaceless
 
     steps:
       - name: Checkout autonomous branch
@@ -109,10 +112,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             blender \
+            xvfb \
+            xauth \
             libegl1 \
             libegl-mesa0 \
-            libgl1-mesa-dri
-          ldconfig -p | grep -E 'libEGL\.so\.1|libGL\.so\.1'
+            libgl1-mesa-dri \
+            libglx-mesa0
+          ldconfig -p | grep -E 'libEGL\.so\.1|libGL\.so\.1|libGLX\.so\.0'
           blender --version
 
       - name: Render normalized A2 vs A3 visual evidence
@@ -122,14 +128,14 @@ jobs:
           BASELINE_COMMIT=$(python -c "import json; print(json.load(open('.dobo/visual_baseline.json'))['commit'])")
           CANDIDATE_COMMIT=$(git rev-parse HEAD)
           rm -rf outputs-ci/visual-a2-a3
-          blender --background \
+          xvfb-run -a -s "-screen 0 1280x1024x24" blender --background \
             --python tools/dobo_blender_compare.py -- \
             --baseline-root outputs-ci/macroblock-a2-baseline \
             --candidate-root outputs-ci/macroblock-a3 \
             --output-root outputs-ci/visual-a2-a3/renders \
             --baseline-label "$BASELINE_LABEL" \
             --candidate-label A3 \
-            --resolution 512
+            --resolution 384
           python tools/dobo_visual_report.py \
             --render-root outputs-ci/visual-a2-a3/renders \
             --output-root outputs-ci/visual-a2-a3/report \
