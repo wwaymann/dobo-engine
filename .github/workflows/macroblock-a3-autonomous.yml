@@ -68,6 +68,7 @@ jobs:
           python -m py_compile app/product_generators/design_interpreter/test_macroblock_a3_continuous_fusion.py
           python -m py_compile app/product_generators/design_interpreter/macroblock_a3_matrix_cli.py
           python -m py_compile tools/dobo_blender_compare.py
+          python -m py_compile tools/dobo_prepare_visual_masks.py
           python -m py_compile tools/dobo_visual_report.py
 
       - name: Run DOBO regression suite through A3
@@ -135,7 +136,9 @@ jobs:
             --output-root outputs-ci/visual-a2-a3/renders \
             --baseline-label "$BASELINE_LABEL" \
             --candidate-label A3 \
-            --resolution 384
+            --resolution 320
+          python tools/dobo_prepare_visual_masks.py \
+            --render-root outputs-ci/visual-a2-a3/renders
           python tools/dobo_visual_report.py \
             --render-root outputs-ci/visual-a2-a3/renders \
             --output-root outputs-ci/visual-a2-a3/report \
