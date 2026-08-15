@@ -10,13 +10,13 @@ def main() -> None:
     planner = ProductionOrientationPlanner()
 
     # A tall rectangular solid has equivalent overhang behavior in the tested
-    # orthogonal orientations, so the deterministic planner should select the
-    # lowest build height while keeping the part on the bed and within volume.
+    # orientations, so the deterministic planner should select a valid pose
+    # while keeping the part on the bed and within volume.
     shape = cq.Workplane("XY").box(10.0, 20.0, 30.0, centered=(True, True, False)).val()
     plan = planner.plan(shape=shape)
 
-    if len(plan.candidates) != 5:
-        raise RuntimeError(f"Expected 5 bounded orientations, got {len(plan.candidates)}")
+    if len(plan.candidates) != 9:
+        raise RuntimeError(f"Expected 9 bounded orientations, got {len(plan.candidates)}")
     if not plan.selected.production_valid:
         raise RuntimeError("Selected orientation must satisfy size and overhang gates")
     if abs(float(plan.selected.shape.BoundingBox().zmin)) > 1.0e-6:
@@ -25,6 +25,16 @@ def main() -> None:
         raise RuntimeError(
             f"Expected minimum build height near 10 mm, got {plan.selected.size_z:.6f}"
         )
+
+    labels = {candidate.label for candidate in plan.candidates}
+    for required in {
+        "rotate-x-45",
+        "rotate-x-minus-45",
+        "rotate-y-45",
+        "rotate-y-minus-45",
+    }:
+        if required not in labels:
+            raise RuntimeError(f"Missing bounded diagonal orientation {required}")
 
     # Machine-volume violations remain visible: orientation may solve an axis
     # fit problem, but the planner may not weaken the configured bed limits.
