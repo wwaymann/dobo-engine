@@ -40,7 +40,7 @@ def main() -> None:
     _check(
         "visible continuity version",
         VISIBLE_MORPHOLOGICAL_CONTINUITY_VERSION,
-        "A4.1",
+        "A4.2",
     )
 
     cases = {case.id: case for case in macroblock_a_matrix()}
