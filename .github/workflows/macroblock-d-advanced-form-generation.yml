@@ -4,14 +4,11 @@ on:
   push:
     branches: [macroblock-d-advanced-form-generation]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: dobo-macroblock-d-advanced-form-generation
   cancel-in-progress: true
-
 jobs:
   visual-first-form-generation:
     runs-on: ubuntu-latest
@@ -23,27 +20,25 @@ jobs:
     steps:
       - name: Checkout Macroblock D
         uses: actions/checkout@v4
-
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-
       - name: Install CAD and visual dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
-
       - name: Compile expressive geometry core
         run: |
           python -m py_compile app/product_generators/organic_shapes/specification.py
           python -m py_compile app/product_generators/organic_shapes/fields.py
           python -m py_compile app/product_generators/design_interpreter/structural_morphogenesis.py
           python -m py_compile app/product_generators/design_interpreter/phase_d_visual_matrix.py
+          python -m py_compile app/product_generators/design_interpreter/phase_d2_visual_matrix.py
           python -m py_compile app/product_generators/design_interpreter/test_macroblock_d_advanced_forms.py
           python -m py_compile app/product_generators/design_interpreter/visual_macroblock_d_benchmark.py
-
+          python -m py_compile app/product_generators/design_interpreter/visual_macroblock_d2_benchmark.py
       - name: Preserve accepted structural regressions
         run: |
           python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
@@ -52,18 +47,19 @@ jobs:
           python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
           python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
           python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
-
       - name: Validate visual-DNA routing into expressive construction
         run: python -m product_generators.design_interpreter.test_macroblock_d_advanced_forms
-
-      - name: Generate eight real expressive constructions
+      - name: Preserve D1 baseline
         run: python -m product_generators.design_interpreter.visual_macroblock_d_benchmark
-
-      - name: Upload Macroblock D real visual evidence
+      - name: Generate D2 high-detail real constructions
+        run: python -m product_generators.design_interpreter.visual_macroblock_d2_benchmark
+      - name: Upload Macroblock D visual evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dobo-macroblock-d-real-visual-evidence
-          path: outputs/macroblock_d_visual_benchmark
+          path: |
+            outputs/macroblock_d_visual_benchmark
+            outputs/macroblock_d2_visual_benchmark
           if-no-files-found: warn
           retention-days: 30
