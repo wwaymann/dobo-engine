@@ -35,17 +35,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
 
-      - name: Compile C0 contracts and binary probe
+      - name: Compile C0 contracts and probes
         run: |
           python -m py_compile app/product_generators/design_interpreter/geometry_composer.py
           python -m py_compile app/product_generators/design_interpreter/test_c0_capability_accumulation.py
           python -m py_compile app/product_generators/design_interpreter/test_c0_direct_reuse_surface_stack.py
+          python -m py_compile app/kernel/geometry/mesh_brep_conversion.py
+          python -m py_compile app/product_generators/design_interpreter/test_c0_mesh_brep_reuse_probe.py
 
       - name: Validate executable capability inventory
         run: python -m product_generators.design_interpreter.test_c0_capability_accumulation
 
       - name: Execute direct modern-morphology to existing-surface-stack binary probe
         run: python -m product_generators.design_interpreter.test_c0_direct_reuse_surface_stack
+
+      - name: Execute minimal mesh to BRep existing-stack reuse probe
+        run: python -m product_generators.design_interpreter.test_c0_mesh_brep_reuse_probe
 
       - name: Preserve native surface text capability
         run: python -m product_generators.surface_designer.test_native_surface_text_capability
