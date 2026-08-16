@@ -109,7 +109,7 @@ jobs:
         with:
           name: dobo-macroblock-c-package-evidence
           path: |
-            outputs/product_generators/surface_designer/v2_prototype_1
+            outputs/product_generators/surface_designer/v2_prototype_1_dobo
             outputs/product_generators/surface_designer/phase_6_multicolor_3mf
           if-no-files-found: warn
           retention-days: 14
