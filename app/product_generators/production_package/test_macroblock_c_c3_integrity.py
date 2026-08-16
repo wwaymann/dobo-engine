@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .package_integrity import PackageIntegrityVerifier
@@ -10,30 +11,37 @@ SPEC_PATH = Path(__file__).resolve().parents[1] / "surface_designer" / "v2_proto
 OUTPUT_ROOT = Path("outputs/product_generators/surface_designer") / SPEC_PATH.stem
 
 
-def main() -> None:
-    package_root = OUTPUT_ROOT / "production_packages"
-    manifests = sorted(package_root.glob("*/production_package_manifest.json"))
-    if not manifests:
+def _current_manifest(package_root: Path, motor_revision: str) -> tuple[Path, dict]:
+    expected_revision = f"git:{motor_revision}"
+    matches: list[tuple[Path, dict]] = []
+    for manifest_path in package_root.glob("*/production_package_manifest.json"):
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if expected_revision in str(payload.get("source_revision", "")):
+            matches.append((manifest_path, payload))
+    if len(matches) != 1:
         raise RuntimeError(
-            "No materialized V2 production package found after C3 generation "
-            f"under {package_root}."
+            "Expected exactly one materialized package for current Motor/source "
+            f"revision {motor_revision}, found {len(matches)}."
         )
+    return matches[0]
 
-    manifest_path = manifests[-1]
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+def main() -> None:
+    motor_revision = os.environ.get("DOBO_MOTOR_SOURCE_REVISION", "").strip()
+    if not motor_revision:
+        raise RuntimeError("Current Motor/source Git revision is unavailable.")
+
+    package_root = OUTPUT_ROOT / "production_packages"
+    manifest_path, payload = _current_manifest(package_root, motor_revision)
     if payload.get("schema_version") != "dobo.production-package.v2":
         raise RuntimeError("V2 content-addressed package schema was not produced.")
     source_revision = str(payload.get("source_revision", ""))
     if f"macroblock-b:{B_CHECKPOINT}" not in source_revision:
         raise RuntimeError("Accepted Macroblock B checkpoint is missing from package provenance.")
-    if "git:" not in source_revision:
-        raise RuntimeError("Motor/source Git revision is missing from package provenance.")
+    if f"git:{motor_revision}" not in source_revision:
+        raise RuntimeError("Current Motor/source Git revision is missing from package provenance.")
 
     records = {str(item["kind"]): item for item in payload.get("artifacts", [])}
-    # Keep integrity acceptance bound to the canonical PRODUCTION render contract:
-    # front, side, top and iso. Do not alias commercial "hero_iso" or introduce
-    # a benchmark-only "perspective" name because the package must prove exactly
-    # the render views that were requested and materialized by RenderContract.
     required = {
         "stl",
         "3mf",
@@ -55,8 +63,8 @@ def main() -> None:
     provenance = json.loads(provenance_file.read_text(encoding="utf-8"))
     if provenance.get("macroblock_b_checkpoint") != B_CHECKPOINT:
         raise RuntimeError("Materialized provenance changed the accepted B checkpoint.")
-    if str(provenance.get("motor_source_revision", "")) not in source_revision:
-        raise RuntimeError("Manifest and materialized Motor/source revision disagree.")
+    if provenance.get("motor_source_revision") != motor_revision:
+        raise RuntimeError("Materialized provenance is not bound to the current Motor revision.")
 
     source_copy = manifest_path.parent / "source" / SPEC_PATH.name
     if not source_copy.is_file():
@@ -70,7 +78,7 @@ def main() -> None:
     print("-----------------------------------")
     print("package schema", payload["schema_version"], "OK")
     print("Macroblock B checkpoint", B_CHECKPOINT, "PRESERVED")
-    print("Motor/source revision", provenance["motor_source_revision"], "VERIFIED")
+    print("Motor/source revision", motor_revision, "VERIFIED")
     print("source JSON", SPEC_PATH.name, "PRESERVED")
     print("artifact hashes", report.artifact_count, "VERIFIED")
     print("content-addressed identity", report.package_sha256, "VERIFIED")
