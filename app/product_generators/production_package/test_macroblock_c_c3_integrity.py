@@ -6,14 +6,18 @@ from pathlib import Path
 from .package_integrity import PackageIntegrityVerifier
 
 B_CHECKPOINT = "b9ceaddf89b31d0b9cbd50f07657dc56ad355d72"
-OUTPUT_ROOT = Path("outputs/product_generators/surface_designer/v2_prototype_1")
+SPEC_PATH = Path(__file__).resolve().parents[1] / "surface_designer" / "v2_prototype_1_dobo.json"
+OUTPUT_ROOT = Path("outputs/product_generators/surface_designer") / SPEC_PATH.stem
 
 
 def main() -> None:
     package_root = OUTPUT_ROOT / "production_packages"
     manifests = sorted(package_root.glob("*/production_package_manifest.json"))
     if not manifests:
-        raise RuntimeError("No materialized V2 production package found after C3 generation.")
+        raise RuntimeError(
+            "No materialized V2 production package found after C3 generation "
+            f"under {package_root}."
+        )
 
     manifest_path = manifests[-1]
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -49,6 +53,10 @@ def main() -> None:
     if str(provenance.get("motor_source_revision", "")) not in source_revision:
         raise RuntimeError("Manifest and materialized Motor/source revision disagree.")
 
+    source_copy = manifest_path.parent / "source" / SPEC_PATH.name
+    if not source_copy.is_file():
+        raise RuntimeError("Materialized package did not preserve the source JSON.")
+
     report = PackageIntegrityVerifier.verify(manifest_path.parent)
     if report.artifact_count != len(records):
         raise RuntimeError("Integrity verifier did not validate the complete artifact set.")
@@ -58,7 +66,7 @@ def main() -> None:
     print("package schema", payload["schema_version"], "OK")
     print("Macroblock B checkpoint", B_CHECKPOINT, "PRESERVED")
     print("Motor/source revision", provenance["motor_source_revision"], "VERIFIED")
-    print("source JSON hash", "VERIFIED")
+    print("source JSON", SPEC_PATH.name, "PRESERVED")
     print("artifact hashes", report.artifact_count, "VERIFIED")
     print("content-addressed identity", report.package_sha256, "VERIFIED")
     print("STL/3MF/render/manufacturing evidence", "COMPLETE")
