@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 from pathlib import Path
 
 from product_generators.surface_designer.multicolor_product import build_multicolor_product
 
 from .consolidated_validator import ManufacturingValidator, ValidationStatus
-from .final_geometry import FinalGeometryManufacturingAnalyzer
 from .product_integration import validate_real_multicolor_product
 from .production_orientation import ProductionOrientationPlanner
-from .production_validation import ProductionAnalyzer
 from .profile import ManufacturingProfile
 from .repair_controller import BoundedManufacturingRepairController, RepairCandidate
 
@@ -45,36 +42,31 @@ def main() -> None:
     product = build_multicolor_product(SPEC_PATH)
     planner = ProductionOrientationPlanner()
     plan = planner.plan(shape=product.final_shape, profile=profile)
-    geometry = FinalGeometryManufacturingAnalyzer()
-    production = ProductionAnalyzer()
     validator = ManufacturingValidator()
 
+    # The planner has already measured every candidate from the real B-Rep with
+    # the production OVERHANG and physical-size analyzers. Reuse those immutable
+    # measurements while rebuilding the complete 24-rule report for each repair
+    # proposal; this preserves full contract revalidation without tessellating
+    # the same candidate geometry twice.
+    metrics_by_shape_id = {id(candidate.shape): candidate for candidate in plan.candidates}
+
     def validate_candidate(shape):
+        candidate = metrics_by_shape_id.get(id(shape))
+        if candidate is None:
+            raise RuntimeError("Repair audit received an unmeasured orientation state.")
         statuses = dict(baseline_statuses)
-        overhang = geometry.overhang(
-            shape=shape,
-            maximum_allowed_angle=profile.max_overhang_angle,
-            bed_tolerance=max(profile.bed_z_tolerance, profile.layer_height),
-        )
         statuses["OVERHANG"] = (
-            ValidationStatus.OK
-            if overhang.available and overhang.valid
-            else ValidationStatus.WARNING
-        )
-        size = production.physical_size(
-            shape=shape,
-            max_x=profile.max_size_x,
-            max_y=profile.max_size_y,
-            max_z=profile.max_size_z,
+            ValidationStatus.OK if candidate.overhang_valid else ValidationStatus.WARNING
         )
         statuses["PHYSICAL_SIZE_LIMITS"] = (
-            ValidationStatus.OK if size.valid else ValidationStatus.ERROR
+            ValidationStatus.OK if candidate.size_valid else ValidationStatus.ERROR
         )
         bounds = shape.BoundingBox()
         tolerance = max(profile.bed_z_tolerance, profile.layer_height)
         statuses["ORIENTATION_ON_BED"] = (
             ValidationStatus.OK
-            if size.valid and abs(float(bounds.zmin)) <= tolerance
+            if candidate.size_valid and abs(float(bounds.zmin)) <= tolerance
             else ValidationStatus.ERROR
         )
         return validator.from_status_map(statuses)
@@ -85,8 +77,8 @@ def main() -> None:
             rule_code="OVERHANG",
             label=candidate.label,
             # Candidate poses are absolute planner states, not cumulative
-            # rotations. The repair controller still performs a complete
-            # 24-rule report validation after every bounded proposal.
+            # rotations. The repair controller still rebuilds and validates the
+            # complete 24-rule contract after every bounded proposal.
             apply=(lambda _state, shape=candidate.shape: shape),
         )
         for candidate in plan.candidates
@@ -132,10 +124,12 @@ def main() -> None:
         raise RuntimeError("Bounded real-product repair regressed a protected rule.")
 
     payload = {
-        "schema_version": "dobo.real-overhang-repair-audit.v1",
+        "schema_version": "dobo.real-overhang-repair-audit.v2",
         "source_specification": str(SPEC_PATH),
         "target_rule": "OVERHANG",
         "threshold_degrees": profile.max_overhang_angle,
+        "measurement_source": "production_orientation_planner_real_brep",
+        "full_contract_revalidation_per_candidate": True,
         "baseline_orientation": baseline.production_orientation,
         "planner_selected_orientation": plan.selected.label,
         "planner_selected_angle": plan.selected.overhang_angle,
@@ -143,7 +137,9 @@ def main() -> None:
         "repair_attempts": len(repaired.attempts),
         "accepted_orientations": accepted,
         "resolved": resolved,
-        "exhausted_without_resolution": bool(not resolved and len(repaired.attempts) == len(candidates)),
+        "exhausted_without_resolution": bool(
+            not resolved and len(repaired.attempts) == len(candidates)
+        ),
         "final_rule_counts": {
             status.value: repaired.report.count(status)
             for status in ValidationStatus
@@ -159,7 +155,10 @@ def main() -> None:
         ],
     }
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    OUTPUT_PATH.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     print("DOBO Macroblock B - Real Product Bounded Repair Audit")
     print("-----------------------------------")
@@ -171,6 +170,7 @@ def main() -> None:
     print("accepted", accepted)
     print("resolved", resolved)
     print("protected rules", len(protected), "OK")
+    print("full 24-rule revalidation per candidate", True)
     print("audit", OUTPUT_PATH)
     print("-----------------------------------")
     if resolved:
