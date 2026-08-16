@@ -18,6 +18,29 @@ SPEC_PATH = Path(__file__).resolve().parents[1] / "surface_designer" / "v2_proto
 B_CHECKPOINT = "b9ceaddf89b31d0b9cbd50f07657dc56ad355d72"
 
 
+def _canonical_manufacturing_mesh(stl_path: str | Path) -> trimesh.Trimesh:
+    """Load exported STL as a welded production mesh for topology validation.
+
+    STL stores triangles independently and may duplicate vertices at every face.
+    ``process=True`` performs Trimesh's deterministic vertex welding and normal
+    cleanup before we evaluate connectivity/watertightness. This does not repair
+    open geometry: genuine holes or disconnected shells remain invalid.
+    """
+    loaded = trimesh.load_mesh(stl_path, process=True)
+    if isinstance(loaded, trimesh.Scene):
+        geometry = tuple(loaded.geometry.values())
+        if not geometry:
+            raise RuntimeError("Production STL contains no mesh geometry.")
+        loaded = trimesh.util.concatenate(geometry)
+        loaded.process(validate=True)
+    if not isinstance(loaded, trimesh.Trimesh):
+        raise RuntimeError(f"Unsupported production mesh type: {type(loaded)!r}")
+    loaded.process(validate=True)
+    if len(loaded.vertices) <= 0 or len(loaded.faces) <= 0:
+        raise RuntimeError("Canonical production mesh is empty.")
+    return loaded
+
+
 def main() -> None:
     motor_revision = os.environ.get("DOBO_MOTOR_SOURCE_REVISION", "unknown-local-revision").strip()
     if not motor_revision:
@@ -25,6 +48,8 @@ def main() -> None:
 
     specification = V2Prototype1Parser().parse_file(SPEC_PATH)
     generated = build_v2_prototype_1(specification)
+    if not generated.shape.isValid() or generated.solid_count != 1:
+        raise RuntimeError("Generated CAD product is not one valid solid.")
     output = Path(generated.stl_path).parent
 
     contract = RenderContract.standard(RenderIntent.PRODUCTION)
@@ -36,9 +61,7 @@ def main() -> None:
     if len(renders) != len(contract.views):
         raise RuntimeError("Render executor did not satisfy the complete contract.")
 
-    mesh = trimesh.load_mesh(generated.stl_path, process=False)
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
+    mesh = _canonical_manufacturing_mesh(generated.stl_path)
     three_mf_path = output / "v2_prototype_1_c2.3mf"
     exported = ThreeMFMeshExporter.export(
         mesh,
@@ -46,16 +69,22 @@ def main() -> None:
         name="v2_prototype_1_c2",
     )
 
+    components = tuple(mesh.split(only_watertight=False))
     manufacturing_path = output / "manufacturing_evidence_c2.json"
     manufacturing_path.write_text(
         json.dumps(
             {
                 "schema_version": "dobo.manufacturing-evidence.v1",
                 "macroblock_b_checkpoint": B_CHECKPOINT,
+                "cad_valid": bool(generated.shape.isValid()),
+                "cad_solid_count": int(generated.solid_count),
+                "mesh_processing": "trimesh-process-validate",
                 "watertight": bool(mesh.is_watertight),
                 "winding_consistent": bool(mesh.is_winding_consistent),
-                "component_count": len(tuple(mesh.split(only_watertight=False))),
+                "component_count": len(components),
                 "volume_mm3": float(abs(mesh.volume)),
+                "vertex_count": int(len(mesh.vertices)),
+                "face_count": int(len(mesh.faces)),
                 "source_stl": Path(generated.stl_path).name,
                 "three_mf": Path(exported.path).name,
             },
@@ -125,6 +154,10 @@ def main() -> None:
     print("Macroblock B checkpoint", B_CHECKPOINT, "PRESERVED")
     print("Motor/source revision", motor_revision, "BOUND")
     print("deterministic render views", len(renders), "OK")
+    print("CAD solid", generated.solid_count, "VALID")
+    print("manufacturing mesh watertight", mesh.is_watertight, "OK")
+    print("manufacturing mesh winding", mesh.is_winding_consistent, "OK")
+    print("manufacturing mesh components", len(components), "OK")
     print("STL + 3MF", "OK")
     print("manufacturing evidence", manufacturing_path.name, "OK")
     print("provenance evidence", provenance_path.name, "OK")
