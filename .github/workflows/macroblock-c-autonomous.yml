@@ -16,7 +16,7 @@ concurrency:
 jobs:
   validate-render-versioning-and-package:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       PYTHONPATH: app
       PYTHONUNBUFFERED: '1'
@@ -42,10 +42,13 @@ jobs:
         run: |
           python -m py_compile app/product_generators/production_package/__init__.py
           python -m py_compile app/product_generators/production_package/render_contract.py
+          python -m py_compile app/product_generators/production_package/render_executor.py
           python -m py_compile app/product_generators/production_package/bundle.py
+          python -m py_compile app/product_generators/production_package/content_addressed.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_render_contract.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_bundle.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_v2_package.py
+          python -m py_compile app/product_generators/production_package/test_macroblock_c_c2_end_to_end.py
 
       - name: Preserve Macroblock A accepted regression contract
         run: |
@@ -82,16 +85,16 @@ jobs:
           python -m product_generators.manufacturability.test_macroblock_b_production_handoff
 
       - name: Validate deterministic render contract
-        run: |
-          python -m product_generators.production_package.test_macroblock_c_render_contract
+        run: python -m product_generators.production_package.test_macroblock_c_render_contract
 
       - name: Validate deterministic versioned production package
-        run: |
-          python -m product_generators.production_package.test_macroblock_c_bundle
+        run: python -m product_generators.production_package.test_macroblock_c_bundle
 
       - name: Validate V2 JSON to STL render package
-        run: |
-          python -m product_generators.production_package.test_macroblock_c_v2_package
+        run: python -m product_generators.production_package.test_macroblock_c_v2_package
+
+      - name: Validate C2 real render and auditable package
+        run: python -m product_generators.production_package.test_macroblock_c_c2_end_to_end
 
       - name: Upload Macroblock C package evidence
         if: always()
