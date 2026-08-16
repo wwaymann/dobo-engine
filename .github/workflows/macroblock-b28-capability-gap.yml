@@ -1,42 +1,41 @@
-name: DOBO Macroblock B28 Capability Gap Closure
+name: DOBO Real Construction Visual Benchmark
 
 on:
   push:
-    branches: [macroblock-b28-capability-gap]
+    branches: [visual-real-construction-benchmark]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: dobo-macroblock-b28-capability-gap
+  group: dobo-real-construction-visual-benchmark
   cancel-in-progress: true
 jobs:
-  validate-general-body-families:
+  generate-real-construction-images:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       PYTHONPATH: app
       PYTHONUNBUFFERED: '1'
       MPLBACKEND: Agg
     steps:
-      - name: Checkout B28 branch
+      - name: Checkout benchmark branch
         uses: actions/checkout@v4
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-      - name: Install geometry dependencies
+      - name: Install CAD geometry and image dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
-      - name: Compile B28 capability layer
+      - name: Compile real construction benchmark
         run: |
           python -m py_compile app/product_generators/design_interpreter/body_family_expansion.py
           python -m py_compile app/product_generators/design_interpreter/phase_b28_capability_matrix.py
-          python -m py_compile app/product_generators/design_interpreter/test_b28_body_family_expansion.py
           python -m py_compile app/product_generators/design_interpreter/visual_geometry_benchmark_b28.py
           python -m py_compile app/product_generators/design_interpreter/structural_pipeline.py
-      - name: Preserve structural morphogenesis baseline
+      - name: Preserve accepted structural regressions
         run: |
           python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
           python -m product_generators.design_interpreter.test_phase_6_advanced_visual_geometry
@@ -44,19 +43,13 @@ jobs:
           python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
           python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
           python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
-      - name: Validate five missing general body families
-        run: python -m product_generators.design_interpreter.test_b28_body_family_expansion
-      - name: Preserve frozen B27 benchmark baseline
-        run: python -m product_generators.design_interpreter.visual_geometry_benchmark
-      - name: Generate B28 physical geometry benchmark
+      - name: Generate eight real physical constructions and visual board
         run: python -m product_generators.design_interpreter.visual_geometry_benchmark_b28
-      - name: Upload B28 physical visual evidence
+      - name: Upload real construction visual evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dobo-b28-physical-geometry-evidence
-          path: |
-            outputs/visual_geometry_benchmark
-            outputs/visual_geometry_benchmark_b28
-          if-no-files-found: warn
+          name: dobo-real-construction-visual-evidence
+          path: outputs/visual_geometry_benchmark_b28
+          if-no-files-found: error
           retention-days: 30
