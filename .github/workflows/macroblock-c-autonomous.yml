@@ -20,6 +20,7 @@ jobs:
     env:
       PYTHONPATH: app
       PYTHONUNBUFFERED: '1'
+      DOBO_MOTOR_SOURCE_REVISION: ${{ github.sha }}
 
     steps:
       - name: Checkout Macroblock C branch
@@ -45,10 +46,12 @@ jobs:
           python -m py_compile app/product_generators/production_package/render_executor.py
           python -m py_compile app/product_generators/production_package/bundle.py
           python -m py_compile app/product_generators/production_package/content_addressed.py
+          python -m py_compile app/product_generators/production_package/package_integrity.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_render_contract.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_bundle.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_v2_package.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_c2_end_to_end.py
+          python -m py_compile app/product_generators/production_package/test_macroblock_c_c3_integrity.py
 
       - name: Preserve Macroblock A accepted regression contract
         run: |
@@ -71,6 +74,7 @@ jobs:
 
       - name: Preserve Macroblock B accepted manufacturing contract
         run: |
+          git cat-file -e b9ceaddf89b31d0b9cbd50f07657dc56ad355d72^{commit}
           python -m product_generators.manufacturability.test_phase_7_8_color_final_production
           python -m product_generators.manufacturability.test_phase_7_9_consolidated_validator
           python -m product_generators.manufacturability.test_macroblock_b_final_geometry
@@ -87,14 +91,17 @@ jobs:
       - name: Validate deterministic render contract
         run: python -m product_generators.production_package.test_macroblock_c_render_contract
 
-      - name: Validate deterministic versioned production package
+      - name: Validate deterministic path-independent production identity
         run: python -m product_generators.production_package.test_macroblock_c_bundle
 
       - name: Validate V2 JSON to STL render package
         run: python -m product_generators.production_package.test_macroblock_c_v2_package
 
-      - name: Validate C2 real render and auditable package
+      - name: Validate C3 real render and auditable package
         run: python -m product_generators.production_package.test_macroblock_c_c2_end_to_end
+
+      - name: Verify C3 materialized package integrity
+        run: python -m product_generators.production_package.test_macroblock_c_c3_integrity
 
       - name: Upload Macroblock C package evidence
         if: always()
