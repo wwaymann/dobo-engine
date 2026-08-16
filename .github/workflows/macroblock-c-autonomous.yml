@@ -1,0 +1,105 @@
+name: DOBO Macroblock C Autonomous
+
+on:
+  push:
+    branches:
+      - macroblock-c-autonomous
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dobo-macroblock-c-autonomous
+  cancel-in-progress: true
+
+jobs:
+  validate-render-versioning-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Checkout Macroblock C branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install CAD and geometry dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow
+
+      - name: Compile Macroblock C foundation
+        run: |
+          python -m py_compile app/product_generators/production_package/__init__.py
+          python -m py_compile app/product_generators/production_package/render_contract.py
+          python -m py_compile app/product_generators/production_package/bundle.py
+          python -m py_compile app/product_generators/production_package/test_macroblock_c_render_contract.py
+          python -m py_compile app/product_generators/production_package/test_macroblock_c_bundle.py
+          python -m py_compile app/product_generators/production_package/test_macroblock_c_v2_package.py
+
+      - name: Preserve Macroblock A accepted regression contract
+        run: |
+          python -m product_generators.design_interpreter.test_phase_3a_semantic_contract
+          python -m product_generators.design_interpreter.test_phase_3b_semantic_compiler
+          python -m product_generators.design_interpreter.test_phase_3c_prompt_interpreter
+          python -m product_generators.design_interpreter.test_phase_3d_image_interpreter
+          python -m product_generators.design_interpreter.test_phase_3e_proposal_repair
+          python -m product_generators.design_interpreter.test_phase_4a_structural_vocabulary
+          python -m product_generators.design_interpreter.test_phase_4g_4k_visual_acceptance
+          python -m product_generators.design_interpreter.test_phase_4l_4p_facial_volume
+          python -m product_generators.design_interpreter.test_phase_4q_4u_canonical_face
+          python -m product_generators.design_interpreter.test_phase_5_generalized_design_grammar
+          python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
+          python -m product_generators.design_interpreter.test_phase_6_advanced_visual_geometry
+          python -m product_generators.design_interpreter.test_macroblock_a_7_8
+          python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
+          python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
+          python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
+
+      - name: Preserve Macroblock B accepted manufacturing contract
+        run: |
+          python -m product_generators.manufacturability.test_phase_7_8_color_final_production
+          python -m product_generators.manufacturability.test_phase_7_9_consolidated_validator
+          python -m product_generators.manufacturability.test_macroblock_b_final_geometry
+          python -m product_generators.manufacturability.test_macroblock_b_repair_controller
+          python -m product_generators.manufacturability.test_macroblock_b_geometry_repairs
+          python -m product_generators.manufacturability.test_macroblock_b_production_orientation
+          python -m product_generators.manufacturability.test_macroblock_b_planned_3mf_export
+          python -m product_generators.manufacturability.test_macroblock_b_3mf_placement
+          python -m product_generators.manufacturability.test_macroblock_b_real_overhang_sources
+          python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
+          python -m product_generators.manufacturability.test_macroblock_b_real_repair_audit
+          python -m product_generators.manufacturability.test_macroblock_b_production_handoff
+
+      - name: Validate deterministic render contract
+        run: |
+          python -m product_generators.production_package.test_macroblock_c_render_contract
+
+      - name: Validate deterministic versioned production package
+        run: |
+          python -m product_generators.production_package.test_macroblock_c_bundle
+
+      - name: Validate V2 JSON to STL render package
+        run: |
+          python -m product_generators.production_package.test_macroblock_c_v2_package
+
+      - name: Upload Macroblock C package evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-macroblock-c-package-evidence
+          path: |
+            outputs/product_generators/surface_designer/v2_prototype_1
+            outputs/product_generators/surface_designer/phase_6_multicolor_3mf
+          if-no-files-found: warn
+          retention-days: 14
