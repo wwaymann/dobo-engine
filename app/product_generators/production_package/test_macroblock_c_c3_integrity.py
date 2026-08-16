@@ -30,14 +30,19 @@ def main() -> None:
         raise RuntimeError("Motor/source Git revision is missing from package provenance.")
 
     records = {str(item["kind"]): item for item in payload.get("artifacts", [])}
+    # Keep integrity acceptance bound to the canonical PRODUCTION render contract:
+    # front, side, top and iso. Do not alias commercial "hero_iso" or introduce
+    # a benchmark-only "perspective" name because the package must prove exactly
+    # the render views that were requested and materialized by RenderContract.
     required = {
         "stl",
         "3mf",
         "manufacturing_evidence",
         "production_provenance",
-        "render_perspective",
         "render_front",
+        "render_side",
         "render_top",
+        "render_iso",
     }
     missing = sorted(required - set(records))
     if missing:
