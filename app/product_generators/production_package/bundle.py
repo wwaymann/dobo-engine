@@ -36,13 +36,14 @@ class GenerationPackageManifest:
 class ProductionPackageBuilder:
     """Build a deterministic, auditable record of a DOBO generation.
 
-    Package identity is content-addressed: it depends on the source JSON,
-    Motor/source revision, render contract version and artifact hashes. Runtime
-    timestamps are intentionally excluded so the same generation inputs produce
-    the same identity.
+    Package identity is content-addressed and intentionally independent from
+    absolute filesystem locations. It depends only on source content, declared
+    Motor/source revision, render contract version, artifact logical names,
+    artifact kinds, sizes and hashes. This allows the same production inputs to
+    receive the same identity on a developer workstation and in CI.
     """
 
-    SCHEMA_VERSION = "dobo.production-package.v1"
+    SCHEMA_VERSION = "dobo.production-package.v2"
 
     @staticmethod
     def _file_sha256(path: Path) -> str:
@@ -60,6 +61,47 @@ class ProductionPackageBuilder:
             separators=(",", ":"),
             ensure_ascii=False,
         ).encode("utf-8")
+
+    @classmethod
+    def identity_payload(
+        cls,
+        *,
+        motor_version: str,
+        source_revision: str,
+        source_sha256: str,
+        source_logical_name: str,
+        render_contract_version: str,
+        artifacts: tuple[ArtifactRecord, ...],
+    ) -> dict[str, object]:
+        return {
+            "schema_version": cls.SCHEMA_VERSION,
+            "motor_version": motor_version,
+            "source_revision": source_revision,
+            "source_logical_name": source_logical_name,
+            "source_sha256": source_sha256,
+            "render_contract_version": render_contract_version,
+            "artifacts": [
+                {
+                    "kind": record.kind,
+                    "logical_name": record.logical_name,
+                    "sha256": record.sha256,
+                    "size_bytes": record.size_bytes,
+                }
+                for record in artifacts
+            ],
+        }
+
+    @classmethod
+    def package_hash_from_manifest(cls, manifest: GenerationPackageManifest) -> str:
+        payload = cls.identity_payload(
+            motor_version=manifest.motor_version,
+            source_revision=manifest.source_revision,
+            source_sha256=manifest.source_sha256,
+            source_logical_name=Path(manifest.source_specification).name,
+            render_contract_version=manifest.render_contract_version,
+            artifacts=manifest.artifacts,
+        )
+        return sha256(cls._canonical_bytes(payload)).hexdigest()
 
     def build(
         self,
@@ -102,16 +144,17 @@ class ProductionPackageBuilder:
             )
 
         source_hash = self._file_sha256(source_path)
-        identity_payload: dict[str, object] = {
-            "schema_version": self.SCHEMA_VERSION,
-            "motor_version": motor_version,
-            "source_revision": source_revision,
-            "source_specification": str(source_path),
-            "source_sha256": source_hash,
-            "render_contract_version": render_contract.schema_version,
-            "artifacts": [asdict(record) for record in records],
-        }
-        package_hash = sha256(self._canonical_bytes(identity_payload)).hexdigest()
+        provisional = GenerationPackageManifest(
+            schema_version=self.SCHEMA_VERSION,
+            motor_version=motor_version,
+            source_revision=source_revision,
+            source_specification=str(source_path),
+            source_sha256=source_hash,
+            render_contract_version=render_contract.schema_version,
+            artifacts=tuple(records),
+            package_sha256="",
+        )
+        package_hash = self.package_hash_from_manifest(provisional)
 
         return GenerationPackageManifest(
             schema_version=self.SCHEMA_VERSION,
