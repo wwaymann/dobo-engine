@@ -1,0 +1,64 @@
+name: DOBO C0 Capability Reconnection
+
+on:
+  push:
+    branches: [consolidation-c0-capability-reconnection]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dobo-c0-capability-reconnection
+  cancel-in-progress: true
+
+jobs:
+  validate-capability-accumulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+      MPLBACKEND: Agg
+    steps:
+      - name: Checkout C0 branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install CAD and geometry dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
+
+      - name: Compile C0 composer contract
+        run: |
+          python -m py_compile app/product_generators/design_interpreter/geometry_composer.py
+          python -m py_compile app/product_generators/design_interpreter/test_c0_capability_accumulation.py
+
+      - name: Validate executable capability inventory
+        run: python -m product_generators.design_interpreter.test_c0_capability_accumulation
+
+      - name: Preserve native surface text capability
+        run: python -m product_generators.surface_designer.test_native_surface_text_capability
+
+      - name: Preserve hybrid BRep composition
+        run: python -m product_generators.surface_designer.test_phase_4_hybrid
+
+      - name: Preserve JSON product composition
+        run: python -m product_generators.surface_designer.test_phase_5_json_composition
+
+      - name: Preserve text decoration and multicolor 3MF accumulation
+        run: python -m product_generators.surface_designer.test_phase_6_multicolor_3mf
+
+      - name: Preserve modern morphological pipeline
+        run: |
+          python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
+          python -m product_generators.design_interpreter.test_phase_6_advanced_visual_geometry
+
+      - name: Preserve manufacturability pipeline
+        run: python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
