@@ -52,6 +52,7 @@ jobs:
           python -m py_compile app/product_generators/production_package/test_macroblock_c_v2_package.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_c2_end_to_end.py
           python -m py_compile app/product_generators/production_package/test_macroblock_c_c3_integrity.py
+          python -m py_compile app/product_generators/production_package/test_macroblock_c_final_acceptance.py
 
       - name: Preserve Macroblock A accepted regression contract
         run: |
@@ -102,6 +103,9 @@ jobs:
 
       - name: Verify C3 materialized package integrity
         run: python -m product_generators.production_package.test_macroblock_c_c3_integrity
+
+      - name: Final Macroblock C acceptance battery
+        run: python -m product_generators.production_package.test_macroblock_c_final_acceptance
 
       - name: Upload Macroblock C package evidence
         if: always()
