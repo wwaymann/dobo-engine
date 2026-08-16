@@ -55,6 +55,7 @@ jobs:
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_planned_3mf_export.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_production_handoff.py
           python -m py_compile app/product_generators/manufacturability/test_macroblock_b_real_overhang_sources.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_real_repair_audit.py
           python -m py_compile app/product_generators/manufacturability/product_integration.py
           python -m py_compile app/product_generators/surface_designer/multicolor_product.py
 
@@ -110,6 +111,10 @@ jobs:
       - name: Validate current real product manufacturing baseline
         run: |
           python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
+
+      - name: Audit bounded real-product repair space
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_real_repair_audit
 
       - name: Build auditable production handoff manifest
         run: |
