@@ -1,0 +1,86 @@
+name: DOBO C0 Morphology Reintroduction 01
+
+on:
+  push:
+    branches: [c0-morphology-reintro-01]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dobo-c0-morphology-reintro-01
+  cancel-in-progress: true
+
+jobs:
+  morphology-plus-accumulated-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install CAD geometry and visual dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
+      - name: Compile selectively reintroduced D1 capability
+        run: |
+          python -m py_compile app/product_generators/organic_shapes/specification.py
+          python -m py_compile app/product_generators/organic_shapes/fields.py
+          python -m py_compile app/product_generators/design_interpreter/structural_morphogenesis.py
+          python -m py_compile app/product_generators/design_interpreter/phase_d_visual_matrix.py
+          python -m py_compile app/product_generators/design_interpreter/test_macroblock_d_advanced_forms.py
+          python -m py_compile app/product_generators/design_interpreter/visual_macroblock_d_benchmark.py
+      - name: Validate D1 expressive routing
+        run: python -m product_generators.design_interpreter.test_macroblock_d_advanced_forms
+      - name: Generate real D1 expressive constructions
+        run: python -m product_generators.design_interpreter.visual_macroblock_d_benchmark
+      - name: Preserve full accumulated design regression contract
+        run: |
+          python -m product_generators.design_interpreter.test_phase_3a_semantic_contract
+          python -m product_generators.design_interpreter.test_phase_3b_semantic_compiler
+          python -m product_generators.design_interpreter.test_phase_3c_prompt_interpreter
+          python -m product_generators.design_interpreter.test_phase_3d_image_interpreter
+          python -m product_generators.design_interpreter.test_phase_3e_proposal_repair
+          python -m product_generators.design_interpreter.test_phase_4a_structural_vocabulary
+          python -m product_generators.design_interpreter.test_phase_4g_4k_visual_acceptance
+          python -m product_generators.design_interpreter.test_phase_4l_4p_facial_volume
+          python -m product_generators.design_interpreter.test_phase_4q_4u_canonical_face
+          python -m product_generators.design_interpreter.test_phase_5_generalized_design_grammar
+          python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
+          python -m product_generators.design_interpreter.test_phase_6_advanced_visual_geometry
+          python -m product_generators.design_interpreter.test_macroblock_a_7_8
+          python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
+          python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
+          python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
+      - name: Preserve full accumulated manufacturing and production contract
+        run: |
+          python -m product_generators.manufacturability.test_phase_7_8_color_final_production
+          python -m product_generators.manufacturability.test_phase_7_9_consolidated_validator
+          python -m product_generators.manufacturability.test_macroblock_b_final_geometry
+          python -m product_generators.manufacturability.test_macroblock_b_repair_controller
+          python -m product_generators.manufacturability.test_macroblock_b_geometry_repairs
+          python -m product_generators.manufacturability.test_macroblock_b_production_orientation
+          python -m product_generators.manufacturability.test_macroblock_b_planned_3mf_export
+          python -m product_generators.manufacturability.test_macroblock_b_3mf_placement
+          python -m product_generators.manufacturability.test_macroblock_b_real_overhang_sources
+          python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
+          python -m product_generators.manufacturability.test_macroblock_b_real_repair_audit
+          python -m product_generators.manufacturability.test_macroblock_b_production_handoff
+      - name: Upload selective morphology evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-morphology-reintro-01-evidence
+          path: |
+            outputs/macroblock_d_visual_benchmark
+            outputs/product_generators/surface_designer/phase_6_multicolor_3mf
+          if-no-files-found: warn
+          retention-days: 14
