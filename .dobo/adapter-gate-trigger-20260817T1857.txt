@@ -1,0 +1,2 @@
+Trigger C0 advanced body adapter gate after verified interface adapter creation.
+No engine or geometry implementation changes.
