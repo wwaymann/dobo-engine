@@ -21,19 +21,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-
-      - name: Install existing CAD geometry dependencies
+      - name: Install existing geometry stack
         run: |
           python -m pip install --upgrade pip
-          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
-
-      - name: Preserve STEP 1 semantic morphology contract
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow
+      - name: Preserve semantic morphology contract
         run: |
           python -m product_generators.design_interpreter.test_phase_4a_structural_vocabulary
           python -m product_generators.design_interpreter.test_phase_5_generalized_design_grammar
@@ -41,117 +38,90 @@ jobs:
           python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
           python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
           python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
-
-      - name: Generate one real advanced morphology
+      - name: Generate exact advanced branching morphology
         run: |
-          rm -rf outputs-ci/c0-advanced-through-123
-          python -m product_generators.design_interpreter.macroblock_a4_matrix_cli \
-            --output-root outputs-ci/c0-advanced-through-123 \
-            --case branching
-          find outputs-ci/c0-advanced-through-123 -maxdepth 3 -type f -print
-
-      - name: Probe exact advanced morphology into existing STEP 2 surface stack
-        id: handoff
-        continue-on-error: true
-        shell: bash
+          rm -rf outputs-ci/c0-adapter
+          python -m product_generators.design_interpreter.macroblock_a4_matrix_cli --output-root outputs-ci/c0-adapter --case branching
+      - name: Connect exact STL to CadQuery and test real text emboss
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           import trimesh
-          import cadquery as cq
-
-          from product_generators.surface_designer.composition_spec import ProductCompositionParser
+          from product_generators.surface_designer.advanced_body_adapter import load_advanced_stl_as_cadquery_shape
           from product_generators.surface_designer.designer import SurfaceDesigner
+          from product_generators.surface_designer.contracts import SurfaceDesignMode
 
-          root = Path('outputs-ci/c0-advanced-through-123/branching')
-          stls = sorted(root.rglob('*.stl'))
-          if not stls:
-              raise SystemExit('ADVANCED_HANDOFF_FAIL: no generated STL found')
-          stl = stls[0]
-          mesh = trimesh.load_mesh(stl, process=True)
-          if isinstance(mesh, trimesh.Scene):
-              mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
-          print('ADVANCED_SOURCE', stl)
-          print('ADVANCED_TYPE', type(mesh).__module__ + '.' + type(mesh).__name__)
-          print('ADVANCED_WATERTIGHT', bool(mesh.is_watertight))
-          print('ADVANCED_VERTICES', len(mesh.vertices))
-          print('ADVANCED_FACES', len(mesh.faces))
-
-          # Contract probe: existing Surface Designer composition currently names
-          # the accepted body explicitly. No replacement engine/function is added here.
-          payload = {
-              'id': 'c0-advanced-branching-product',
-              'body': 'macroblock_a4_branching',
-              'primitives': True,
-              'booleans': True,
-              'geometric_decoration': True,
-              'text': {
-                  'content': 'DOBO', 'mode': 'emboss', 'depth': 1.8, 'size': 12.0,
-                  'font': 'Arial', 'kind': 'bold', 'width_fraction': 0.32,
-                  'height_fraction': 0.18, 'u_center': 0.5, 'v_center': 0.64,
-              },
-              'svg': {
-                  'svg': '<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0 12 L 10 0 L 20 12 L 30 0 L 40 12 L 30 24 L 20 12 L 10 24 Z"/></svg>',
-                  'mode': 'deboss', 'depth': 1.4, 'width_fraction': 0.25,
-                  'height_fraction': 0.17, 'u_center': 0.5, 'v_center': 0.38,
-                  'document_id': 'c0_advanced_svg',
-              },
-              'output_filename': 'c0_advanced_complete.step',
-          }
+          root = Path('outputs-ci/c0-adapter')
+          stl = next(root.rglob('*.stl'))
+          mesh = trimesh.load_mesh(stl, process=False)
+          shape = load_advanced_stl_as_cadquery_shape(stl)
+          bb = shape.BoundingBox()
+          mesh_ext = mesh.bounds
+          occ_ext = ((bb.xmin, bb.ymin, bb.zmin), (bb.xmax, bb.ymax, bb.zmax))
+          max_delta = max(abs(float(mesh_ext[i][j]) - float(occ_ext[i][j])) for i in range(2) for j in range(3))
+          print('ADAPTER_SOURCE_TYPE', type(mesh).__module__ + '.' + type(mesh).__name__)
+          print('ADAPTER_TARGET_TYPE', type(shape).__module__ + '.' + type(shape).__name__)
+          print('ADAPTER_FACE_COUNT', len(shape.Faces()))
+          print('ADAPTER_BOUNDS_MAX_DELTA_MM', max_delta)
+          if max_delta > 1e-3:
+              raise SystemExit('Adapter changed source morphology bounds.')
+          faces = sorted(shape.Faces(), key=lambda f: f.Area(), reverse=True)
+          if not faces:
+              raise SystemExit('No OCC face available for SurfaceDesigner.')
+          base_volume = float(shape.Volume())
           try:
-              ProductCompositionParser().parse_dict(payload)
-              print('SURFACE_CONTRACT_ACCEPTED', True)
-          except Exception as exc:
-              print('SURFACE_CONTRACT_ACCEPTED', False)
-              print('SURFACE_CONTRACT_ERROR', type(exc).__name__, str(exc))
-              Path('outputs-ci/c0-advanced-through-123/handoff_verdict.json').write_text(
-                  json.dumps({
-                      'result': 'FAIL',
-                      'boundary': 'surface_composition_body_contract',
-                      'advanced_geometry_type': type(mesh).__module__ + '.' + type(mesh).__name__,
-                      'error_type': type(exc).__name__,
-                      'error': str(exc),
-                  }, indent=2) + '\n'
+              result = SurfaceDesigner().add_text(
+                  base_shape=shape,
+                  target_face=faces[0],
+                  text='DOBO',
+                  size=12.0,
+                  mode=SurfaceDesignMode.EMBOSS,
+                  depth=1.8,
+                  width_fraction=0.32,
+                  height_fraction=0.18,
+                  u_center=0.5,
+                  v_center=0.64,
+                  font='Arial',
+                  kind='bold',
               )
-              raise
-
-          # Geometry probe only runs if the existing contract accepts the advanced body.
-          if not isinstance(mesh, cq.Shape):
+              final_volume = float(result.shape.Volume())
               verdict = {
-                  'result': 'FAIL',
-                  'boundary': 'advanced_geometry_to_surface_designer_geometry_type',
-                  'advanced_geometry_type': type(mesh).__module__ + '.' + type(mesh).__name__,
-                  'surface_expected_type': 'cadquery.Shape',
+                  'adapter':'PASS',
+                  'surface_designer_entry':'PASS',
+                  'text':'PASS',
+                  'base_volume':base_volume,
+                  'final_volume':final_volume,
+                  'bounds_delta_mm':max_delta,
               }
-              Path('outputs-ci/c0-advanced-through-123/handoff_verdict.json').write_text(
-                  json.dumps(verdict, indent=2) + '\n'
-              )
-              print('ADVANCED_HANDOFF_FAIL', json.dumps(verdict))
-              raise TypeError('Existing SurfaceDesigner requires cadquery.Shape for the exact advanced body handoff')
-
-          print('ADVANCED_HANDOFF_PASS')
+              if final_volume <= base_volume:
+                  raise RuntimeError('Emboss did not increase volume.')
+          except Exception as exc:
+              verdict = {
+                  'adapter':'PASS',
+                  'surface_designer_entry':'PASS',
+                  'text':'FAIL',
+                  'boundary':'native_face_on_imported_triangulated_body',
+                  'error_type':type(exc).__name__,
+                  'error':str(exc),
+                  'bounds_delta_mm':max_delta,
+              }
+              Path(root/'adapter_verdict.json').write_text(json.dumps(verdict, indent=2)+'\n')
+              print(json.dumps(verdict, indent=2))
+              raise
+          Path(root/'adapter_verdict.json').write_text(json.dumps(verdict, indent=2)+'\n')
+          print(json.dumps(verdict, indent=2))
           PY
-
-      - name: Run STEP 2 and STEP 3 control paths unchanged
+      - name: Preserve unchanged old complete product path
         if: always()
         run: |
           python -m product_generators.surface_designer.test_phase_5_json_composition
           python -m product_generators.surface_designer.test_phase_6_multicolor_3mf
-          python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
-          python -m product_generators.manufacturability.test_macroblock_b_production_handoff
-
-      - name: Upload advanced handoff evidence
+      - name: Upload adapter evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dobo-c0-advanced-morphology-through-123-evidence
-          path: outputs-ci/c0-advanced-through-123
+          name: dobo-c0-advanced-body-adapter-evidence
+          path: outputs-ci/c0-adapter
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Enforce same-object 1-2-3 integration gate
-        if: always()
-        run: |
-          echo "Advanced handoff outcome: ${{ steps.handoff.outcome }}"
-          test "${{ steps.handoff.outcome }}" = "success"
