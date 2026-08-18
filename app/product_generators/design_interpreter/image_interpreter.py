@@ -16,7 +16,7 @@ IMAGE_INTERPRETER_VERSION = "3D.1"
 SUPPORTED_IMAGE_TYPES = {
     ".gif": "image/gif",
     ".jpeg": "image/jpeg",
-    ".jpg": "image/jpg",
+    ".jpg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
 }
