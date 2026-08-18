@@ -16,7 +16,7 @@ IMAGE_INTERPRETER_VERSION = "3D.1"
 SUPPORTED_IMAGE_TYPES = {
     ".gif": "image/gif",
     ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
+    ".jpg": "image/jpg",
     ".png": "image/png",
     ".webp": "image/webp",
 }
@@ -33,6 +33,12 @@ Rules:
   source.image_reference exactly.
 - Describe the planter itself, not its background, plant, tools, packaging,
   shadows, camera or photographic environment.
+- The main vessel body, base, rim/opening and cavity belong to the top-level
+  body/manufacturing semantics. Do not duplicate them as feature entries such
+  as rounded_body, planter_body, plant_opening, pot_opening, rim or cavity.
+- Use features only for secondary visible geometry that is distinct from the
+  canonical vessel body, such as ears, leaves, ribs, facial parts, applied
+  ornaments, cutouts or relief details.
 - Express visible geometric parts as features and spatial structure as relations.
 - Use normalized anchors as semantic estimates; do not claim pixel precision.
 - Use only values permitted by the supplied JSON Schema.
