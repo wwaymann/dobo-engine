@@ -1,7 +1,7 @@
 diff --git a/app/product_generators/design_interpreter/semantic_compiler.py b/app/product_generators/design_interpreter/semantic_compiler.py
 --- a/app/product_generators/design_interpreter/semantic_compiler.py
 +++ b/app/product_generators/design_interpreter/semantic_compiler.py
-@@ -414,11 +414,15 @@ class SemanticToMotorCompiler:
+@@ -414,10 +414,14 @@ class SemanticToMotorCompiler:
                  round_mm=max(0.4, 0.25 * minimum_feature_mm),
              )
          else:
