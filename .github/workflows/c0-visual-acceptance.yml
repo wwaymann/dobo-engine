@@ -118,7 +118,10 @@ jobs:
               manifests = list((root / label).rglob('*.manifest.json'))
               if len(stls) != 1 or len(threemf) != 1 or len(manifests) != 1:
                   raise SystemExit(f'{label}: expected one STL, one 3MF and one manifest')
-              mesh = trimesh.load_mesh(stls[0], process=False)
+              # STL stores independent triangle vertices. Let trimesh reconstruct
+              # indexed adjacency before topology checks; process=False makes a
+              # valid exported solid appear non-watertight after reload.
+              mesh = trimesh.load_mesh(stls[0], process=True)
               if not mesh.is_watertight:
                   raise SystemExit(f'{label}: generated STL is not watertight')
               if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
