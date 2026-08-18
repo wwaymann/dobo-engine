@@ -6,7 +6,10 @@ from tempfile import TemporaryDirectory
 import trimesh
 
 from product_generators.design_interpreter.macroblock_a4_matrix_cli import main as a4_matrix_main
-from product_generators.surface_designer.advanced_body_adapter import load_advanced_stl_as_cadquery_shape
+from product_generators.surface_designer.advanced_body_adapter import (
+    load_advanced_stl_as_cadquery_shape,
+    local_surface_mapping_proxy,
+)
 from product_generators.surface_designer.contracts import SurfaceDesignMode
 from product_generators.surface_designer.designer import SurfaceDesigner
 
@@ -39,22 +42,32 @@ def test_advanced_branching_body_reaches_surface_designer_without_morphology_rep
             for j in range(3)
         )
         assert max_delta <= 1e-3
+        assert shape.Solids()
 
-        faces = sorted(shape.Faces(), key=lambda face: face.Area(), reverse=True)
-        assert faces
+        # The STL boundary is intentionally triangulated, so one OCC face is
+        # only one tiny triangle. Use an interface-only local mapping proxy
+        # derived from that exact mesh; the Boolean still operates on `shape`.
+        target_face = local_surface_mapping_proxy(
+            stl,
+            width_mm=34.0,
+            height_mm=22.0,
+            inset_mm=0.45,
+        )
         base_volume = float(shape.Volume())
         result = SurfaceDesigner().add_text(
             base_shape=shape,
-            target_face=faces[0],
+            target_face=target_face,
             text="DOBO",
             size=12.0,
             mode=SurfaceDesignMode.EMBOSS,
             depth=1.8,
-            width_fraction=0.32,
-            height_fraction=0.18,
+            width_fraction=0.62,
+            height_fraction=0.52,
             u_center=0.5,
-            v_center=0.64,
+            v_center=0.5,
             font="Arial",
             kind="bold",
         )
-        assert float(result.shape.Volume()) > base_volume
+        final_volume = float(result.shape.Volume())
+        assert final_volume > base_volume + 1e-8
+        assert len(result.shape.Solids()) == 1
