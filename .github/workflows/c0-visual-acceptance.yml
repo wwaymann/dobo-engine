@@ -8,6 +8,7 @@ on:
       - '.github/workflows/c0-visual-acceptance.yml'
       - 'tools/dobo_blender_acceptance.py'
       - 'patches/c0-rounded-box-depth.patch'
+      - 'patches/c0_normalize_body_relations.py'
   pull_request:
     branches:
       - main
@@ -15,6 +16,7 @@ on:
       - '.github/workflows/c0-visual-acceptance.yml'
       - 'tools/dobo_blender_acceptance.py'
       - 'patches/c0-rounded-box-depth.patch'
+      - 'patches/c0_normalize_body_relations.py'
   workflow_dispatch:
 
 permissions:
@@ -49,6 +51,12 @@ jobs:
           git apply --check patches/c0-rounded-box-depth.patch
           git apply patches/c0-rounded-box-depth.patch
           python -m py_compile app/product_generators/design_interpreter/semantic_compiler.py
+
+      - name: Normalize implicit body relations
+        shell: bash
+        run: |
+          python patches/c0_normalize_body_relations.py
+          python -m py_compile app/product_generators/design_interpreter/prompt_interpreter.py
 
       - name: Verify live-model configuration
         shell: bash
