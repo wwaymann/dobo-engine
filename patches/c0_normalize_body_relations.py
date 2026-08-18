@@ -8,3 +8,9 @@ if old not in text:
     raise SystemExit("prompt interpreter parse insertion point not found")
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
 print(path)
+
+# Keep the live-model acceptance gate on the existing manufacturability contract,
+# but normalize its minimum-feature interpretation: lateral printable size and
+# relief depth are independent checks in the contract.
+minimum_feature_patch = Path("patches/c0_normalize_minimum_feature_validation.py")
+exec(compile(minimum_feature_patch.read_text(encoding="utf-8"), str(minimum_feature_patch), "exec"))
