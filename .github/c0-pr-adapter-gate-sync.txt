@@ -1,0 +1,1 @@
+Trigger PR synchronization after installing the minimal C0 adapter gate bootstrap on main.
