@@ -7,6 +7,12 @@ on:
     paths:
       - '.github/workflows/c0-visual-acceptance.yml'
       - 'tools/dobo_blender_acceptance.py'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/c0-visual-acceptance.yml'
+      - 'tools/dobo_blender_acceptance.py'
   workflow_dispatch:
 
 permissions:
@@ -52,8 +58,6 @@ jobs:
           target = Path('outputs-ci/c0-visual-acceptance/input/reference.png')
           image = Image.new('RGB', (640, 640), 'white')
           draw = ImageDraw.Draw(image)
-          # Deliberately graphic planter reference: tapered organic vessel with
-          # three fused branching lobes that alter the external silhouette.
           draw.rounded_rectangle((205, 170, 435, 535), radius=90, fill=(65, 67, 70))
           draw.ellipse((170, 115, 470, 245), fill=(65, 67, 70))
           draw.polygon([(210,310),(90,230),(118,205),(250,285)], fill=(65,67,70))
@@ -88,7 +92,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import trimesh
-
           root = Path('outputs-ci/c0-visual-acceptance')
           for label in ('prompt', 'image'):
               stls = list((root / label).rglob('*.stl'))
@@ -125,7 +128,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from PIL import Image, ImageDraw
-
           root = Path('outputs-ci/c0-visual-acceptance')
           ref = Image.open(root/'input/reference.png').convert('RGB').resize((512,512))
           views = ['front','side','top','iso']
@@ -138,7 +140,7 @@ jobs:
                   row.paste(img,(i*512,48))
                   draw.text((i*512+12,16), f'{label} · {v}', fill='black')
               panels.append(row)
-          sheet = Image.new('RGB', (512*4, 512+560*2+80), 'white')
+          sheet = Image.new('RGB', (512*4, 1760), 'white')
           draw = ImageDraw.Draw(sheet)
           sheet.paste(ref,(0,48))
           draw.text((12,16),'visual reference input',fill='black')
