@@ -6,6 +6,9 @@ from tempfile import TemporaryDirectory
 import trimesh
 
 from product_generators.design_interpreter.macroblock_a4_matrix_cli import main as a4_matrix_main
+from product_generators.manufacturability.final_product_validation import FinalProductAnalyzer
+from product_generators.manufacturability.production_validation import ProductionAnalyzer
+from product_generators.manufacturability.profile import ManufacturingProfile
 from product_generators.surface_designer.advanced_body_adapter import (
     load_advanced_stl_as_cadquery_shape,
     local_surface_mapping_proxy,
@@ -96,3 +99,21 @@ def test_advanced_branching_body_reaches_surface_designer_without_morphology_rep
         svg_volume = float(svg_result.shape.Volume())
         assert svg_volume < text_volume - 1e-8
         assert len(svg_result.shape.Solids()) == 1
+
+        # STEP 3 gate: feed the exact same decorated branching solid directly
+        # into existing manufacturability analyzers. No legacy body is rebuilt.
+        final = FinalProductAnalyzer().analyze(shape=svg_result.shape)
+        assert final.cad_valid
+        assert final.connected
+        assert final.degenerate_geometry_ok
+        assert final.solid_count == 1
+        assert abs(final.volume - svg_volume) <= 1e-6
+
+        profile = ManufacturingProfile()
+        size = ProductionAnalyzer().physical_size(
+            shape=svg_result.shape,
+            max_x=profile.max_size_x,
+            max_y=profile.max_size_y,
+            max_z=profile.max_size_z,
+        )
+        assert size.valid
