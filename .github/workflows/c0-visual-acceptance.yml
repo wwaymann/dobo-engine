@@ -7,12 +7,14 @@ on:
     paths:
       - '.github/workflows/c0-visual-acceptance.yml'
       - 'tools/dobo_blender_acceptance.py'
+      - 'patches/c0-rounded-box-depth.patch'
   pull_request:
     branches:
       - main
     paths:
       - '.github/workflows/c0-visual-acceptance.yml'
       - 'tools/dobo_blender_acceptance.py'
+      - 'patches/c0-rounded-box-depth.patch'
   workflow_dispatch:
 
 permissions:
@@ -40,6 +42,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install openai numpy scipy scikit-image trimesh networkx shapely Pillow cadquery
+
+      - name: Apply bounded rounded-box integration
+        shell: bash
+        run: |
+          git apply --check patches/c0-rounded-box-depth.patch
+          git apply patches/c0-rounded-box-depth.patch
+          python -m py_compile app/product_generators/design_interpreter/semantic_compiler.py
 
       - name: Verify live-model configuration
         shell: bash
