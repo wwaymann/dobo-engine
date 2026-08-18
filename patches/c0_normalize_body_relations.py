@@ -20,3 +20,23 @@ patch_interpreter("app/product_generators/design_interpreter/image_interpreter.p
 # relief depth are independent checks in the contract.
 minimum_feature_patch = Path("patches/c0_normalize_minimum_feature_validation.py")
 exec(compile(minimum_feature_patch.read_text(encoding="utf-8"), str(minimum_feature_patch), "exec"))
+
+# The deterministic repair previously targeted half of maximum relief depth.
+# That can remain below the compiler's minimum-depth gate (up to 0.8 mm), so a
+# valid shallow feature could be selected for repair forever without ever
+# reaching a satisfiable value. Raise only failing depth features to the exact
+# bounded contract floor, with a 1% numerical margin, and keep the existing
+# maximum-relief ceiling intact.
+repair_path = Path("app/product_generators/design_interpreter/proposal_repair.py")
+repair_text = repair_path.read_text(encoding="utf-8")
+old_repair = '''            if operations.get("increase_depth"):\n                depth = max(\n                    size.depth_mm,\n                    min(\n                        0.8,\n                        0.5 * program.manufacturing.maximum_relief_depth_mm,\n                    ),\n                )\n'''
+new_repair = '''            if operations.get("increase_depth"):\n                required_depth = min(\n                    0.8, program.manufacturing.maximum_relief_depth_mm\n                )\n                target_depth = min(\n                    program.manufacturing.maximum_relief_depth_mm,\n                    1.01 * required_depth,\n                )\n                depth = max(size.depth_mm, target_depth)\n'''
+if new_repair in repair_text:
+    print(f"already normalized: {repair_path}")
+elif old_repair in repair_text:
+    repair_path.write_text(
+        repair_text.replace(old_repair, new_repair, 1), encoding="utf-8"
+    )
+    print(repair_path)
+else:
+    raise SystemExit("proposal-repair minimum-depth block no longer matches expected source")
