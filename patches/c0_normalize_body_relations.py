@@ -1,0 +1,10 @@
+from pathlib import Path
+
+path = Path("app/product_generators/design_interpreter/prompt_interpreter.py")
+text = path.read_text(encoding="utf-8")
+old = '''        program = SemanticProgramParser().parse_dict(response.output)\n'''
+new = '''        semantic_output = response.output\n        features = semantic_output.get("features")\n        relations = semantic_output.get("relations")\n        if isinstance(features, list) and isinstance(relations, list):\n            feature_ids = {\n                feature.get("id")\n                for feature in features\n                if isinstance(feature, dict) and isinstance(feature.get("id"), str)\n            }\n            normalized_relations = []\n            for relation in relations:\n                if not isinstance(relation, dict):\n                    normalized_relations.append(relation)\n                    continue\n                subject = relation.get("subject_id")\n                object_id = relation.get("object_id")\n                endpoints = {subject, object_id}\n                if "body" in endpoints:\n                    other = object_id if subject == "body" else subject\n                    if other in feature_ids:\n                        # Attachment to the vessel body is already encoded by\n                        # the feature's normalized surface anchor. The semantic\n                        # relation contract intentionally contains feature-to-\n                        # feature relations only, so this model shorthand is\n                        # redundant and must not be forwarded to validation.\n                        continue\n                normalized_relations.append(relation)\n            if len(normalized_relations) != len(relations):\n                semantic_output = dict(semantic_output)\n                semantic_output["relations"] = normalized_relations\n        program = SemanticProgramParser().parse_dict(semantic_output)\n'''
+if old not in text:
+    raise SystemExit("prompt interpreter parse insertion point not found")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+print(path)
