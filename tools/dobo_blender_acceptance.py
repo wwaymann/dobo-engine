@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Human-review renderer used only by the C0 prompt/image acceptance workflow.
 import argparse
 import sys
 from pathlib import Path
