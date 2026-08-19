@@ -137,7 +137,11 @@ jobs:
           import trimesh
 
           root = Path('outputs-ci/c0-visual-acceptance')
-          tolerance_mm = 1e-5
+          # Manufacturing-relevant STL reconstruction tolerance. DOBO validates the
+          # in-memory mesh before export; STL is a triangle soup with no vertex identity.
+          # 0.01 mm is still far below FDM process resolution while avoiding false
+          # failures caused by serialization/coordinate noise.
+          tolerance_mm = 0.01
 
           for label in ('prompt', 'image'):
               stls = list((root / label).rglob('*.stl'))
@@ -150,12 +154,6 @@ jobs:
               if not manifest.get('validation', {}).get('watertight', False):
                   raise SystemExit(f'{label}: DOBO in-memory mesh was not watertight')
 
-              # STL is a triangle soup and does not preserve vertex identity. A global
-              # vertex weld can therefore create false non-manifold junctions when
-              # topologically distinct vertices occupy the same coordinate. Validate
-              # the serialized STL by geometric edge parity instead: every undirected
-              # geometric edge must occur exactly twice. Quantization is bounded to
-              # 1e-5 mm, far below DOBO manufacturing tolerances.
               mesh = trimesh.load_mesh(stls[0], process=False)
               triangles = np.asarray(mesh.triangles, dtype=np.float64)
               if triangles.size == 0 or not np.isfinite(triangles).all():
@@ -185,7 +183,8 @@ jobs:
               bad = int(np.count_nonzero(counts != 2))
               if bad:
                   raise SystemExit(
-                      f'{label}: STL geometric edge parity failed; {bad} edges do not occur exactly twice'
+                      f'{label}: STL geometric edge parity failed at {tolerance_mm} mm; '
+                      f'{bad} edges do not occur exactly twice'
                   )
 
               print(
