@@ -1,0 +1,153 @@
+name: DOBO C0 Conic DOBO Regression
+
+on:
+  push:
+    branches: [c0-advanced-morphology-through-123]
+    paths:
+      - '.github/workflows/c0-conic-dobo-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conic-dobo-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install existing DOBO stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy Pillow trimesh
+
+      - name: Build known conic planter with DOBO front, DOBO mark back, and 3 material regions
+        run: |
+          mkdir -p outputs-ci/c0-conic-dobo
+          python - <<'PY'
+          from pathlib import Path
+          import cadquery as cq
+          from product_generators.surface_designer.face_selector import SurfaceFaceSelector
+          from product_generators.surface_designer.native_text_face import NativeTextFaceDecorator
+          from product_generators.surface_designer.native_svg_face import NativeSvgFaceDecorator
+          from product_generators.surface_designer.three_mf_exporter import ThreeMFExporter, ThreeMFRegion
+
+          out = Path('outputs-ci/c0-conic-dobo')
+          # Existing DOBO V2 prototype dimensions: a true tapered/conic planter.
+          height = 140.0
+          bottom_r = 56.0
+          top_r = 65.0
+          wall = 4.0
+          bottom = 4.0
+          outer = cq.Solid.makeCone(bottom_r, top_r, height)
+          inner = cq.Solid.makeCone(bottom_r-wall, top_r-wall, height-bottom+1.0, cq.Vector(0,0,bottom))
+          base = outer.cut(inner, tol=0.005).clean()
+          if not base.isValid() or len(base.Solids()) != 1:
+              raise RuntimeError('Known conic planter base invalid')
+
+          face = SurfaceFaceSelector().largest_external(base, geom_type='CONE')
+          text = NativeTextFaceDecorator().decorate(
+              base_shape=base, target_face=face, text_value='DOBO', size=15.0,
+              depth=1.8, mode='emboss', font='Arial', kind='bold',
+              width_fraction=0.30, height_fraction=0.16, u_center=0.25, v_center=0.56,
+          )
+          text.validate()
+
+          # Existing validated DOBO geometric mark used by the Surface Designer regression.
+          logo_svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0 12 L 10 0 L 20 12 L 30 0 L 40 12 L 30 24 L 20 12 L 10 24 Z"/></svg>'
+          face2 = SurfaceFaceSelector().largest_external(text.shape, geom_type='CONE')
+          logo = NativeSvgFaceDecorator().decorate(
+              base_shape=text.shape, target_face=face2, svg=logo_svg,
+              mode='emboss', depth=1.8, width_fraction=0.24,
+              height_fraction=0.18, u_center=0.75, v_center=0.56,
+              document_id='dobo-regression-logo',
+          )
+          logo.validate()
+          final = logo.shape.clean()
+
+          def primary(shape):
+              solids = tuple(shape.Solids())
+              if not solids: raise RuntimeError('No solid in material partition')
+              return max(solids, key=lambda s: float(s.Volume())).clean()
+
+          text_region = primary(final.intersect(text.tool, tol=0.005).clean())
+          logo_region = primary(final.intersect(logo.tool, tol=0.005).clean())
+          body_region = primary(final.cut(text_region, tol=0.005).cut(logo_region, tol=0.005).clean())
+
+          vf = float(final.Volume())
+          vr = sum(float(s.Volume()) for s in (body_region, text_region, logo_region))
+          if abs(vf-vr) > max(1.0, vf*2e-4):
+              raise RuntimeError(f'Material partition volume mismatch final={vf} regions={vr}')
+
+          step = out/'dobo_conic_multicolor.step'
+          stl = out/'dobo_conic_multicolor.stl'
+          mf = out/'dobo_conic_multicolor.3mf'
+          cq.exporters.export(final, str(step))
+          cq.exporters.export(final, str(stl), tolerance=0.08, angularTolerance=0.15)
+          export = ThreeMFExporter().export(regions=(
+              ThreeMFRegion(name='Body', shape=body_region, color='#EAEAEA', filament_slot=1),
+              ThreeMFRegion(name='DOBO Text', shape=text_region, color='#6D3BFF', filament_slot=2),
+              ThreeMFRegion(name='DOBO Logo', shape=logo_region, color='#19A974', filament_slot=3),
+          ), path=str(mf))
+          if export.region_object_count != 3 or export.filament_slot_count != 3:
+              raise RuntimeError('3MF did not preserve three material regions')
+          print('CONIC DOBO REGRESSION OK')
+          print('dimensions', bottom_r*2, top_r*2, height, 'wall', wall)
+          print('colors', '#EAEAEA', '#6D3BFF', '#19A974')
+          print('3mf regions', export.region_object_count, 'filament slots', export.filament_slot_count)
+          PY
+
+      - name: Validate STL and 3MF files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import trimesh, zipfile
+          root=Path('outputs-ci/c0-conic-dobo')
+          mesh=trimesh.load_mesh(root/'dobo_conic_multicolor.stl', process=True)
+          if mesh.is_empty or not mesh.is_watertight:
+              raise RuntimeError('Conic regression STL is not watertight')
+          with zipfile.ZipFile(root/'dobo_conic_multicolor.3mf') as z:
+              required={'3D/3dmodel.model','Metadata/model_settings.config','Metadata/project_settings.config'}
+              missing=required-set(z.namelist())
+              if missing: raise RuntimeError(f'3MF missing Creality project files: {missing}')
+          print('STL watertight and Creality 3MF project structure OK')
+          PY
+
+      - name: Install Blender and render review views
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri libglx-mesa0
+          mkdir -p outputs-ci/c0-conic-dobo/renders
+          xvfb-run -a -s '-screen 0 1280x1024x24' blender --background --python tools/dobo_blender_acceptance.py -- \
+            --stl outputs-ci/c0-conic-dobo/dobo_conic_multicolor.stl \
+            --output-root outputs-ci/c0-conic-dobo/renders --label conic_dobo --resolution 512
+
+      - name: Build review sheet
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          root=Path('outputs-ci/c0-conic-dobo')
+          views=['front','side','top','iso']
+          imgs=[Image.open(root/'renders'/f'conic_dobo_{v}.png').convert('RGB') for v in views]
+          sheet=Image.new('RGB',(2048,580),'white'); d=ImageDraw.Draw(sheet)
+          d.text((12,10),'DOBO conic regression · body white · text purple · logo green in 3MF',fill='black')
+          for i,(v,img) in enumerate(zip(views,imgs)):
+              sheet.paste(img,(i*512,60)); d.text((i*512+12,38),v,fill='black')
+          sheet.save(root/'DOBO_CONIC_REGRESSION_REVIEW.jpg',quality=94)
+          PY
+
+      - name: Upload conic regression output
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-conic-multicolor-regression
+          path: outputs-ci/c0-conic-dobo
+          if-no-files-found: error
+          retention-days: 30
