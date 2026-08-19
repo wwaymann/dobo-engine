@@ -122,13 +122,13 @@ jobs:
               manifest = json.loads(manifests[0].read_text(encoding='utf-8'))
               if not manifest.get('validation', {}).get('watertight', False):
                   raise SystemExit(f'{label}: DOBO in-memory mesh was not watertight')
-              # STL is an unindexed triangle format: shared surface vertices are
-              # serialized once per triangle. Explicitly weld identical vertices
-              # after reload before evaluating edge incidence/topology.
+              # STL is an unindexed float32 triangle format. Reconstruct shared
+              # topology with a manufacturing-negligible 1e-5 mm precision weld
+              # before evaluating edge incidence after export/reload.
               mesh = trimesh.load_mesh(stls[0], process=True)
-              mesh.merge_vertices()
+              mesh.merge_vertices(digits_vertex=5)
               if not mesh.is_watertight:
-                  raise SystemExit(f'{label}: generated STL is not watertight after STL vertex welding')
+                  raise SystemExit(f'{label}: generated STL is not watertight after precision-bounded STL vertex welding')
               if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
                   raise SystemExit(f'{label}: empty mesh')
               print(label, stls[0], 'vertices', len(mesh.vertices), 'faces', len(mesh.faces), 'watertight', mesh.is_watertight)
