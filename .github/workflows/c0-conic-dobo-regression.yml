@@ -33,6 +33,7 @@ jobs:
           mkdir -p outputs-ci/c0-conic-dobo
           python - <<'PY'
           from pathlib import Path
+          import json
           import cadquery as cq
           from product_generators.surface_designer.face_selector import SurfaceFaceSelector
           from product_generators.surface_designer.native_text_face import NativeTextFaceDecorator
@@ -40,12 +41,26 @@ jobs:
           from product_generators.surface_designer.three_mf_exporter import ThreeMFExporter, ThreeMFRegion
 
           out = Path('outputs-ci/c0-conic-dobo')
-          # Existing DOBO V2 prototype dimensions: a true tapered/conic planter.
           height = 140.0
           bottom_r = 56.0
           top_r = 65.0
           wall = 4.0
           bottom = 4.0
+          trace = {
+              'case_id': 'c0-conic-dobo-regression',
+              'source': 'direct_known_specification',
+              'family': 'conic_planter',
+              'body': {'bottom_radius_mm': bottom_r, 'top_radius_mm': top_r, 'height_mm': height, 'wall_mm': wall, 'bottom_mm': bottom},
+              'front': {'kind': 'text', 'content': 'DOBO', 'mode': 'emboss'},
+              'back': {'kind': 'svg_mark', 'document_id': 'dobo-regression-logo', 'mode': 'emboss'},
+              'materials': [
+                  {'name': 'Body', 'color': '#EAEAEA', 'filament_slot': 1},
+                  {'name': 'DOBO Text', 'color': '#6D3BFF', 'filament_slot': 2},
+                  {'name': 'DOBO Logo', 'color': '#19A974', 'filament_slot': 3},
+              ],
+          }
+          (out/'EXECUTED_SPECIFICATION.json').write_text(json.dumps(trace, indent=2), encoding='utf-8')
+
           outer = cq.Solid.makeCone(bottom_r, top_r, height)
           inner = cq.Solid.makeCone(bottom_r-wall, top_r-wall, height-bottom+1.0, cq.Vector(0,0,bottom))
           base = outer.cut(inner, tol=0.005).clean()
@@ -60,7 +75,6 @@ jobs:
           )
           text.validate()
 
-          # Existing validated DOBO geometric mark used by the Surface Designer regression.
           logo_svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0 12 L 10 0 L 20 12 L 30 0 L 40 12 L 30 24 L 20 12 L 10 24 Z"/></svg>'
           face2 = SurfaceFaceSelector().largest_external(text.shape, geom_type='CONE')
           logo = NativeSvgFaceDecorator().decorate(
@@ -99,8 +113,7 @@ jobs:
           if export.region_object_count != 3 or export.filament_slot_count != 3:
               raise RuntimeError('3MF did not preserve three material regions')
           print('CONIC DOBO REGRESSION OK')
-          print('dimensions', bottom_r*2, top_r*2, height, 'wall', wall)
-          print('colors', '#EAEAEA', '#6D3BFF', '#19A974')
+          print(json.dumps(trace, indent=2))
           print('3mf regions', export.region_object_count, 'filament slots', export.filament_slot_count)
           PY
 
@@ -138,9 +151,10 @@ jobs:
           views=['front','side','top','iso']
           imgs=[Image.open(root/'renders'/f'conic_dobo_{v}.png').convert('RGB') for v in views]
           sheet=Image.new('RGB',(2048,580),'white'); d=ImageDraw.Draw(sheet)
-          d.text((12,10),'DOBO conic regression · body white · text purple · logo green in 3MF',fill='black')
+          d.text((12,10),'DOBO CONIC REGRESSION — isolated known specification',fill='black')
+          d.text((12,28),'Body white · DOBO text purple · DOBO rear logo green in 3MF',fill='black')
           for i,(v,img) in enumerate(zip(views,imgs)):
-              sheet.paste(img,(i*512,60)); d.text((i*512+12,38),v,fill='black')
+              sheet.paste(img,(i*512,60)); d.text((i*512+12,44),v,fill='black')
           sheet.save(root/'DOBO_CONIC_REGRESSION_REVIEW.jpg',quality=94)
           PY
 
