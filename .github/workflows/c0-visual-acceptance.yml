@@ -110,6 +110,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import json
           import trimesh
           root = Path('outputs-ci/c0-visual-acceptance')
           for label in ('prompt', 'image'):
@@ -118,12 +119,16 @@ jobs:
               manifests = list((root / label).rglob('*.manifest.json'))
               if len(stls) != 1 or len(threemf) != 1 or len(manifests) != 1:
                   raise SystemExit(f'{label}: expected one STL, one 3MF and one manifest')
-              # STL stores independent triangle vertices. Let trimesh reconstruct
-              # indexed adjacency before topology checks; process=False makes a
-              # valid exported solid appear non-watertight after reload.
+              manifest = json.loads(manifests[0].read_text(encoding='utf-8'))
+              if not manifest.get('validation', {}).get('watertight', False):
+                  raise SystemExit(f'{label}: DOBO in-memory mesh was not watertight')
+              # STL is an unindexed triangle format: shared surface vertices are
+              # serialized once per triangle. Explicitly weld identical vertices
+              # after reload before evaluating edge incidence/topology.
               mesh = trimesh.load_mesh(stls[0], process=True)
+              mesh.merge_vertices()
               if not mesh.is_watertight:
-                  raise SystemExit(f'{label}: generated STL is not watertight')
+                  raise SystemExit(f'{label}: generated STL is not watertight after STL vertex welding')
               if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
                   raise SystemExit(f'{label}: empty mesh')
               print(label, stls[0], 'vertices', len(mesh.vertices), 'faces', len(mesh.faces), 'watertight', mesh.is_watertight)
