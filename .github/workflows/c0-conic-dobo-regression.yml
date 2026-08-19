@@ -3,8 +3,8 @@ name: DOBO C0 Conic DOBO Regression
 on:
   push:
     branches: [c0-advanced-morphology-through-123]
-    paths:
-      - '.github/workflows/c0-conic-dobo-regression.yml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
