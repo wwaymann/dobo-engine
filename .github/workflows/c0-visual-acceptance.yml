@@ -9,6 +9,7 @@ on:
       - 'tools/dobo_blender_acceptance.py'
       - 'patches/c0-rounded-box-depth.patch'
       - 'patches/c0_normalize_body_relations.py'
+      - 'patches/c0_normalize_stl_export.py'
       - 'app/product_generators/design_interpreter/image_interpreter.py'
   pull_request:
     branches:
@@ -18,6 +19,7 @@ on:
       - 'tools/dobo_blender_acceptance.py'
       - 'patches/c0-rounded-box-depth.patch'
       - 'patches/c0_normalize_body_relations.py'
+      - 'patches/c0_normalize_stl_export.py'
       - 'app/product_generators/design_interpreter/image_interpreter.py'
   workflow_dispatch:
 
