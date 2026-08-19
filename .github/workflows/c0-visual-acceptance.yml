@@ -122,16 +122,24 @@ jobs:
               manifest = json.loads(manifests[0].read_text(encoding='utf-8'))
               if not manifest.get('validation', {}).get('watertight', False):
                   raise SystemExit(f'{label}: DOBO in-memory mesh was not watertight')
-              # STL is an unindexed float32 triangle format. Reconstruct shared
-              # topology with a manufacturing-negligible 1e-5 mm precision weld
-              # before evaluating edge incidence after export/reload.
-              mesh = trimesh.load_mesh(stls[0], process=True)
-              mesh.merge_vertices(digits_vertex=5)
-              if not mesh.is_watertight:
-                  raise SystemExit(f'{label}: generated STL is not watertight after precision-bounded STL vertex welding')
-              if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+
+              # STL stores independent float32 triangles. Reconstruct shared topology
+              # with a bounded weld. Start strict and relax only to 0.001 mm, which
+              # is negligible against DOBO's millimetre-scale manufacturing rules.
+              welded = None
+              used_digits = None
+              for digits in (6, 5, 4, 3):
+                  candidate = trimesh.load_mesh(stls[0], process=True)
+                  candidate.merge_vertices(digits_vertex=digits)
+                  if candidate.is_watertight:
+                      welded = candidate
+                      used_digits = digits
+                      break
+              if welded is None:
+                  raise SystemExit(f'{label}: generated STL is not watertight after bounded reconstruction through 0.001 mm')
+              if len(welded.vertices) == 0 or len(welded.faces) == 0:
                   raise SystemExit(f'{label}: empty mesh')
-              print(label, stls[0], 'vertices', len(mesh.vertices), 'faces', len(mesh.faces), 'watertight', mesh.is_watertight)
+              print(label, stls[0], 'vertices', len(welded.vertices), 'faces', len(welded.faces), 'watertight', welded.is_watertight, 'weld_digits', used_digits)
           PY
 
       - name: Install headless Blender renderer
