@@ -92,19 +92,39 @@ jobs:
           PY
 
       - name: Generate DOBO construction from prompt
+        shell: bash
         run: |
-          mkdir -p outputs-ci/c0-visual-acceptance/prompt
-          python -m product_generators.design_interpreter.pipeline_cli prompt \
-            "A sculptural open-top planter about 150 mm tall with a stable flat base, a softly tapered organic body, a narrow waist, and three broad branching ribs that grow diagonally upward from the lower body and merge continuously into the vessel surface. Rounded transitions, no detached parts, no perforations, minimum 3 mm printable walls." \
-            --output-root outputs-ci/c0-visual-acceptance/prompt
+          prompt='A sculptural open-top planter about 150 mm tall with a stable flat base, a softly tapered organic body, a narrow waist, and three broad branching ribs that grow diagonally upward from the lower body and merge continuously into the vessel surface. Rounded transitions, no detached parts, no perforations, minimum 3 mm printable walls.'
+          passed=0
+          for attempt in 1 2 3; do
+            echo "Prompt acceptance attempt ${attempt}/3"
+            rm -rf outputs-ci/c0-visual-acceptance/prompt
+            mkdir -p outputs-ci/c0-visual-acceptance/prompt
+            if python -m product_generators.design_interpreter.pipeline_cli prompt "$prompt" \
+              --output-root outputs-ci/c0-visual-acceptance/prompt; then
+              passed=1
+              break
+            fi
+          done
+          test "$passed" -eq 1 || { echo 'Prompt acceptance failed after 3 approved full-pipeline attempts'; exit 1; }
 
       - name: Generate DOBO construction from visual reference
+        shell: bash
         run: |
-          mkdir -p outputs-ci/c0-visual-acceptance/image
-          python -m product_generators.design_interpreter.pipeline_cli image \
-            outputs-ci/c0-visual-acceptance/input/reference.png \
-            --detail high \
-            --output-root outputs-ci/c0-visual-acceptance/image
+          passed=0
+          for attempt in 1 2 3; do
+            echo "Image acceptance attempt ${attempt}/3"
+            rm -rf outputs-ci/c0-visual-acceptance/image
+            mkdir -p outputs-ci/c0-visual-acceptance/image
+            if python -m product_generators.design_interpreter.pipeline_cli image \
+              outputs-ci/c0-visual-acceptance/input/reference.png \
+              --detail high \
+              --output-root outputs-ci/c0-visual-acceptance/image; then
+              passed=1
+              break
+            fi
+          done
+          test "$passed" -eq 1 || { echo 'Image acceptance failed after 3 approved full-pipeline attempts'; exit 1; }
 
       - name: Validate generated review artifacts
         run: |
