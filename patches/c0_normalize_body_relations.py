@@ -40,3 +40,10 @@ elif old_repair in repair_text:
     print(repair_path)
 else:
     raise SystemExit("proposal-repair minimum-depth block no longer matches expected source")
+
+# STL is the only lossy representation boundary in this acceptance path: it
+# serializes triangle coordinates as float32. Normalize the already-approved
+# mesh topology at that boundary before writing STL, without changing semantic
+# intent, feature generation, or any geometric capability.
+stl_export_patch = Path("patches/c0_normalize_stl_export.py")
+exec(compile(stl_export_patch.read_text(encoding="utf-8"), str(stl_export_patch), "exec"))
