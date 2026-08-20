@@ -27,6 +27,8 @@ Rules:
 - Set source.kind to prompt and source.image_reference to null.
 - Use only values permitted by the supplied JSON Schema.
 - Express visible parts as features and spatial structure as relations.
+- Relations may reference feature ids only; never use the body itself as subject_id or object_id.
+- Use each feature's anchor to express attachment or placement on the planter body.
 - Use normalized anchors and real millimetres only where the schema requests them.
 - Record every inferred value as an assumption.
 - Record uncertainty as a non-blocking ambiguity when a safe default exists.
