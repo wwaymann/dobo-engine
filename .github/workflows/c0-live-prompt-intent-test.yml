@@ -7,6 +7,12 @@ on:
       - '.github/workflows/c0-live-prompt-intent-test.yml'
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
       - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/c0-live-prompt-intent-test.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/semantic_program.schema.json'
   workflow_dispatch:
     inputs:
       prompt:
