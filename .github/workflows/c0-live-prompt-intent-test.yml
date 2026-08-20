@@ -7,12 +7,14 @@ on:
       - '.github/workflows/c0-live-prompt-intent-test.yml'
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
       - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/c0-live-prompt-intent-test.yml'
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
       - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
   workflow_dispatch:
     inputs:
       prompt:
@@ -59,6 +61,7 @@ jobs:
               OpenAIResponsesSemanticClient,
               PromptSemanticInterpreter,
           )
+          from product_generators.design_interpreter.semantic_contract import BODY_FAMILIES
 
           out = Path('outputs-ci/c0-live-prompt-intent')
           prompt = os.environ['DESIGN_PROMPT']
@@ -85,30 +88,31 @@ jobs:
           (out/'INTERPRETATION_TRACE.json').write_text(json.dumps(trace, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
           requested = {
-              'shape': 'sphere',
+              'shape': 'spherical',
               'text': 'DOBO',
               'surface_effect': 'raised',
               'region': 'front',
           }
-          allowed_families = ['organic', 'cylindrical', 'tapered', 'hexagonal', 'character']
+          allowed_families = sorted(BODY_FAMILIES)
           features = semantic.get('features', [])
-          text_candidates = [
-              f for f in features
-              if f.get('form_hint') == 'text'
-              or str(f.get('concept', '')).lower() == 'dobo'
-          ]
-          text_ok = any(
-              str(f.get('concept', '')).lower() == 'dobo'
-              and f.get('surface_effect') == 'raised'
-              and f.get('anchor', {}).get('region') == 'front'
-              for f in text_candidates
-          )
-          sphere_representable = 'sphere' in allowed_families
+
+          def preserves_dobo(feature):
+              concept = str(feature.get('concept', '')).lower()
+              concept_tokens = [token for token in concept.split('_') if token]
+              return (
+                  feature.get('form_hint') == 'text'
+                  and 'dobo' in concept_tokens
+                  and feature.get('surface_effect') == 'raised'
+                  and feature.get('anchor', {}).get('region') == 'front'
+              )
+
+          text_ok = any(preserves_dobo(f) for f in features)
+          sphere_representable = 'spherical' in BODY_FAMILIES
           body_family = semantic.get('body', {}).get('family')
-          shape_ok = body_family == 'sphere'
+          shape_ok = body_family == 'spherical'
 
           audit = {
-              'schema': 'dobo.c0.live_prompt_intent.1',
+              'schema': 'dobo.c0.live_prompt_intent.2',
               'prompt': prompt,
               'requested_intent': requested,
               'semantic_body_family': body_family,
@@ -120,7 +124,7 @@ jobs:
               'reason': (
                   'Exact prompt intent preserved by current semantic contract.'
                   if text_ok and shape_ok
-                  else 'Prompt interpretation completed, but current semantic contract cannot preserve the requested intent exactly.'
+                  else 'Prompt interpretation completed, but current semantic contract did not preserve the requested intent exactly.'
               ),
           }
           (out/'INTENT_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
@@ -130,7 +134,7 @@ jobs:
               raise RuntimeError('AI interpretation did not preserve DOBO as raised front text.')
           if not shape_ok:
               raise RuntimeError(
-                  f"AI interpretation could not preserve exact spherical body intent; semantic body.family={body_family!r}, "
+                  f"AI interpretation did not preserve exact spherical body intent; semantic body.family={body_family!r}, "
                   f"current allowed values={allowed_families}."
               )
           PY
