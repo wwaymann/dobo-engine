@@ -12,7 +12,7 @@ _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 SOURCE_KINDS = frozenset({"prompt", "image", "prompt_and_image"})
 PRODUCT_KINDS = frozenset({"planter"})
 BODY_FAMILIES = frozenset(
-    {"organic", "cylindrical", "tapered", "hexagonal", "character"}
+    {"organic", "cylindrical", "tapered", "hexagonal", "character", "spherical"}
 )
 OPENING_SHAPES = frozenset({"circular", "elliptical", "polygonal"})
 SURFACE_REGIONS = frozenset(
