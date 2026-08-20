@@ -41,8 +41,8 @@ jobs:
           out = Path('outputs-ci/c0-spherical-dobo')
           radius = 65.0
           wall = 4.0
-          opening_radius = 42.0
-          cut_z = 48.0
+          opening_radius = 25.0
+          cut_z = 55.0
 
           trace = {
               'case_id': 'c0-spherical-dobo-test',
@@ -50,12 +50,19 @@ jobs:
               'creates_new_engine_behavior': False,
               'creates_new_geometry_capability': False,
               'change_from_conic_reference': 'body family only: conic -> spherical',
-              'body': {'family': 'spherical_planter', 'radius_mm': radius, 'wall_mm': wall, 'opening_radius_mm': opening_radius},
+              'body': {
+                  'family': 'spherical_planter',
+                  'radius_mm': radius,
+                  'wall_mm': wall,
+                  'opening_radius_mm': opening_radius,
+                  'opening_start_z_mm': cut_z,
+              },
               'front': {'kind': 'text', 'content': 'DOBO', 'mode': 'emboss', 'depth_mm': 1.8},
           }
           (out/'EXECUTED_SPECIFICATION.json').write_text(json.dumps(trace, indent=2), encoding='utf-8')
 
-          # Existing CadQuery primitive operations only: spherical shell plus a top opening.
+          # Existing CadQuery primitive operations only: preserve the spherical body
+          # and remove only a bounded top opening that reaches the existing cavity.
           outer = cq.Solid.makeSphere(radius)
           inner = cq.Solid.makeSphere(radius-wall)
           shell = outer.cut(inner, tol=0.005).clean()
@@ -103,7 +110,7 @@ jobs:
           if not all(math.isfinite(float(v)) for v in mesh.vertices.reshape(-1)):
               raise RuntimeError('Non-finite STL vertices')
           ext=mesh.extents
-          if not (125 <= float(ext[0]) <= 140 and 125 <= float(ext[1]) <= 140 and 105 <= float(ext[2]) <= 135):
+          if not (125 <= float(ext[0]) <= 140 and 125 <= float(ext[1]) <= 140 and 120 <= float(ext[2]) <= 132):
               raise RuntimeError(f'Unexpected spherical planter extents: {ext.tolist()}')
           print('SPHERICAL STL OK', ext.tolist())
           PY
