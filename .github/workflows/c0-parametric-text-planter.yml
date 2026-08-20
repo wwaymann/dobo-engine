@@ -1,0 +1,127 @@
+name: DOBO C0 Parametric Text Planter
+
+on:
+  workflow_dispatch:
+    inputs:
+      shape:
+        description: 'Geometric body'
+        required: true
+        default: 'cone'
+        type: choice
+        options: [cone, cylinder, sphere]
+      text:
+        description: 'Embossed text'
+        required: true
+        default: 'DOBO'
+        type: string
+      text_size:
+        description: 'Text size in mm'
+        required: true
+        default: '15.0'
+        type: string
+      emboss_depth:
+        description: 'Emboss depth in mm'
+        required: true
+        default: '1.8'
+        type: string
+  push:
+    branches: [c0-advanced-morphology-through-123]
+    paths:
+      - '.github/workflows/c0-parametric-text-planter.yml'
+      - 'tools/dobo_parametric_text_planter.py'
+      - 'tools/dobo_blender_acceptance.py'
+      - 'app/product_generators/surface_designer/face_selector.py'
+      - 'app/product_generators/surface_designer/native_text_face.py'
+
+permissions:
+  contents: read
+
+jobs:
+  parametric-text-planter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      SHAPE: ${{ github.event_name == 'workflow_dispatch' && inputs.shape || 'cone' }}
+      LABEL_TEXT: ${{ github.event_name == 'workflow_dispatch' && inputs.text || 'DOBO' }}
+      TEXT_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.text_size || '15.0' }}
+      EMBOSS_DEPTH: ${{ github.event_name == 'workflow_dispatch' && inputs.emboss_depth || '1.8' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing DOBO stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy Pillow trimesh
+
+      - name: Generate requested geometric planter with requested text
+        run: |
+          rm -rf outputs-ci/c0-parametric-text-planter
+          mkdir -p outputs-ci/c0-parametric-text-planter
+          python tools/dobo_parametric_text_planter.py \
+            --shape "$SHAPE" \
+            --text "$LABEL_TEXT" \
+            --size "$TEXT_SIZE" \
+            --depth "$EMBOSS_DEPTH" \
+            --output-root outputs-ci/c0-parametric-text-planter
+
+      - name: Validate generated transport mesh
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import math
+          import trimesh
+          root = Path('outputs-ci/c0-parametric-text-planter')
+          stls = list(root.glob('*.stl'))
+          if len(stls) != 1:
+              raise RuntimeError(f'Expected one STL, found {len(stls)}')
+          mesh = trimesh.load_mesh(stls[0], process=True)
+          if mesh.is_empty or len(mesh.faces) < 100:
+              raise RuntimeError('Generated STL is empty or implausibly small')
+          if not all(math.isfinite(float(v)) for v in mesh.vertices.reshape(-1)):
+              raise RuntimeError('Generated STL contains non-finite vertices')
+          ext = mesh.extents
+          if min(float(v) for v in ext) <= 1.0:
+              raise RuntimeError(f'Generated STL has degenerate extents: {ext.tolist()}')
+          print('PARAMETRIC STL OK', ext.tolist(), 'faces', len(mesh.faces))
+          PY
+
+      - name: Install Blender and render review views
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri libglx-mesa0
+          STL=$(find outputs-ci/c0-parametric-text-planter -maxdepth 1 -name '*.stl' -print -quit)
+          mkdir -p outputs-ci/c0-parametric-text-planter/renders
+          xvfb-run -a -s '-screen 0 1280x1024x24' blender --background --python tools/dobo_blender_acceptance.py -- \
+            --stl "$STL" --output-root outputs-ci/c0-parametric-text-planter/renders --label parametric --resolution 512
+
+      - name: Build visual review sheet
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          import os
+          root = Path('outputs-ci/c0-parametric-text-planter')
+          views = ['front','side','top','iso']
+          imgs = [Image.open(root/'renders'/f'parametric_{v}.png').convert('RGB') for v in views]
+          sheet = Image.new('RGB',(2048,580),'white')
+          d = ImageDraw.Draw(sheet)
+          d.text((12,10), f"DOBO PARAMETRIC TEST — shape={os.environ['SHAPE']} text={os.environ['LABEL_TEXT']}", fill='black')
+          for i,(v,img) in enumerate(zip(views,imgs)):
+              sheet.paste(img,(i*512,60)); d.text((i*512+12,44),v,fill='black')
+          sheet.save(root/'DOBO_PARAMETRIC_TEXT_PLANTER_REVIEW.jpg',quality=94)
+          PY
+
+      - name: Upload parametric model and review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-parametric-text-planter-${{ env.SHAPE }}
+          path: outputs-ci/c0-parametric-text-planter
+          if-no-files-found: error
+          retention-days: 30
