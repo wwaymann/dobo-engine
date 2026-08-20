@@ -35,7 +35,7 @@
       "additionalProperties": false,
       "required": ["family", "height_mm", "width_mm", "depth_mm", "opening_shape", "opening_width_ratio", "opening_depth_ratio", "style_tags"],
       "properties": {
-        "family": {"enum": ["organic", "cylindrical", "tapered", "hexagonal", "character"]},
+        "family": {"enum": ["organic", "cylindrical", "tapered", "hexagonal", "character", "spherical"]},
         "height_mm": {"type": "number", "minimum": 30.0, "maximum": 500.0},
         "width_mm": {"type": "number", "minimum": 30.0, "maximum": 500.0},
         "depth_mm": {"type": "number", "minimum": 30.0, "maximum": 500.0},
