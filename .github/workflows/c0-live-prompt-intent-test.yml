@@ -41,10 +41,10 @@ jobs:
           python-version: '3.11'
           cache: pip
 
-      - name: Install live semantic interpreter dependency
+      - name: Install live semantic interpreter dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install openai jsonschema
+          python -m pip install openai jsonschema numpy trimesh
 
       - name: Interpret natural-language prompt with existing DOBO semantic interpreter
         run: |
