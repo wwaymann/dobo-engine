@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+VISIBLE_MORPHOLOGICAL_CONTINUITY_VERSION = "A4.2"
+
+
+@dataclass(frozen=True, slots=True)
+class VisibleRootFlarePolicy:
+    kind: str
+    lateral_scale: float
+    depth_scale: float
+    vertical_scale: float
+    outward_shift_scale: float
+    blend_scale: float
+
+    def validate(self) -> None:
+        if self.kind not in {"ellipsoid", "rounded_box"}:
+            raise ValueError("Unsupported visible root flare kind.")
+        if min(
+            self.lateral_scale,
+            self.depth_scale,
+            self.vertical_scale,
+            self.outward_shift_scale,
+            self.blend_scale,
+        ) <= 0.0:
+            raise ValueError("Visible root flare scales must be positive.")
+        if self.lateral_scale > 1.12 or self.vertical_scale > 1.12:
+            raise ValueError("Visible root flare exceeds its silhouette reserve.")
+
+
+@dataclass(frozen=True, slots=True)
+class HierarchyBridgePolicy:
+    start_fraction: float
+    end_fraction: float
+    radius_scale: float
+    blend_scale: float
+
+    def validate(self) -> None:
+        if not 0.0 < self.start_fraction < self.end_fraction < 1.0:
+            raise ValueError("Hierarchy bridge fractions are invalid.")
+        if not 0.10 <= self.radius_scale <= 0.55:
+            raise ValueError("Hierarchy bridge radius scale is outside its safe range.")
+        if self.blend_scale <= 0.0:
+            raise ValueError("Hierarchy bridge blend scale must be positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class SpanVisibleRootPolicy:
+    kind: str
+    width_scale: float
+    depth_scale: float
+    height_scale: float
+    outward_shift_scale: float
+    blend_scale: float
+
+    def validate(self) -> None:
+        if self.kind not in {"ellipsoid", "rounded_box"}:
+            raise ValueError("Unsupported span root kind.")
+        if min(
+            self.width_scale,
+            self.depth_scale,
+            self.height_scale,
+            self.outward_shift_scale,
+            self.blend_scale,
+        ) <= 0.0:
+            raise ValueError("Span visible root scales must be positive.")
+
+
+class VisibleMorphologicalContinuity:
+    """A.4 rules that make structural continuity visible, not merely valid.
+
+    A.3 added deep collars that strengthened fusion but intentionally stayed
+    inside the source silhouette. A.4 adds a controlled external transition
+    layer while preserving the semantic component itself. A4.2 strengthens
+    branch and terminal exposure after the automated A3/A4 visual gate showed
+    that the first A4 calibration was still too subtle on branching topology.
+    """
+
+    @staticmethod
+    def root_flare(*, style_name: str, topology_role: str) -> VisibleRootFlarePolicy:
+        if style_name == "geometric":
+            result = VisibleRootFlarePolicy(
+                kind="rounded_box",
+                lateral_scale=0.90,
+                depth_scale=0.92,
+                vertical_scale=0.86,
+                outward_shift_scale=0.08,
+                blend_scale=1.06,
+            )
+        elif topology_role == "terminal":
+            result = VisibleRootFlarePolicy(
+                kind="ellipsoid",
+                lateral_scale=1.02,
+                depth_scale=1.02,
+                vertical_scale=0.98,
+                outward_shift_scale=0.24,
+                blend_scale=1.42,
+            )
+        else:
+            result = VisibleRootFlarePolicy(
+                kind="ellipsoid",
+                lateral_scale=1.10,
+                depth_scale=1.06,
+                vertical_scale=1.08,
+                outward_shift_scale=0.28,
+                blend_scale=1.52,
+            )
+        result.validate()
+        return result
+
+    @staticmethod
+    def hierarchy_bridge(
+        *,
+        style_name: str,
+        topology_role: str,
+    ) -> HierarchyBridgePolicy:
+        if style_name == "geometric":
+            result = HierarchyBridgePolicy(
+                start_fraction=0.28,
+                end_fraction=0.76,
+                radius_scale=0.22,
+                blend_scale=1.02,
+            )
+        elif topology_role == "terminal":
+            result = HierarchyBridgePolicy(
+                start_fraction=0.16,
+                end_fraction=0.90,
+                radius_scale=0.38,
+                blend_scale=1.42,
+            )
+        else:
+            result = HierarchyBridgePolicy(
+                start_fraction=0.12,
+                end_fraction=0.90,
+                radius_scale=0.46,
+                blend_scale=1.50,
+            )
+        result.validate()
+        return result
+
+    @staticmethod
+    def span_visible_root(style_name: str) -> SpanVisibleRootPolicy:
+        if style_name == "geometric":
+            result = SpanVisibleRootPolicy(
+                kind="rounded_box",
+                width_scale=1.08,
+                depth_scale=0.90,
+                height_scale=1.00,
+                outward_shift_scale=0.06,
+                blend_scale=1.04,
+            )
+        else:
+            result = SpanVisibleRootPolicy(
+                kind="ellipsoid",
+                width_scale=1.42,
+                depth_scale=1.02,
+                height_scale=1.22,
+                outward_shift_scale=0.16,
+                blend_scale=1.28,
+            )
+        result.validate()
+        return result

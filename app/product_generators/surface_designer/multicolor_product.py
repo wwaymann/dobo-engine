@@ -40,6 +40,7 @@ class MulticolorProductResult:
     body_region: cq.Shape
     text_region: cq.Shape
     decoration_region: cq.Shape
+    export_regions: tuple[ThreeMFRegion, ...]
     step_path: str
     three_mf_path: str
     region_count: int
@@ -438,30 +439,30 @@ def build_multicolor_product(
         "dobo_multicolor_product.3mf",
     )
 
+    export_regions = (
+        ThreeMFRegion(
+            name="Body",
+            shape=body_region,
+            color="#EAEAEA",
+            filament_slot=1,
+        ),
+        ThreeMFRegion(
+            name="Text",
+            shape=text_region,
+            color="#6D3BFF",
+            filament_slot=2,
+        ),
+        ThreeMFRegion(
+            name="Decoration",
+            shape=decoration_region,
+            color="#19A974",
+            filament_slot=3,
+        ),
+    )
+
     export = (
         ThreeMFExporter().export(
-            regions=(
-                ThreeMFRegion(
-                    name="Body",
-                    shape=body_region,
-                    color="#EAEAEA",
-                    filament_slot=1,
-                ),
-                ThreeMFRegion(
-                    name="Text",
-                    shape=text_region,
-                    color="#6D3BFF",
-                    filament_slot=2,
-                ),
-                ThreeMFRegion(
-                    name="Decoration",
-                    shape=(
-                        decoration_region
-                    ),
-                    color="#19A974",
-                    filament_slot=3,
-                ),
-            ),
+            regions=export_regions,
             path=three_mf_path,
         )
     )
@@ -489,6 +490,7 @@ def build_multicolor_product(
         decoration_region=(
             decoration_region
         ),
+        export_regions=export_regions,
         step_path=step_path,
         three_mf_path=three_mf_path,
 

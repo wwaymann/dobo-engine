@@ -1,0 +1,178 @@
+{
+  "id": "phase_2e_structural_castle",
+  "grid": {
+    "minimum": [-53.0, -49.0, -54.0],
+    "maximum": [53.0, 44.0, 56.0],
+    "voxel_mm": 0.7
+  },
+  "fields": [
+    {
+      "id": "body",
+      "center": [0.0, 0.0, -3.0],
+      "radii": [38.0, 32.0, 46.0]
+    },
+    {
+      "id": "front_mass",
+      "center": [0.0, -15.0, 2.0],
+      "radii": [31.0, 21.0, 38.0]
+    }
+  ],
+  "composition": {
+    "field_ids": ["body", "front_mass"],
+    "blend_mm": 9.0
+  },
+  "vessel": {
+    "wall_mm": 4.2,
+    "base_z_mm": -45.0,
+    "cavity_floor_z_mm": -38.5,
+    "opening_center": [0.0, 0.0],
+    "opening_radii": [18.0, 14.5],
+    "opening_start_z_mm": 25.0,
+    "opening_blend_mm": 5.0,
+    "rim_round_mm": 1.6,
+    "drain_center": [0.0, 0.0],
+    "drain_radius_mm": 3.2,
+    "drain_start_z_mm": -48.0,
+    "drain_end_z_mm": -35.0
+  },
+  "mesh_quality": {
+    "subdivision_passes": 1,
+    "projection_iterations": 3,
+    "projection_epsilon_mm": 0.07,
+    "max_surface_error_mm": 0.015,
+    "iterations": 4,
+    "lambda_factor": 0.42,
+    "mu_factor": -0.44,
+    "rim_axial_band_mm": 13.0,
+    "rim_radial_band": 0.7,
+    "max_displacement_mm": 0.8,
+    "base_protection_mm": 1.2,
+    "drain_protection_mm": 1.6,
+    "max_volume_drift_percent": 0.8,
+    "minimum_roughness_improvement_percent": 1.0
+  },
+  "structure": {
+    "additions": [
+      {
+        "id": "gatehouse",
+        "kind": "rounded_box",
+        "center": [0.0, -28.5, 4.0],
+        "half_sizes": [16.0, 4.5, 26.0],
+        "round_mm": 2.5,
+        "blend_mm": 3.0
+      },
+      {
+        "id": "left_tower",
+        "kind": "cylinder",
+        "center": [-25.0, -14.0, 5.0],
+        "radius_mm": 12.0,
+        "half_height_mm": 31.0,
+        "blend_mm": 3.0
+      },
+      {
+        "id": "right_tower",
+        "kind": "cylinder",
+        "center": [25.0, -14.0, 5.0],
+        "radius_mm": 12.0,
+        "half_height_mm": 31.0,
+        "blend_mm": 3.0
+      },
+      {
+        "id": "gate_merlon_left",
+        "kind": "rounded_box",
+        "center": [-11.0, -28.5, 33.0],
+        "half_sizes": [3.0, 4.0, 5.0],
+        "round_mm": 1.0,
+        "blend_mm": 1.4
+      },
+      {
+        "id": "gate_merlon_center",
+        "kind": "rounded_box",
+        "center": [0.0, -28.5, 33.0],
+        "half_sizes": [3.0, 4.0, 5.0],
+        "round_mm": 1.0,
+        "blend_mm": 1.4
+      },
+      {
+        "id": "gate_merlon_right",
+        "kind": "rounded_box",
+        "center": [11.0, -28.5, 33.0],
+        "half_sizes": [3.0, 4.0, 5.0],
+        "round_mm": 1.0,
+        "blend_mm": 1.4
+      },
+      {
+        "id": "left_tower_merlon_outer",
+        "kind": "rounded_box",
+        "center": [-30.5, -18.0, 40.0],
+        "half_sizes": [3.2, 4.2, 5.0],
+        "round_mm": 1.0,
+        "blend_mm": 1.5
+      },
+      {
+        "id": "left_tower_merlon_inner",
+        "kind": "rounded_box",
+        "center": [-20.0, -18.0, 40.0],
+        "half_sizes": [3.2, 4.2, 5.0],
+        "round_mm": 1.0,
+        "blend_mm": 1.5
+      },
+      {
+        "id": "right_tower_merlon_inner",
+        "kind": "rounded_box",
+        "center": [20.0, -18.0, 40.0],
+        "half_sizes": [3.2, 4.2, 5.0],
+        "round_mm": 1.0,
+        "blend_mm": 1.5
+      },
+      {
+        "id": "right_tower_merlon_outer",
+        "kind": "rounded_box",
+        "center": [30.5, -18.0, 40.0],
+        "half_sizes": [3.2, 4.2, 5.0],
+        "round_mm": 1.0,
+        "blend_mm": 1.5
+      }
+    ],
+    "cutouts": [
+      {
+        "id": "arched_gate",
+        "kind": "arched_prism",
+        "center": [0.0, -34.0, -12.0],
+        "bottom_z_mm": -20.0,
+        "spring_z_mm": -6.0,
+        "half_width_mm": 6.0,
+        "half_depth_mm": 5.0,
+        "round_mm": 0.8,
+        "blend_mm": 1.2
+      },
+      {
+        "id": "left_window",
+        "kind": "arched_prism",
+        "center": [-25.0, -28.5, 2.0],
+        "bottom_z_mm": -3.0,
+        "spring_z_mm": 4.0,
+        "half_width_mm": 2.4,
+        "half_depth_mm": 4.0,
+        "round_mm": 0.5,
+        "blend_mm": 0.7
+      },
+      {
+        "id": "right_window",
+        "kind": "arched_prism",
+        "center": [25.0, -28.5, 2.0],
+        "bottom_z_mm": -3.0,
+        "spring_z_mm": 4.0,
+        "half_width_mm": 2.4,
+        "half_depth_mm": 4.0,
+        "round_mm": 0.5,
+        "blend_mm": 0.7
+      }
+    ]
+  },
+  "output": {
+    "directory": "outputs/product_generators/organic_shapes/phase_2e_structural_castle",
+    "basename": "phase_2e_structural_castle",
+    "max_generation_seconds": 30.0
+  }
+}

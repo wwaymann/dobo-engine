@@ -1,0 +1,258 @@
+--- a/app/product_generators/design_interpreter/structural_compiler.py
++++ b/app/product_generators/design_interpreter/structural_compiler.py
+@@ -10,6 +10,7 @@
+     ComplexCompositionResolver,
+ )
+ from .morphological_integration import AdvancedMorphologicalIntegration
++from .continuous_morphological_fusion import ContinuousMorphologicalFusion
+ from .design_grammar import (
+     DesignGrammarPlan,
+     DesignGrammarResolver,
+@@ -200,6 +201,20 @@
+                 semantic_feature=semantic_feature,
+                 program=program,
+             )
++            if (
++                complex_nodes[feature_id].operation == "add"
++                and complex_nodes[feature_id].role in {"branch", "terminal"}
++                and grammar_feature.mass_strategy == "surface"
++            ):
++                cls._add_transition_mass_template(
++                    hierarchy,
++                    node=node,
++                    template=templates[f"{feature_id}_template"],
++                    topology_role=complex_nodes[feature_id].role,
++                    style_profile=grammar.style.name,
++                    minimum_feature_mm=program.manufacturing.minimum_feature_mm,
++                    is_child=False,
++                )
+             normalized += 1
+             if grammar_feature.mass_strategy == "silhouette_mass":
+                 template = templates[f"{feature_id}_template"]
+@@ -265,6 +280,20 @@
+                     resolved.parent_feature_id
+                 ].role,
+             )
++            if (
++                complex_nodes[child_id].operation == "add"
++                and complex_nodes[child_id].role in {"branch", "terminal"}
++                and grammar_feature.mass_strategy == "surface"
++            ):
++                cls._add_transition_mass_template(
++                    hierarchy,
++                    node=child_node,
++                    template=templates[f"{child_id}_template"],
++                    topology_role=complex_nodes[child_id].role,
++                    style_profile=grammar.style.name,
++                    minimum_feature_mm=program.manufacturing.minimum_feature_mm,
++                    is_child=True,
++                )
+             hierarchy_parents[child_id] = resolved.parent_feature_id
+             normalized += 1
+ 
+@@ -525,6 +554,7 @@
+         ):
+             return
+         interface = AdvancedMorphologicalIntegration.span_interface(style_profile)
++        continuity = ContinuousMorphologicalFusion.span_continuity(style_profile)
+         half_width = float(template["half_width_mm"])
+         half_depth = float(template["half_depth_mm"])
+         bottom = float(template["bottom_z_mm"])
+@@ -547,7 +577,7 @@
+             half_width - 1.15 * foot_half_width,
+         )
+         foot_z = bottom + foot_half_height
+-        foot_y = max(0.9, 0.42 * half_depth)
++        foot_y = max(0.9, continuity.inward_shift_scale * half_depth)
+         connector_ids: list[str] = []
+         for side, x in (("left", -foot_x), ("right", foot_x)):
+             connector_id = f"{node['id']}_{side}_fusion_foot_template"
+@@ -555,7 +585,7 @@
+             base_blend = max(
+                 2.2,
+                 min(4.2, 0.68 * foot_half_depth),
+-            ) * interface.blend_scale
++            ) * interface.blend_scale * continuity.blend_scale
+             if interface.kind == "ellipsoid":
+                 connector = {
+                     "id": connector_id,
+@@ -565,16 +595,16 @@
+                     "kind": "ellipsoid",
+                     "center": [x, foot_y, foot_z],
+                     "radii": [
+-                        interface.width_scale * foot_half_width,
+-                        interface.depth_scale * foot_half_depth,
+-                        interface.height_scale * foot_half_height,
++                        interface.width_scale * continuity.width_scale * foot_half_width,
++                        interface.depth_scale * continuity.depth_scale * foot_half_depth,
++                        interface.height_scale * continuity.height_scale * foot_half_height,
+                     ],
+                 }
+             else:
+                 half_sizes = [
+-                    interface.width_scale * foot_half_width,
+-                    interface.depth_scale * foot_half_depth,
+-                    interface.height_scale * foot_half_height,
++                    interface.width_scale * continuity.width_scale * foot_half_width,
++                    interface.depth_scale * continuity.depth_scale * foot_half_depth,
++                    interface.height_scale * continuity.height_scale * foot_half_height,
+                 ]
+                 connector = {
+                     "id": connector_id,
+@@ -593,6 +623,108 @@
+         node["template_ids"].extend(connector_ids)
+ 
+     @staticmethod
++    def _add_transition_mass_template(
++        hierarchy: dict[str, Any],
++        *,
++        node: dict[str, Any],
++        template: dict[str, Any],
++        topology_role: str,
++        style_profile: str,
++        minimum_feature_mm: float,
++        is_child: bool,
++    ) -> None:
++        """Add a narrower/deeper SDF collar at an additive interface.
++
++        The collar is owned by the same hierarchy node as the visible feature,
++        so layout intentionally treats both templates as one compound component.
++        Local +Y points into the body/parent surface. Keeping X/Z smaller than
++        the visible component preserves silhouette while the deeper Y extent and
++        stronger smooth-union radius create a continuous transition.
++        """
++        if template.get("operation") != "add":
++            return
++        if topology_role not in {"branch", "terminal"}:
++            return
++
++        def half_extents(source: dict[str, Any]) -> tuple[float, float, float]:
++            kind = str(source.get("kind"))
++            if kind in {"ellipsoid", "superellipsoid", "faceted_ellipsoid", "leaf", "pointed"}:
++                radii = source["radii"]
++                return float(radii[0]), float(radii[1]), float(radii[2])
++            if kind == "rounded_box":
++                half_sizes = source["half_sizes"]
++                return float(half_sizes[0]), float(half_sizes[1]), float(half_sizes[2])
++            if kind == "rounded_triangle_prism":
++                vertices = source["vertices_xz"]
++                return (
++                    max(abs(float(point[0])) for point in vertices),
++                    float(source["half_depth_mm"]),
++                    max(abs(float(point[1])) for point in vertices),
++                )
++            if kind == "capsule":
++                start = source["start"]
++                end = source["end"]
++                radius = float(source["radius_mm"])
++                return (
++                    0.5 * abs(float(end[0]) - float(start[0])) + radius,
++                    0.5 * abs(float(end[1]) - float(start[1])) + radius,
++                    0.5 * abs(float(end[2]) - float(start[2])) + radius,
++                )
++            raise ValueError(f"A.3 cannot derive transition extents for {kind!r}.")
++
++        half_x, half_y, half_z = half_extents(template)
++        policy = ContinuousMorphologicalFusion.transition_mass(
++            style_name=style_profile,
++            topology_role=topology_role,
++            is_child=is_child,
++        )
++        transition_id = f"{node['id']}_continuous_transition_template"
++        center_y = max(
++            0.45 * minimum_feature_mm,
++            policy.inward_shift_scale * half_y,
++        )
++        transition_half = [
++            max(0.75 * minimum_feature_mm, policy.lateral_scale * half_x),
++            max(1.35 * minimum_feature_mm, policy.depth_scale * half_y),
++            max(0.75 * minimum_feature_mm, policy.vertical_scale * half_z),
++        ]
++        blend = min(
++            5.2,
++            max(
++                1.5 * minimum_feature_mm,
++                float(template.get("blend_mm", 1.0)) * policy.blend_scale,
++                0.56 * transition_half[1],
++            ),
++        )
++        if policy.kind == "ellipsoid":
++            transition = {
++                "id": transition_id,
++                "operation": "add",
++                "blend_mm": blend,
++                "probe": [0.0, 0.0, 0.0],
++                "kind": "ellipsoid",
++                "center": [0.0, center_y, 0.0],
++                "radii": transition_half,
++            }
++        else:
++            round_mm = max(
++                0.55,
++                min(1.6, 0.30 * min(transition_half)),
++            )
++            transition = {
++                "id": transition_id,
++                "operation": "add",
++                "blend_mm": blend,
++                "probe": [0.0, 0.0, 0.0],
++                "kind": "rounded_box",
++                "center": [0.0, center_y, 0.0],
++                "half_sizes": transition_half,
++                "round_mm": round_mm,
++            }
++        hierarchy["templates"].append(transition)
++        node.setdefault("template_ids", []).append(transition_id)
++
++    @staticmethod
+     def _promote_silhouette_to_volumetric_mass(
+         motor_program: dict[str, Any],
+         *,
+@@ -979,11 +1111,16 @@
+             )
+             translate_y = exposure.translate_y_mm
+             depth_scale = exposure.depth_scale
++        parent_width = parent_feature.size.width_ratio * body_width_mm
++        child_width = child_feature.size.width_ratio * body_width_mm
++        spread = ContinuousMorphologicalFusion.attachment_spread(
++            topology_role=topology_role,
++            parent_width_mm=parent_width,
++            child_width_mm=child_width,
++        )
+         return {
+             "translate": [
+-                resolved.anchor.horizontal
+-                * parent_feature.size.width_ratio
+-                * body_width_mm,
++                resolved.anchor.horizontal * parent_width * spread.lateral_scale,
+                 translate_y,
+                 (resolved.anchor.vertical - 0.5) * parent_height,
+             ],
+--- a/app/product_generators/design_interpreter/__init__.py
++++ b/app/product_generators/design_interpreter/__init__.py
+@@ -103,6 +103,13 @@
+     ParentLocalAnchor,
+     SpanInterfacePolicy,
+ )
++from .continuous_morphological_fusion import (
++    CONTINUOUS_MORPHOLOGICAL_FUSION_VERSION,
++    AttachmentSpreadPolicy,
++    ContinuousMorphologicalFusion,
++    SpanContinuityPolicy,
++    TransitionMassPolicy,
++)
+ from .complex_composition import (
+     COMPLEX_ACCEPTANCE_VERSION,
+     COMPLEX_TOPOLOGY_VERSION,
+@@ -207,6 +214,11 @@
+     "ChildExposurePolicy",
+     "SpanInterfacePolicy",
+     "AdvancedMorphologicalIntegration",
++    "CONTINUOUS_MORPHOLOGICAL_FUSION_VERSION",
++    "AttachmentSpreadPolicy",
++    "TransitionMassPolicy",
++    "SpanContinuityPolicy",
++    "ContinuousMorphologicalFusion",
+     "COMPLEX_TOPOLOGY_VERSION",
+     "STRUCTURAL_SPAN_VERSION",
+     "NEGATIVE_VOLUME_VERSION",

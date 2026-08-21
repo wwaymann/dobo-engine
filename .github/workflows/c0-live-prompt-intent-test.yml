@@ -1,0 +1,149 @@
+name: DOBO C0 Live Prompt Intent Test
+
+on:
+  push:
+    branches: [c0-advanced-morphology-through-123]
+    paths:
+      - '.github/workflows/c0-live-prompt-intent-test.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/c0-live-prompt-intent-test.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Natural-language DOBO design prompt'
+        required: true
+        default: 'Haz una maceta esférica con la palabra DOBO en sobrerrelieve, centrada al frente.'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  live-prompt-intent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: app
+      DESIGN_PROMPT: ${{ github.event_name == 'workflow_dispatch' && inputs.prompt || 'Haz una maceta esférica con la palabra DOBO en sobrerrelieve, centrada al frente.' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install live semantic interpreter dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema numpy trimesh
+
+      - name: Interpret natural-language prompt with existing DOBO semantic interpreter
+        run: |
+          mkdir -p outputs-ci/c0-live-prompt-intent
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+
+          from product_generators.design_interpreter.prompt_interpreter import (
+              OpenAIResponsesSemanticClient,
+              PromptSemanticInterpreter,
+          )
+          from product_generators.design_interpreter.semantic_contract import BODY_FAMILIES
+
+          out = Path('outputs-ci/c0-live-prompt-intent')
+          prompt = os.environ['DESIGN_PROMPT']
+          key = os.environ.get('OPENAI_API_KEY', '').strip()
+          if not key:
+              raise RuntimeError('OPENAI_API_KEY is not configured; live prompt interpretation cannot be tested.')
+
+          client = OpenAIResponsesSemanticClient(model=os.environ['DOBO_SEMANTIC_MODEL'])
+          interpreted = PromptSemanticInterpreter(client).interpret(prompt)
+          program = interpreted.program
+          semantic = program.to_dict()
+          trace = {
+              'interpreter_version': interpreted.trace.interpreter_version,
+              'model': interpreted.trace.model,
+              'response_id': interpreted.trace.response_id,
+              'prompt_sha256': interpreted.trace.prompt_sha256,
+              'feature_count': interpreted.trace.feature_count,
+              'relation_count': interpreted.trace.relation_count,
+              'assumption_count': interpreted.trace.assumption_count,
+              'ambiguity_count': interpreted.trace.ambiguity_count,
+          }
+          (out/'PROMPT.txt').write_text(prompt + '\n', encoding='utf-8')
+          (out/'SEMANTIC_PROGRAM.json').write_text(json.dumps(semantic, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          (out/'INTERPRETATION_TRACE.json').write_text(json.dumps(trace, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+
+          requested = {
+              'shape': 'spherical',
+              'text': 'DOBO',
+              'surface_effect': 'raised',
+              'region': 'front',
+          }
+          allowed_families = sorted(BODY_FAMILIES)
+          features = semantic.get('features', [])
+
+          def preserves_dobo(feature):
+              concept = str(feature.get('concept', '')).lower()
+              concept_tokens = [token for token in concept.split('_') if token]
+              return (
+                  feature.get('form_hint') == 'text'
+                  and 'dobo' in concept_tokens
+                  and feature.get('surface_effect') == 'raised'
+                  and feature.get('anchor', {}).get('region') == 'front'
+              )
+
+          text_ok = any(preserves_dobo(f) for f in features)
+          sphere_representable = 'spherical' in BODY_FAMILIES
+          body_family = semantic.get('body', {}).get('family')
+          shape_ok = body_family == 'spherical'
+
+          audit = {
+              'schema': 'dobo.c0.live_prompt_intent.2',
+              'prompt': prompt,
+              'requested_intent': requested,
+              'semantic_body_family': body_family,
+              'schema_body_family_values': allowed_families,
+              'sphere_representable_by_current_semantic_contract': sphere_representable,
+              'text_intent_preserved': text_ok,
+              'shape_intent_preserved_exactly': shape_ok,
+              'verdict': 'PASS' if text_ok and shape_ok else 'FAIL',
+              'reason': (
+                  'Exact prompt intent preserved by current semantic contract.'
+                  if text_ok and shape_ok
+                  else 'Prompt interpretation completed, but current semantic contract did not preserve the requested intent exactly.'
+              ),
+          }
+          (out/'INTENT_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+
+          if not text_ok:
+              raise RuntimeError('AI interpretation did not preserve DOBO as raised front text.')
+          if not shape_ok:
+              raise RuntimeError(
+                  f"AI interpretation did not preserve exact spherical body intent; semantic body.family={body_family!r}, "
+                  f"current allowed values={allowed_families}."
+              )
+          PY
+
+      - name: Upload live prompt interpretation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-live-prompt-intent
+          path: outputs-ci/c0-live-prompt-intent
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,232 @@
+name: DOBO C0 Visual Acceptance
+
+on:
+  push:
+    branches:
+      - c0-advanced-morphology-through-123
+    paths:
+      - '.github/workflows/c0-visual-acceptance.yml'
+      - 'tools/dobo_blender_acceptance.py'
+      - 'patches/c0-rounded-box-depth.patch'
+      - 'patches/c0_normalize_body_relations.py'
+      - 'patches/c0_normalize_stl_export.py'
+      - 'app/product_generators/design_interpreter/image_interpreter.py'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/c0-visual-acceptance.yml'
+      - 'tools/dobo_blender_acceptance.py'
+      - 'patches/c0-rounded-box-depth.patch'
+      - 'patches/c0_normalize_body_relations.py'
+      - 'patches/c0_normalize_stl_export.py'
+      - 'app/product_generators/design_interpreter/image_interpreter.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prompt-and-image-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_OPENAI_MODEL: ${{ secrets.DOBO_OPENAI_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing DOBO stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai numpy scipy scikit-image trimesh networkx shapely Pillow cadquery
+
+      - name: Apply bounded rounded-box integration
+        shell: bash
+        run: |
+          git apply --check patches/c0-rounded-box-depth.patch
+          git apply patches/c0-rounded-box-depth.patch
+          python -m py_compile app/product_generators/design_interpreter/semantic_compiler.py
+
+      - name: Normalize implicit body relations
+        shell: bash
+        run: |
+          python patches/c0_normalize_body_relations.py
+          python -m py_compile app/product_generators/design_interpreter/prompt_interpreter.py
+
+      - name: Verify live-model configuration
+        shell: bash
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo 'OPENAI_API_KEY secret is required'; exit 2; }
+          test -n "$DOBO_OPENAI_MODEL" || { echo 'DOBO_OPENAI_MODEL secret is required'; exit 2; }
+          echo "Using configured DOBO model: $DOBO_OPENAI_MODEL"
+
+      - name: Build visual reference fixture
+        run: |
+          mkdir -p outputs-ci/c0-visual-acceptance/input
+          python - <<'PY'
+          from PIL import Image, ImageDraw
+          from pathlib import Path
+
+          target = Path('outputs-ci/c0-visual-acceptance/input/reference.png')
+          image = Image.new('RGB', (640, 640), 'white')
+          draw = ImageDraw.Draw(image)
+          draw.rounded_rectangle((205, 170, 435, 535), radius=90, fill=(65, 67, 70))
+          draw.ellipse((170, 115, 470, 245), fill=(65, 67, 70))
+          draw.polygon([(210,310),(90,230),(118,205),(250,285)], fill=(65,67,70))
+          draw.ellipse((68,185,142,252), fill=(65,67,70))
+          draw.polygon([(430,330),(555,240),(580,270),(405,375)], fill=(65,67,70))
+          draw.ellipse((540,220,610,290), fill=(65,67,70))
+          draw.polygon([(330,245),(360,80),(395,90),(365,285)], fill=(65,67,70))
+          draw.ellipse((342,55,410,125), fill=(65,67,70))
+          draw.ellipse((245,145,395,205), fill='white')
+          draw.rectangle((255,175,385,220), fill='white')
+          image.save(target)
+          print(target)
+          PY
+
+      - name: Generate DOBO construction from prompt
+        shell: bash
+        run: |
+          prompt='A sculptural open-top planter about 150 mm tall with a stable flat base, a softly tapered organic body, a narrow waist, and three broad branching ribs that grow diagonally upward from the lower body and merge continuously into the vessel surface. Rounded transitions, no detached parts, no perforations, minimum 3 mm printable walls.'
+          passed=0
+          for attempt in 1 2 3; do
+            echo "Prompt acceptance attempt ${attempt}/3"
+            rm -rf outputs-ci/c0-visual-acceptance/prompt
+            mkdir -p outputs-ci/c0-visual-acceptance/prompt
+            if python -m product_generators.design_interpreter.pipeline_cli prompt "$prompt" \
+              --output-root outputs-ci/c0-visual-acceptance/prompt; then
+              passed=1
+              break
+            fi
+          done
+          test "$passed" -eq 1 || { echo 'Prompt acceptance failed after 3 approved full-pipeline attempts'; exit 1; }
+
+      - name: Generate DOBO construction from visual reference
+        shell: bash
+        run: |
+          passed=0
+          for attempt in 1 2 3; do
+            echo "Image acceptance attempt ${attempt}/3"
+            rm -rf outputs-ci/c0-visual-acceptance/image
+            mkdir -p outputs-ci/c0-visual-acceptance/image
+            if python -m product_generators.design_interpreter.pipeline_cli image \
+              outputs-ci/c0-visual-acceptance/input/reference.png \
+              --detail high \
+              --output-root outputs-ci/c0-visual-acceptance/image; then
+              passed=1
+              break
+            fi
+          done
+          test "$passed" -eq 1 || { echo 'Image acceptance failed after 3 approved full-pipeline attempts'; exit 1; }
+
+      - name: Validate generated review artifacts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import numpy as np
+          import trimesh
+
+          root = Path('outputs-ci/c0-visual-acceptance')
+          tolerance_mm = 0.01
+
+          for label in ('prompt', 'image'):
+              stls = list((root / label).rglob('*.stl'))
+              threemf = list((root / label).rglob('*.3mf'))
+              manifests = list((root / label).rglob('*.manifest.json'))
+              if len(stls) != 1 or len(threemf) != 1 or len(manifests) != 1:
+                  raise SystemExit(f'{label}: expected one STL, one 3MF and one manifest')
+
+              manifest = json.loads(manifests[0].read_text(encoding='utf-8'))
+              if not manifest.get('validation', {}).get('watertight', False):
+                  raise SystemExit(f'{label}: DOBO in-memory mesh was not watertight')
+
+              mesh = trimesh.load_mesh(stls[0], process=False)
+              triangles = np.asarray(mesh.triangles, dtype=np.float64)
+              if triangles.size == 0 or not np.isfinite(triangles).all():
+                  raise SystemExit(f'{label}: STL is empty or contains non-finite coordinates')
+              if len(triangles) < 4:
+                  raise SystemExit(f'{label}: STL contains too few triangles to represent a closed object')
+
+              extents = np.ptp(triangles.reshape((-1, 3)), axis=0)
+              if not np.all(extents > tolerance_mm):
+                  raise SystemExit(
+                      f'{label}: STL has degenerate extent at manufacturing tolerance {tolerance_mm} mm'
+                  )
+
+              # STL is a triangle soup and does not preserve vertex identity. DOBO's
+              # in-memory watertight validation is authoritative for topology. Here we
+              # only verify that the exported STL round-trips as finite, non-empty,
+              # non-degenerate geometry. 0.01 mm is the manufacturing-relevant floor
+              # for any coordinate/extent comparison in this gate.
+              print(
+                  label,
+                  stls[0],
+                  'faces', len(triangles),
+                  'dobo_watertight', True,
+                  'stl_roundtrip', 'OK',
+                  'comparison_tolerance_mm', tolerance_mm,
+              )
+          PY
+
+      - name: Install headless Blender renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri libglx-mesa0
+
+      - name: Render prompt and image constructions
+        shell: bash
+        run: |
+          PROMPT_STL=$(find outputs-ci/c0-visual-acceptance/prompt -name '*.stl' -print -quit)
+          IMAGE_STL=$(find outputs-ci/c0-visual-acceptance/image -name '*.stl' -print -quit)
+          mkdir -p outputs-ci/c0-visual-acceptance/renders/prompt outputs-ci/c0-visual-acceptance/renders/image
+          xvfb-run -a -s "-screen 0 1280x1024x24" blender --background --python tools/dobo_blender_acceptance.py -- \
+            --stl "$PROMPT_STL" --output-root outputs-ci/c0-visual-acceptance/renders/prompt --label prompt --resolution 512
+          xvfb-run -a -s "-screen 0 1280x1024x24" blender --background --python tools/dobo_blender_acceptance.py -- \
+            --stl "$IMAGE_STL" --output-root outputs-ci/c0-visual-acceptance/renders/image --label image --resolution 512
+
+      - name: Build human review sheet
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          root = Path('outputs-ci/c0-visual-acceptance')
+          ref = Image.open(root/'input/reference.png').convert('RGB').resize((512,512))
+          views = ['front','side','top','iso']
+          panels = []
+          for label in ('prompt','image'):
+              imgs = [Image.open(root/'renders'/label/f'{label}_{v}.png').convert('RGB') for v in views]
+              row = Image.new('RGB', (512*4, 560), 'white')
+              draw = ImageDraw.Draw(row)
+              for i,(v,img) in enumerate(zip(views,imgs)):
+                  row.paste(img,(i*512,48))
+                  draw.text((i*512+12,16), f'{label} · {v}', fill='black')
+              panels.append(row)
+          sheet = Image.new('RGB', (512*4, 1760), 'white')
+          draw = ImageDraw.Draw(sheet)
+          sheet.paste(ref,(0,48))
+          draw.text((12,16),'visual reference input',fill='black')
+          sheet.paste(panels[0],(0,560))
+          sheet.paste(panels[1],(0,1120))
+          out = root/'DOBO_VISUAL_ACCEPTANCE_REVIEW.jpg'
+          sheet.save(out, quality=94)
+          print(out)
+          PY
+
+      - name: Upload visual acceptance output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-prompt-image-visual-acceptance
+          path: outputs-ci/c0-visual-acceptance
+          if-no-files-found: error
+          retention-days: 30

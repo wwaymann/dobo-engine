@@ -1,0 +1,5 @@
+# Direct dependencies of the DOBO Organic Shape Engine.
+# NumPy is already a core runtime dependency; keep it within the tested major.
+numpy>=2.0,<3.0
+scikit-image==0.26.0
+trimesh==5.0.0

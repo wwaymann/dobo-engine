@@ -1,0 +1,180 @@
+name: DOBO C0 Capability Combination Tests
+
+on:
+  push:
+    branches: [c0-advanced-morphology-through-123]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dobo-c0-capability-combination-tests
+  cancel-in-progress: true
+
+jobs:
+  capability-combinations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - name: Checkout accumulated C0 tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing geometry stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib svgpathtools
+
+      - name: Execute accumulated capability combinations
+        run: |
+          mkdir -p outputs-ci/c0-capability-combinations/logs
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          root = Path.cwd()
+          out = root / 'outputs-ci' / 'c0-capability-combinations'
+          logs = out / 'logs'
+          logs.mkdir(parents=True, exist_ok=True)
+
+          # No new engine behavior is implemented here. Each scenario only chains
+          # existing DOBO tests/capabilities that already exist in the accumulated tree.
+          scenarios = {
+              '01_semantic_to_organic_form': [
+                  'product_generators.design_interpreter.test_phase_3a_semantic_contract',
+                  'product_generators.design_interpreter.test_phase_3b_semantic_compiler',
+                  'product_generators.design_interpreter.test_phase_5_generalized_design_grammar',
+                  'product_generators.design_interpreter.test_phase_6_structural_morphogenesis',
+                  'product_generators.organic_shapes.test_phase_2b_organic_vessel',
+                  'product_generators.organic_shapes.test_phase_2i_surface_anchoring',
+              ],
+              '02_form_to_surface_design': [
+                  'product_generators.organic_shapes.test_phase_2f_hybrid_feature_program',
+                  'product_generators.surface_mapping.test_phase_2',
+                  'product_generators.surface_features.test_pipeline',
+                  'product_generators.surface_designer.test_native_surface_text_capability',
+                  'product_generators.surface_designer.test_phase_5_json_composition',
+              ],
+              '03_surface_to_multicolor_production': [
+                  'product_generators.surface_designer.test_phase_6_multicolor_3mf',
+                  'product_generators.manufacturability.test_phase_7_6_text_manufacturing',
+                  'product_generators.manufacturability.test_phase_7_7_decoration_manufacturing',
+                  'product_generators.manufacturability.test_phase_7_8_color_final_production',
+                  'product_generators.manufacturability.test_phase_7_9_consolidated_validator',
+                  'product_generators.manufacturability.test_phase_7_10_real_product_validation',
+              ],
+              '04_advanced_body_to_surface_and_handoff': [
+                  'product_generators.design_interpreter.test_macroblock_a2_morphological_integration',
+                  'product_generators.design_interpreter.test_macroblock_a3_continuous_fusion',
+                  'product_generators.design_interpreter.test_macroblock_a4_visible_continuity',
+                  'product_generators.surface_designer.test_c0_advanced_body_adapter_gate',
+                  'product_generators.manufacturability.test_macroblock_b_final_geometry',
+                  'product_generators.manufacturability.test_macroblock_b_planned_3mf_export',
+                  'product_generators.manufacturability.test_macroblock_b_3mf_placement',
+                  'product_generators.manufacturability.test_macroblock_b_production_handoff',
+              ],
+          }
+
+          report = {
+              'schema': 'dobo.c0.capability_combinations.1',
+              'commit': os.environ.get('GITHUB_SHA'),
+              'creates_new_engine_behavior': False,
+              'creates_new_geometry_capability': False,
+              'scenarios': {},
+          }
+          overall_failures = 0
+
+          for scenario, modules in scenarios.items():
+              results = []
+              scenario_failed = False
+              for idx, module in enumerate(modules, start=1):
+                  started = time.monotonic()
+                  proc = subprocess.run(
+                      [sys.executable, '-m', module],
+                      cwd=root,
+                      env={**os.environ, 'PYTHONPATH': 'app'},
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.STDOUT,
+                      text=True,
+                      timeout=600,
+                  )
+                  duration = round(time.monotonic() - started, 3)
+                  status = 'PASS' if proc.returncode == 0 else 'FAIL'
+                  log_path = logs / f'{scenario}_{idx:02d}.log'
+                  log_path.write_text(proc.stdout or '', encoding='utf-8', errors='replace')
+                  results.append({
+                      'module': module,
+                      'status': status,
+                      'returncode': proc.returncode,
+                      'duration_s': duration,
+                      'log': str(log_path.relative_to(root)),
+                  })
+                  print(f'[{status}] {scenario}: {module} ({duration}s)')
+                  if status == 'FAIL':
+                      scenario_failed = True
+
+              scenario_status = 'FAIL' if scenario_failed else 'PASS'
+              if scenario_failed:
+                  overall_failures += 1
+              report['scenarios'][scenario] = {
+                  'status': scenario_status,
+                  'module_count': len(modules),
+                  'results': results,
+              }
+
+          report['summary'] = {
+              'scenario_count': len(scenarios),
+              'scenario_failures': overall_failures,
+              'verdict': 'FAIL' if overall_failures else 'PASS',
+          }
+
+          (out / 'CAPABILITY_COMBINATIONS.json').write_text(
+              json.dumps(report, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+
+          lines = [
+              '# DOBO C0 Capability Combination Tests',
+              '',
+              f"Commit: `{report['commit']}`",
+              '',
+              'These scenarios exercise only capabilities already present in the accumulated C0 tree.',
+              '',
+              '| Scenario | Status | Existing modules exercised |',
+              '|---|---:|---:|',
+          ]
+          for name, data in report['scenarios'].items():
+              lines.append(f"| `{name}` | **{data['status']}** | {data['module_count']} |")
+          lines += ['', f"Overall verdict: **{report['summary']['verdict']}**", '']
+          (out / 'CAPABILITY_COMBINATIONS.md').write_text('\n'.join(lines), encoding='utf-8')
+
+          if overall_failures:
+              raise SystemExit(f'{overall_failures} capability-combination scenario(s) failed')
+          PY
+
+      - name: Upload combination evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-capability-combination-tests
+          path: outputs-ci/c0-capability-combinations
+          if-no-files-found: error
+          retention-days: 30

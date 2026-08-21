@@ -1,0 +1,199 @@
+name: DOBO C0 Visual Product Stress
+
+on:
+  push:
+    branches: [c0-advanced-morphology-through-123]
+    paths:
+      - '.github/workflows/c0-visual-product-stress.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/c0-visual-product-stress.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dobo-c0-visual-product-stress
+  cancel-in-progress: true
+
+jobs:
+  visual-product-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - name: Checkout accumulated C0 tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing DOBO geometry stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib svgpathtools
+
+      - name: Generate three existing advanced morphology cases
+        run: |
+          rm -rf outputs-ci/c0-visual-product-stress
+          mkdir -p outputs-ci/c0-visual-product-stress/models
+          python -m product_generators.design_interpreter.macroblock_a4_matrix_cli \
+            --output-root outputs-ci/c0-visual-product-stress/models/macroblock \
+            --case all
+
+      - name: Generate existing complete decorated JSON product
+        run: |
+          python -m product_generators.surface_designer.test_phase_5_json_composition
+          python -m product_generators.surface_designer.test_phase_6_multicolor_3mf
+          python -m product_generators.surface_designer.gallery_phase_5_json_composition
+          python - <<'PY'
+          from pathlib import Path
+          import cadquery as cq
+
+          source = Path('outputs/product_generators/surface_designer/phase_5_json_composition/dobo_json_complete_product.step')
+          if not source.is_file():
+              raise SystemExit(f'missing expected existing STEP product: {source}')
+          out = Path('outputs-ci/c0-visual-product-stress/models/decorated')
+          out.mkdir(parents=True, exist_ok=True)
+          shape = cq.importers.importStep(str(source))
+          target = out / 'decorated_complete_product.stl'
+          cq.exporters.export(shape, str(target))
+          if not target.is_file():
+              raise SystemExit('STEP to STL review transport failed')
+          print(target)
+          PY
+
+      - name: Preserve existing manufacturing contracts
+        run: |
+          python -m product_generators.manufacturability.test_phase_7_6_text_manufacturing
+          python -m product_generators.manufacturability.test_phase_7_7_decoration_manufacturing
+          python -m product_generators.manufacturability.test_phase_7_8_color_final_production
+          python -m product_generators.manufacturability.test_phase_7_9_consolidated_validator
+          python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
+
+      - name: Build review model manifest
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import shutil
+
+          root = Path('outputs-ci/c0-visual-product-stress')
+          review = root / 'review_models'
+          review.mkdir(parents=True, exist_ok=True)
+          expected = {
+              'architectural': next((root/'models'/'macroblock'/'architectural').rglob('*.stl')),
+              'branching': next((root/'models'/'macroblock'/'branching').rglob('*.stl')),
+              'perforated': next((root/'models'/'macroblock'/'perforated').rglob('*.stl')),
+              'decorated': root/'models'/'decorated'/'decorated_complete_product.stl',
+          }
+          capabilities = {
+              'architectural': ['semantic grammar','structural morphogenesis','hierarchy','surface intents','STL','3MF'],
+              'branching': ['semantic grammar','continuous fusion','advanced morphology','surface intents','STL','3MF'],
+              'perforated': ['semantic grammar','boolean/perforated morphology','visible continuity','surface intents','STL','3MF'],
+              'decorated': ['organic body','primitives','booleans','geometric decoration','text emboss','SVG deboss','multicolor contract'],
+          }
+          manifest = {'schema':'dobo.c0.visual_product_stress.1','creates_new_geometry_capability':False,'products':{}}
+          for label, source in expected.items():
+              if not source.is_file():
+                  raise SystemExit(f'{label}: missing source STL {source}')
+              target = review / f'{label}.stl'
+              shutil.copy2(source, target)
+              manifest['products'][label] = {
+                  'stl': str(target.relative_to(root)),
+                  'capabilities': capabilities[label],
+              }
+          (root/'VISUAL_PRODUCT_STRESS.json').write_text(json.dumps(manifest, indent=2)+'\n', encoding='utf-8')
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Install existing headless Blender review renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri libglx-mesa0
+
+      - name: Render four products from normalized views
+        shell: bash
+        run: |
+          mkdir -p outputs-ci/c0-visual-product-stress/renders
+          for label in architectural branching perforated decorated; do
+            mkdir -p "outputs-ci/c0-visual-product-stress/renders/$label"
+            xvfb-run -a -s "-screen 0 1280x1024x24" blender --background \
+              --python tools/dobo_blender_acceptance.py -- \
+              --stl "outputs-ci/c0-visual-product-stress/review_models/$label.stl" \
+              --output-root "outputs-ci/c0-visual-product-stress/renders/$label" \
+              --label "$label" --resolution 512
+          done
+
+      - name: Build visual comparison sheet
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+
+          root = Path('outputs-ci/c0-visual-product-stress')
+          labels = ['architectural','branching','perforated','decorated']
+          views = ['front','side','top','iso']
+          cell = 384
+          header = 42
+          sheet = Image.new('RGB', (cell*4, (cell+header)*4), 'white')
+          draw = ImageDraw.Draw(sheet)
+          for row,label in enumerate(labels):
+              for col,view in enumerate(views):
+                  path = root/'renders'/label/f'{label}_{view}.png'
+                  if not path.is_file():
+                      raise SystemExit(f'missing render {path}')
+                  img = Image.open(path).convert('RGB').resize((cell,cell))
+                  x = col*cell
+                  y = row*(cell+header)+header
+                  sheet.paste(img,(x,y))
+                  draw.text((x+10,row*(cell+header)+12),f'{label} · {view}',fill='black')
+          out = root/'DOBO_VISUAL_PRODUCT_STRESS_REVIEW.jpg'
+          sheet.save(out, quality=94)
+          print(out)
+          PY
+
+      - name: Validate review evidence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import numpy as np
+          import trimesh
+
+          root = Path('outputs-ci/c0-visual-product-stress')
+          manifest = json.loads((root/'VISUAL_PRODUCT_STRESS.json').read_text())
+          if set(manifest['products']) != {'architectural','branching','perforated','decorated'}:
+              raise SystemExit('expected exactly four review products')
+          for label,data in manifest['products'].items():
+              mesh = trimesh.load_mesh(root/data['stl'], process=False)
+              tri = np.asarray(mesh.triangles, dtype=float)
+              if tri.size == 0 or not np.isfinite(tri).all():
+                  raise SystemExit(f'{label}: invalid STL review transport')
+              ext = np.ptp(tri.reshape((-1,3)), axis=0)
+              if not np.all(ext > 0.01):
+                  raise SystemExit(f'{label}: degenerate review geometry')
+          sheet = root/'DOBO_VISUAL_PRODUCT_STRESS_REVIEW.jpg'
+          if not sheet.is_file() or sheet.stat().st_size < 10000:
+              raise SystemExit('review sheet missing or implausibly small')
+          print('VISUAL PRODUCT STRESS EVIDENCE OK')
+          PY
+
+      - name: Upload visual product stress evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-visual-product-stress
+          path: outputs-ci/c0-visual-product-stress
+          if-no-files-found: error
+          retention-days: 30

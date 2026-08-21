@@ -1,0 +1,29 @@
+{
+  "id": "phase_2a_smooth_blend",
+  "grid": {
+    "minimum": [-52.0, -43.0, -55.0],
+    "maximum": [68.0, 43.0, 75.0],
+    "voxel_mm": 1.0
+  },
+  "fields": [
+    {
+      "id": "primary_form",
+      "center": [0.0, 0.0, 0.0],
+      "radii": [34.0, 29.0, 43.0]
+    },
+    {
+      "id": "secondary_form",
+      "center": [31.0, 0.0, 24.0],
+      "radii": [21.0, 22.0, 27.0]
+    }
+  ],
+  "composition": {
+    "field_ids": ["primary_form", "secondary_form"],
+    "blend_mm": 12.0
+  },
+  "output": {
+    "directory": "outputs/product_generators/organic_shapes/phase_2a_smooth_blend",
+    "basename": "phase_2a_smooth_blend",
+    "max_generation_seconds": 30.0
+  }
+}
