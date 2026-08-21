@@ -45,10 +45,6 @@ jobs:
           opening_radius = 25.0
           center_z = radius
 
-          # Build a true spherical shell first, with outer and inner spheres sharing
-          # the same center. Then pierce only the small top cap with a bounded
-          # cylinder. This preserves the lower hemisphere and almost all of the
-          # original 130 mm spherical height while opening the existing cavity.
           opening_plane_z = center_z + math.sqrt(radius * radius - opening_radius * opening_radius)
           opening_cut_start_z = opening_plane_z - 1.5
           opening_cut_height = 20.0
@@ -72,17 +68,18 @@ jobs:
           }
           (out/'EXECUTED_SPECIFICATION.json').write_text(json.dumps(trace, indent=2), encoding='utf-8')
 
-          # Existing CadQuery primitive operations only.
-          outer = cq.Solid.makeSphere(radius, cq.Vector(0, 0, center_z))
-          inner = cq.Solid.makeSphere(radius-wall, cq.Vector(0, 0, center_z))
+          # CadQuery makeSphere() positional arguments after radius are angular bounds,
+          # not a center point. Build full spheres at the origin, then translate them.
+          outer = cq.Solid.makeSphere(radius).translate(cq.Vector(0, 0, center_z))
+          inner = cq.Solid.makeSphere(radius-wall).translate(cq.Vector(0, 0, center_z))
           shell = outer.cut(inner, tol=0.005).clean()
 
           outer_bb = outer.BoundingBox()
           shell_bb = shell.BoundingBox()
           print('SPHERICAL OUTER BBOX', [outer_bb.xlen, outer_bb.ylen, outer_bb.zlen])
           print('SPHERICAL SHELL BBOX', [shell_bb.xlen, shell_bb.ylen, shell_bb.zlen])
-          if shell_bb.zlen < 129.0:
-              raise RuntimeError(f'Spherical shell lost height before opening cut: {shell_bb.zlen}')
+          if not (129.0 <= shell_bb.xlen <= 131.0 and 129.0 <= shell_bb.ylen <= 131.0 and 129.0 <= shell_bb.zlen <= 131.0):
+              raise RuntimeError(f'Spherical shell dimensions invalid before opening cut: {[shell_bb.xlen, shell_bb.ylen, shell_bb.zlen]}')
 
           opening = cq.Solid.makeCylinder(
               opening_radius,
@@ -95,8 +92,8 @@ jobs:
 
           bb = base.BoundingBox()
           print('SPHERICAL BASE BBOX', [bb.xlen, bb.ylen, bb.zlen])
-          if bb.zlen < 120.0:
-              raise RuntimeError(f'Spherical planter opening cut truncated body: {bb.zlen}')
+          if not (125.0 <= bb.xlen <= 140.0 and 125.0 <= bb.ylen <= 140.0 and 120.0 <= bb.zlen <= 132.0):
+              raise RuntimeError(f'Spherical planter opening cut truncated body: {[bb.xlen, bb.ylen, bb.zlen]}')
 
           face = SurfaceFaceSelector().largest_external(base, geom_type='SPHERE')
           text = NativeTextFaceDecorator().decorate(
@@ -120,8 +117,8 @@ jobs:
 
           bb = final.BoundingBox()
           print('SPHERICAL FINAL BBOX', [bb.xlen, bb.ylen, bb.zlen])
-          if bb.zlen < 120.0:
-              raise RuntimeError(f'DOBO decoration truncated spherical body: {bb.zlen}')
+          if not (125.0 <= bb.xlen <= 140.0 and 125.0 <= bb.ylen <= 140.0 and 120.0 <= bb.zlen <= 132.0):
+              raise RuntimeError(f'DOBO decoration truncated spherical body: {[bb.xlen, bb.ylen, bb.zlen]}')
 
           cq.exporters.export(final, str(out/'dobo_spherical.step'))
           cq.exporters.export(final, str(out/'dobo_spherical.stl'), tolerance=0.03, angularTolerance=0.08)
