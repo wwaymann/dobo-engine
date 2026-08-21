@@ -57,8 +57,18 @@ jobs:
               'creates_new_engine_behavior': False,
               'creates_new_geometry_capability': False,
               'change_from_conic_reference': 'body family only: conic -> spherical',
-              'body': {'family':'spherical_planter','radius_mm':radius,'diameter_mm':radius*2,'wall_mm':wall,'opening_radius_mm':opening_radius,'center_mm':[0,0,center_z]},
-              'front': {'kind':'text','content':'DOBO','mode':'emboss','depth_mm':1.8,'placement':'front hemisphere, centered'},
+              'body': {
+                  'family':'spherical_planter',
+                  'radius_mm':radius,
+                  'diameter_mm':radius*2,
+                  'wall_mm':wall,
+                  'opening_radius_mm':opening_radius,
+                  'center_mm':[0,0,center_z],
+              },
+              'front': {
+                  'kind':'text','content':'DOBO','mode':'emboss','depth_mm':1.8,
+                  'placement':'camera-front hemisphere (-Y), centered'
+              },
           }
           (out/'EXECUTED_SPECIFICATION.json').write_text(json.dumps(trace, indent=2), encoding='utf-8')
 
@@ -74,6 +84,12 @@ jobs:
           if not base.isValid() or len(base.Solids()) != 1:
               raise RuntimeError('Spherical planter base invalid')
 
+          # The opening must be physically present: require a cylindrical wall from
+          # the bounded top cut in addition to the spherical faces.
+          cylinder_faces = [f for f in base.Faces() if f.geomType() == 'CYLINDER']
+          if not cylinder_faces:
+              raise RuntimeError('Top opening was not created: no cylindrical opening wall found')
+
           face = SurfaceFaceSelector().largest_external(base, geom_type='SPHERE')
           planar = cq_text('DOBO', 14.0, font='Arial', kind='bold', halign='center', valign='center')
           if not planar.isValid():
@@ -84,11 +100,10 @@ jobs:
           u_min,u_max,v_min,v_max = face.uvBounds()
           u_span=float(u_max-u_min); v_span=float(v_max-v_min)
 
-          # OCC spherical U is periodic. The visual front of the acceptance camera is
-          # the middle of the first quarter of the U domain, not u=0.25 expressed
-          # against an arbitrary seam. Pin the placement explicitly to that front
-          # hemisphere and keep the text compact enough to avoid wrapping the seam.
-          u_mid = u_min + u_span * 0.125
+          # Blender acceptance "front" is camera on -Y looking toward +Y.
+          # OCC sphere parameterization is x=R*cos(u)*cos(v), y=R*sin(u)*cos(v).
+          # Therefore camera-front is u=3*pi/2, i.e. 75% of the periodic U range.
+          u_mid = u_min + u_span * 0.75
           v_mid = v_min + v_span * 0.50
           target_w = u_span * 0.16
           target_h = v_span * 0.13
@@ -108,6 +123,21 @@ jobs:
               placement=placement,
           )
           text_result.validate()
+
+          # Assert that mapped text is actually on the camera-front hemisphere,
+          # rather than trusting CI volume/dimension checks alone.
+          mapped_bb = text_result.mapped_faces.BoundingBox()
+          mapped_cx = (mapped_bb.xmin + mapped_bb.xmax) / 2.0
+          mapped_cy = (mapped_bb.ymin + mapped_bb.ymax) / 2.0
+          mapped_cz = (mapped_bb.zmin + mapped_bb.zmax) / 2.0
+          print('DOBO MAPPED CENTER', [mapped_cx, mapped_cy, mapped_cz])
+          if mapped_cy > -35.0:
+              raise RuntimeError(f'DOBO is not on front (-Y) hemisphere: y={mapped_cy}')
+          if abs(mapped_cx) > 20.0:
+              raise RuntimeError(f'DOBO is not horizontally centered on front: x={mapped_cx}')
+          if not (50.0 <= mapped_cz <= 90.0):
+              raise RuntimeError(f'DOBO is not vertically centered: z={mapped_cz}')
+
           final=text_result.shape.clean()
           if not final.isValid() or len(final.Solids()) != 1:
               raise RuntimeError('Spherical DOBO result invalid')
@@ -145,11 +175,11 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from PIL import Image, ImageDraw
-          root=Path('outputs-ci/c0-spherical-dobo'); views=['front','side','top','iso']
+          root=Path('outputs-ci/c0-spherical-dobo'); views=['front','iso','top','side']
           imgs=[Image.open(root/'renders'/f'spherical_dobo_{v}.png').convert('RGB') for v in views]
           sheet=Image.new('RGB',(2048,580),'white'); d=ImageDraw.Draw(sheet)
-          d.text((12,10),'DOBO SPHERICAL TEST — front-centered emboss',fill='black')
-          d.text((12,28),'120 mm spherical planter; existing native face decoration capability',fill='black')
+          d.text((12,10),'DOBO SPHERICAL TEST — verified front emboss + top opening',fill='black')
+          d.text((12,28),'120 mm spherical planter; front is -Y in acceptance camera coordinates',fill='black')
           for i,(v,img) in enumerate(zip(views,imgs)):
               sheet.paste(img,(i*512,60)); d.text((i*512+12,44),v,fill='black')
           sheet.save(root/'DOBO_SPHERICAL_REVIEW.jpg',quality=94)
