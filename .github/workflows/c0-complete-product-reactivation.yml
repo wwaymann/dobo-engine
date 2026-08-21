@@ -1,0 +1,88 @@
+name: DOBO C0 Complete Product Reactivation
+
+on:
+  push:
+    branches:
+      - c0-complete-product-reactivation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  complete-product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install validated CAD and render dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
+      - name: Execute existing complete JSON product pipeline
+        run: |
+          python -m product_generators.surface_designer.test_phase_5_json_composition
+          python -m product_generators.surface_designer.gallery_phase_5_json_composition
+      - name: Generate real dark-background wireframe evaluation image
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import cadquery as cq
+          import numpy as np
+          import trimesh
+          import matplotlib.pyplot as plt
+          from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+          from product_generators.surface_designer.gallery_phase_5_json_composition import build_json_product
+
+          out = Path('outputs/c0_complete_product_reactivation')
+          out.mkdir(parents=True, exist_ok=True)
+          result = build_json_product()
+          stl = out / 'dobo_complete_product.stl'
+          cq.exporters.export(result.shape, str(stl))
+          mesh = trimesh.load_mesh(stl, process=False)
+          if isinstance(mesh, trimesh.Scene):
+              mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
+          v = np.asarray(mesh.vertices, dtype=float)
+          f = np.asarray(mesh.faces, dtype=int)
+          center = (v.min(0) + v.max(0)) / 2.0
+          v = v - center
+          scale = float(max(v.max(0)-v.min(0)))
+          v = v / max(scale, 1e-9)
+          tri = v[f]
+          fig = plt.figure(figsize=(14, 14), facecolor='#20242a')
+          ax = fig.add_subplot(111, projection='3d', facecolor='#20242a')
+          poly = Poly3DCollection(tri, facecolor='#c8a97e', edgecolor='#16191d', linewidth=0.18, alpha=1.0)
+          ax.add_collection3d(poly)
+          ax.view_init(elev=18, azim=-78)
+          ax.set_xlim(-0.58,0.58); ax.set_ylim(-0.58,0.58); ax.set_zlim(-0.58,0.58)
+          ax.set_box_aspect((1,1,1))
+          ax.set_axis_off()
+          ax.set_title('DOBO C0 — Complete Product Reactivation\nOrganic body + volumes + booleans + decoration + embossed text + debossed SVG | wireframe overlay', color='white', fontsize=15, pad=18)
+          fig.tight_layout()
+          fig.savefig(out/'dobo_complete_product_wireframe.png', dpi=220, facecolor=fig.get_facecolor(), bbox_inches='tight')
+          plt.close(fig)
+          print('VISUAL', out/'dobo_complete_product_wireframe.png')
+          print('STL', stl)
+          print('STEP', result.path)
+          print('OPERATIONS', ' -> '.join(result.operations))
+          PY
+      - name: Preserve accumulated surface and production regressions
+        run: |
+          python -m product_generators.surface_designer.test_phase_4_hybrid
+          python -m product_generators.surface_designer.test_phase_5_json_composition
+          python -m product_generators.surface_designer.test_phase_6_multicolor_3mf
+      - name: Upload complete product evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-c0-complete-product-reactivation
+          path: |
+            outputs/c0_complete_product_reactivation/**
+            outputs/product_generators/surface_designer/phase_5_json_composition/**
+          if-no-files-found: error

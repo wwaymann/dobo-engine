@@ -1,0 +1,209 @@
+{
+  "id": "phase_2h_adaptive_feature_refinement",
+  "grid": {
+    "minimum": [-52.0, -49.0, -54.0],
+    "maximum": [52.0, 44.0, 62.0],
+    "voxel_mm": 0.7
+  },
+  "fields": [
+    {
+      "id": "body",
+      "center": [0.0, 0.0, -2.0],
+      "radii": [38.0, 32.0, 47.0]
+    },
+    {
+      "id": "face_mass",
+      "center": [0.0, -17.0, 4.0],
+      "radii": [31.0, 21.0, 38.0]
+    }
+  ],
+  "composition": {
+    "field_ids": ["body", "face_mass"],
+    "blend_mm": 9.0
+  },
+  "vessel": {
+    "wall_mm": 4.2,
+    "base_z_mm": -45.0,
+    "cavity_floor_z_mm": -38.5,
+    "opening_center": [0.0, 0.0],
+    "opening_radii": [18.0, 14.5],
+    "opening_start_z_mm": 26.0,
+    "opening_blend_mm": 5.0,
+    "rim_round_mm": 1.6,
+    "drain_center": [0.0, 0.0],
+    "drain_radius_mm": 3.2,
+    "drain_start_z_mm": -48.0,
+    "drain_end_z_mm": -35.0
+  },
+  "mesh_quality": {
+    "subdivision_passes": 1,
+    "projection_iterations": 3,
+    "projection_epsilon_mm": 0.07,
+    "max_surface_error_mm": 0.015,
+    "iterations": 4,
+    "lambda_factor": 0.42,
+    "mu_factor": -0.44,
+    "rim_axial_band_mm": 13.0,
+    "rim_radial_band": 0.7,
+    "max_displacement_mm": 0.8,
+    "base_protection_mm": 1.2,
+    "drain_protection_mm": 1.6,
+    "max_volume_drift_percent": 0.8,
+    "minimum_roughness_improvement_percent": 1.0
+  },
+  "hierarchy_program": {
+    "adaptive_refinement": {
+      "surface_band_mm": 1.2,
+      "size_band_ratio": 0.45,
+      "maximum_band_mm": 2.4,
+      "small_feature_threshold_mm": 3.5,
+      "detail_subdivision_passes": 1
+    },
+    "templates": [
+      {
+        "id": "helmet_band",
+        "operation": "add",
+        "kind": "rounded_box",
+        "center": [0.0, 0.0, 0.0],
+        "half_sizes": [24.0, 4.0, 4.0],
+        "round_mm": 1.8,
+        "blend_mm": 3.0,
+        "probe": [0.0, -2.0, 0.0]
+      },
+      {
+        "id": "crest_point",
+        "operation": "add",
+        "kind": "rounded_triangle_prism",
+        "vertices_xz": [[-5.0, 0.0], [5.0, 0.0], [0.0, 15.0]],
+        "center_y_mm": 0.0,
+        "half_depth_mm": 4.0,
+        "round_mm": 1.8,
+        "blend_mm": 3.0,
+        "probe": [0.0, -2.0, 6.0]
+      },
+      {
+        "id": "eye_slit",
+        "operation": "subtract",
+        "kind": "capsule",
+        "start": [-4.0, 0.0, 0.0],
+        "end": [4.0, 0.0, 0.0],
+        "radius_mm": 1.6,
+        "blend_mm": 0.9,
+        "probe": [0.0, 0.0, 0.0]
+      },
+      {
+        "id": "cheek",
+        "operation": "add",
+        "kind": "ellipsoid",
+        "center": [0.0, 0.0, 0.0],
+        "radii": [6.5, 2.7, 4.8],
+        "blend_mm": 1.8,
+        "probe": [0.0, -1.0, 0.0]
+      },
+      {
+        "id": "nose",
+        "operation": "add",
+        "kind": "ellipsoid",
+        "center": [0.0, 0.0, 0.0],
+        "radii": [3.2, 1.5, 2.2],
+        "blend_mm": 1.1,
+        "probe": [0.0, -0.5, 0.0]
+      },
+      {
+        "id": "mouth",
+        "operation": "subtract",
+        "kind": "arched_prism",
+        "center": [0.0, 0.0, 0.0],
+        "bottom_z_mm": -4.0,
+        "spring_z_mm": 1.0,
+        "half_width_mm": 3.0,
+        "half_depth_mm": 3.0,
+        "round_mm": 0.7,
+        "blend_mm": 0.8,
+        "probe": [0.0, 0.0, -1.0]
+      },
+      {
+        "id": "forehead_gem",
+        "operation": "add",
+        "kind": "cylinder",
+        "center": [0.0, 0.0, 0.0],
+        "radius_mm": 3.0,
+        "half_height_mm": 1.5,
+        "blend_mm": 1.0,
+        "probe": [0.0, 0.0, 0.0]
+      }
+    ],
+    "roots": [
+      {
+        "id": "character",
+        "children": [
+          {
+            "id": "helmet",
+            "template_ids": ["helmet_band"],
+            "transform": {
+              "translate": [0.0, -29.0, 25.0]
+            },
+            "children": [
+              {
+                "id": "repeated_crest",
+                "template_ids": ["crest_point"],
+                "transform": {
+                  "translate": [-13.0, 0.0, 4.0]
+                },
+                "repeat": {
+                  "count": 3,
+                  "translate_step": [13.0, 0.0, 0.0]
+                }
+              }
+            ]
+          },
+          {
+            "id": "mirrored_eye",
+            "template_ids": ["eye_slit"],
+            "mirror_axis": "x",
+            "transform": {
+              "translate": [-11.0, -38.0, 12.0],
+              "rotate_degrees": [0.0, -10.0, 0.0]
+            }
+          },
+          {
+            "id": "mirrored_cheek",
+            "template_ids": ["cheek"],
+            "mirror_axis": "x",
+            "transform": {
+              "translate": [-6.5, -36.5, -1.0]
+            }
+          },
+          {
+            "id": "nose_instance",
+            "template_ids": ["nose"],
+            "transform": {
+              "translate": [0.0, -40.0, 4.0]
+            }
+          },
+          {
+            "id": "mouth_instance",
+            "template_ids": ["mouth"],
+            "transform": {
+              "translate": [0.0, -39.0, -9.0]
+            }
+          },
+          {
+            "id": "scaled_rotated_gem",
+            "template_ids": ["forehead_gem"],
+            "transform": {
+              "translate": [0.0, -38.0, 20.0],
+              "rotate_degrees": [90.0, 0.0, 0.0],
+              "scale": [1.25, 1.0, 1.25]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "output": {
+    "directory": "outputs/product_generators/organic_shapes/phase_2h_adaptive_feature_refinement",
+    "basename": "phase_2h_adaptive_feature_refinement",
+    "max_generation_seconds": 30.0
+  }
+}
