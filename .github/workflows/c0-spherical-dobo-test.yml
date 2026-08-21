@@ -40,14 +40,22 @@ jobs:
           from product_generators.surface_designer.native_text_face import NativeTextFaceDecorator
 
           out = Path('outputs-ci/c0-spherical-dobo')
-          radius = 65.0
+
+          # New probe dimensions and a different creation point.
+          # Build the primitive through Workplane.sphere(), which explicitly creates
+          # a full sphere around the workplane origin, then translate the finished
+          # primitive to the requested center. This avoids the previous low-level
+          # makeSphere positional-argument ambiguity.
+          radius = 60.0
           wall = 4.0
-          opening_radius = 25.0
-          center_z = radius
+          opening_radius = 22.0
+          creation_origin = cq.Vector(0, 0, 0)
+          center = cq.Vector(0, 0, 70.0)
+          center_z = center.z
 
           opening_plane_z = center_z + math.sqrt(radius * radius - opening_radius * opening_radius)
-          opening_cut_start_z = opening_plane_z - 1.5
-          opening_cut_height = 20.0
+          opening_cut_start_z = opening_plane_z - 1.0
+          opening_cut_height = 16.0
 
           trace = {
               'case_id': 'c0-spherical-dobo-test',
@@ -58,9 +66,11 @@ jobs:
               'body': {
                   'family': 'spherical_planter',
                   'radius_mm': radius,
+                  'diameter_mm': radius * 2.0,
                   'wall_mm': wall,
                   'opening_radius_mm': opening_radius,
-                  'center_z_mm': center_z,
+                  'creation_origin_mm': [creation_origin.x, creation_origin.y, creation_origin.z],
+                  'center_mm': [center.x, center.y, center.z],
                   'opening_plane_z_mm': opening_plane_z,
                   'opening_cut_start_z_mm': opening_cut_start_z,
               },
@@ -68,17 +78,15 @@ jobs:
           }
           (out/'EXECUTED_SPECIFICATION.json').write_text(json.dumps(trace, indent=2), encoding='utf-8')
 
-          # CadQuery makeSphere() positional arguments after radius are angular bounds,
-          # not a center point. Build full spheres at the origin, then translate them.
-          outer = cq.Solid.makeSphere(radius).translate(cq.Vector(0, 0, center_z))
-          inner = cq.Solid.makeSphere(radius-wall).translate(cq.Vector(0, 0, center_z))
+          outer = cq.Workplane('XY').sphere(radius).val().translate(center)
+          inner = cq.Workplane('XY').sphere(radius-wall).val().translate(center)
           shell = outer.cut(inner, tol=0.005).clean()
 
           outer_bb = outer.BoundingBox()
           shell_bb = shell.BoundingBox()
           print('SPHERICAL OUTER BBOX', [outer_bb.xlen, outer_bb.ylen, outer_bb.zlen])
           print('SPHERICAL SHELL BBOX', [shell_bb.xlen, shell_bb.ylen, shell_bb.zlen])
-          if not (129.0 <= shell_bb.xlen <= 131.0 and 129.0 <= shell_bb.ylen <= 131.0 and 129.0 <= shell_bb.zlen <= 131.0):
+          if not (119.0 <= shell_bb.xlen <= 121.0 and 119.0 <= shell_bb.ylen <= 121.0 and 119.0 <= shell_bb.zlen <= 121.0):
               raise RuntimeError(f'Spherical shell dimensions invalid before opening cut: {[shell_bb.xlen, shell_bb.ylen, shell_bb.zlen]}')
 
           opening = cq.Solid.makeCylinder(
@@ -92,7 +100,7 @@ jobs:
 
           bb = base.BoundingBox()
           print('SPHERICAL BASE BBOX', [bb.xlen, bb.ylen, bb.zlen])
-          if not (125.0 <= bb.xlen <= 140.0 and 125.0 <= bb.ylen <= 140.0 and 120.0 <= bb.zlen <= 132.0):
+          if not (115.0 <= bb.xlen <= 125.0 and 115.0 <= bb.ylen <= 125.0 and 110.0 <= bb.zlen <= 122.0):
               raise RuntimeError(f'Spherical planter opening cut truncated body: {[bb.xlen, bb.ylen, bb.zlen]}')
 
           face = SurfaceFaceSelector().largest_external(base, geom_type='SPHERE')
@@ -100,7 +108,7 @@ jobs:
               base_shape=base,
               target_face=face,
               text_value='DOBO',
-              size=15.0,
+              size=14.0,
               depth=1.8,
               mode='emboss',
               font='Arial',
@@ -117,7 +125,7 @@ jobs:
 
           bb = final.BoundingBox()
           print('SPHERICAL FINAL BBOX', [bb.xlen, bb.ylen, bb.zlen])
-          if not (125.0 <= bb.xlen <= 140.0 and 125.0 <= bb.ylen <= 140.0 and 120.0 <= bb.zlen <= 132.0):
+          if not (115.0 <= bb.xlen <= 128.0 and 115.0 <= bb.ylen <= 128.0 and 110.0 <= bb.zlen <= 124.0):
               raise RuntimeError(f'DOBO decoration truncated spherical body: {[bb.xlen, bb.ylen, bb.zlen]}')
 
           cq.exporters.export(final, str(out/'dobo_spherical.step'))
@@ -139,7 +147,7 @@ jobs:
           if not all(math.isfinite(float(v)) for v in mesh.vertices.reshape(-1)):
               raise RuntimeError('Non-finite STL vertices')
           ext=mesh.extents
-          if not (125 <= float(ext[0]) <= 140 and 125 <= float(ext[1]) <= 140 and 120 <= float(ext[2]) <= 132):
+          if not (115 <= float(ext[0]) <= 128 and 115 <= float(ext[1]) <= 128 and 110 <= float(ext[2]) <= 124):
               raise RuntimeError(f'Unexpected spherical planter extents: {ext.tolist()}')
           print('SPHERICAL STL OK', ext.tolist())
           PY
@@ -163,8 +171,8 @@ jobs:
           imgs=[Image.open(root/'renders'/f'spherical_dobo_{v}.png').convert('RGB') for v in views]
           sheet=Image.new('RGB',(2048,580),'white')
           d=ImageDraw.Draw(sheet)
-          d.text((12,10),'DOBO SPHERICAL TEST — shape substitution only',fill='black')
-          d.text((12,28),'Same DOBO emboss capability; conic body replaced by spherical planter body',fill='black')
+          d.text((12,10),'DOBO SPHERICAL TEST — alternate origin and dimensions',fill='black')
+          d.text((12,28),'Full 120 mm sphere via Workplane.sphere; existing DOBO emboss capability',fill='black')
           for i,(v,img) in enumerate(zip(views,imgs)):
               sheet.paste(img,(i*512,60))
               d.text((i*512+12,44),v,fill='black')
