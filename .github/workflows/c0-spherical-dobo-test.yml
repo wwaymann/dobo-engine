@@ -36,23 +36,17 @@ jobs:
           import json
           import math
           import cadquery as cq
+          from cadquery.func import text as cq_text
           from product_generators.surface_designer.face_selector import SurfaceFaceSelector
-          from product_generators.surface_designer.native_text_face import NativeTextFaceDecorator
+          from product_generators.surface_designer.native_face_decorator import NativeFaceDecorator
+          from product_generators.surface_designer.uv_placement import UVPlacement
 
           out = Path('outputs-ci/c0-spherical-dobo')
-
-          # New probe dimensions and a different creation point.
-          # Build the primitive through Workplane.sphere(), which explicitly creates
-          # a full sphere around the workplane origin, then translate the finished
-          # primitive to the requested center. This avoids the previous low-level
-          # makeSphere positional-argument ambiguity.
           radius = 60.0
           wall = 4.0
           opening_radius = 22.0
-          creation_origin = cq.Vector(0, 0, 0)
           center = cq.Vector(0, 0, 70.0)
           center_z = center.z
-
           opening_plane_z = center_z + math.sqrt(radius * radius - opening_radius * opening_radius)
           opening_cut_start_z = opening_plane_z - 1.0
           opening_cut_height = 16.0
@@ -63,92 +57,79 @@ jobs:
               'creates_new_engine_behavior': False,
               'creates_new_geometry_capability': False,
               'change_from_conic_reference': 'body family only: conic -> spherical',
-              'body': {
-                  'family': 'spherical_planter',
-                  'radius_mm': radius,
-                  'diameter_mm': radius * 2.0,
-                  'wall_mm': wall,
-                  'opening_radius_mm': opening_radius,
-                  'creation_origin_mm': [creation_origin.x, creation_origin.y, creation_origin.z],
-                  'center_mm': [center.x, center.y, center.z],
-                  'opening_plane_z_mm': opening_plane_z,
-                  'opening_cut_start_z_mm': opening_cut_start_z,
-              },
-              'front': {'kind': 'text', 'content': 'DOBO', 'mode': 'emboss', 'depth_mm': 1.8},
+              'body': {'family':'spherical_planter','radius_mm':radius,'diameter_mm':radius*2,'wall_mm':wall,'opening_radius_mm':opening_radius,'center_mm':[0,0,center_z]},
+              'front': {'kind':'text','content':'DOBO','mode':'emboss','depth_mm':1.8,'placement':'front hemisphere, centered'},
           }
           (out/'EXECUTED_SPECIFICATION.json').write_text(json.dumps(trace, indent=2), encoding='utf-8')
 
           outer = cq.Workplane('XY').sphere(radius).val().translate(center)
           inner = cq.Workplane('XY').sphere(radius-wall).val().translate(center)
           shell = outer.cut(inner, tol=0.005).clean()
-
-          outer_bb = outer.BoundingBox()
           shell_bb = shell.BoundingBox()
-          print('SPHERICAL OUTER BBOX', [outer_bb.xlen, outer_bb.ylen, outer_bb.zlen])
-          print('SPHERICAL SHELL BBOX', [shell_bb.xlen, shell_bb.ylen, shell_bb.zlen])
-          if not (119.0 <= shell_bb.xlen <= 121.0 and 119.0 <= shell_bb.ylen <= 121.0 and 119.0 <= shell_bb.zlen <= 121.0):
-              raise RuntimeError(f'Spherical shell dimensions invalid before opening cut: {[shell_bb.xlen, shell_bb.ylen, shell_bb.zlen]}')
+          if not (119 <= shell_bb.xlen <= 121 and 119 <= shell_bb.ylen <= 121 and 119 <= shell_bb.zlen <= 121):
+              raise RuntimeError(f'Spherical shell dimensions invalid: {[shell_bb.xlen,shell_bb.ylen,shell_bb.zlen]}')
 
-          opening = cq.Solid.makeCylinder(
-              opening_radius,
-              opening_cut_height,
-              cq.Vector(0, 0, opening_cut_start_z),
-          )
+          opening = cq.Solid.makeCylinder(opening_radius, opening_cut_height, cq.Vector(0,0,opening_cut_start_z))
           base = shell.cut(opening, tol=0.005).clean()
           if not base.isValid() or len(base.Solids()) != 1:
               raise RuntimeError('Spherical planter base invalid')
 
-          bb = base.BoundingBox()
-          print('SPHERICAL BASE BBOX', [bb.xlen, bb.ylen, bb.zlen])
-          if not (115.0 <= bb.xlen <= 125.0 and 115.0 <= bb.ylen <= 125.0 and 110.0 <= bb.zlen <= 122.0):
-              raise RuntimeError(f'Spherical planter opening cut truncated body: {[bb.xlen, bb.ylen, bb.zlen]}')
-
           face = SurfaceFaceSelector().largest_external(base, geom_type='SPHERE')
-          text = NativeTextFaceDecorator().decorate(
+          planar = cq_text('DOBO', 14.0, font='Arial', kind='bold', halign='center', valign='center')
+          if not planar.isValid():
+              raise RuntimeError('DOBO planar text invalid')
+          pbb = planar.BoundingBox()
+          source_w = pbb.xlen
+          source_h = pbb.ylen
+          u_min,u_max,v_min,v_max = face.uvBounds()
+          u_span=float(u_max-u_min); v_span=float(v_max-v_min)
+
+          # OCC spherical U is periodic. The visual front of the acceptance camera is
+          # the middle of the first quarter of the U domain, not u=0.25 expressed
+          # against an arbitrary seam. Pin the placement explicitly to that front
+          # hemisphere and keep the text compact enough to avoid wrapping the seam.
+          u_mid = u_min + u_span * 0.125
+          v_mid = v_min + v_span * 0.50
+          target_w = u_span * 0.16
+          target_h = v_span * 0.13
+          placement = UVPlacement(
+              u_offset=u_mid - ((pbb.xmin+pbb.xmax)/2.0)*(target_w/source_w),
+              v_offset=v_mid - ((pbb.ymin+pbb.ymax)/2.0)*(target_h/source_h),
+              scale_u=target_w/source_w,
+              scale_v=target_h/source_h,
+          )
+          placement.validate()
+          text_result = NativeFaceDecorator().decorate(
               base_shape=base,
               target_face=face,
-              text_value='DOBO',
-              size=14.0,
-              depth=1.8,
+              planar_shape=planar,
               mode='emboss',
-              font='Arial',
-              kind='bold',
-              width_fraction=0.30,
-              height_fraction=0.16,
-              u_center=0.25,
-              v_center=0.50,
+              depth=1.8,
+              placement=placement,
           )
-          text.validate()
-          final = text.shape.clean()
+          text_result.validate()
+          final=text_result.shape.clean()
           if not final.isValid() or len(final.Solids()) != 1:
               raise RuntimeError('Spherical DOBO result invalid')
-
-          bb = final.BoundingBox()
-          print('SPHERICAL FINAL BBOX', [bb.xlen, bb.ylen, bb.zlen])
-          if not (115.0 <= bb.xlen <= 128.0 and 115.0 <= bb.ylen <= 128.0 and 110.0 <= bb.zlen <= 124.0):
-              raise RuntimeError(f'DOBO decoration truncated spherical body: {[bb.xlen, bb.ylen, bb.zlen]}')
+          bb=final.BoundingBox()
+          if not (115 <= bb.xlen <= 128 and 115 <= bb.ylen <= 128 and 110 <= bb.zlen <= 124):
+              raise RuntimeError(f'DOBO decoration truncated spherical body: {[bb.xlen,bb.ylen,bb.zlen]}')
 
           cq.exporters.export(final, str(out/'dobo_spherical.step'))
           cq.exporters.export(final, str(out/'dobo_spherical.stl'), tolerance=0.03, angularTolerance=0.08)
-          print('SPHERICAL DOBO TEST OK')
-          print(json.dumps(trace, indent=2))
+          print('SPHERICAL DOBO TEST OK', [bb.xlen,bb.ylen,bb.zlen])
           PY
 
       - name: Validate transport mesh
         run: |
           python - <<'PY'
           from pathlib import Path
-          import math
-          import trimesh
-          p=Path('outputs-ci/c0-spherical-dobo/dobo_spherical.stl')
-          mesh=trimesh.load_mesh(p, process=True)
-          if mesh.is_empty or len(mesh.faces) < 100:
-              raise RuntimeError('Spherical STL empty or implausibly small')
-          if not all(math.isfinite(float(v)) for v in mesh.vertices.reshape(-1)):
-              raise RuntimeError('Non-finite STL vertices')
+          import math, trimesh
+          mesh=trimesh.load_mesh(Path('outputs-ci/c0-spherical-dobo/dobo_spherical.stl'), process=True)
+          if mesh.is_empty or len(mesh.faces)<100: raise RuntimeError('Spherical STL empty or implausibly small')
+          if not all(math.isfinite(float(v)) for v in mesh.vertices.reshape(-1)): raise RuntimeError('Non-finite STL vertices')
           ext=mesh.extents
-          if not (115 <= float(ext[0]) <= 128 and 115 <= float(ext[1]) <= 128 and 110 <= float(ext[2]) <= 124):
-              raise RuntimeError(f'Unexpected spherical planter extents: {ext.tolist()}')
+          if not (115<=float(ext[0])<=128 and 115<=float(ext[1])<=128 and 110<=float(ext[2])<=124): raise RuntimeError(f'Unexpected extents: {ext.tolist()}')
           print('SPHERICAL STL OK', ext.tolist())
           PY
 
@@ -157,25 +138,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y blender xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri libglx-mesa0
           mkdir -p outputs-ci/c0-spherical-dobo/renders
-          xvfb-run -a -s '-screen 0 1280x1024x24' blender --background --python tools/dobo_blender_acceptance.py -- \
-            --stl outputs-ci/c0-spherical-dobo/dobo_spherical.stl \
-            --output-root outputs-ci/c0-spherical-dobo/renders --label spherical_dobo --resolution 512
+          xvfb-run -a -s '-screen 0 1280x1024x24' blender --background --python tools/dobo_blender_acceptance.py -- --stl outputs-ci/c0-spherical-dobo/dobo_spherical.stl --output-root outputs-ci/c0-spherical-dobo/renders --label spherical_dobo --resolution 512
 
       - name: Build visual review sheet
         run: |
           python - <<'PY'
           from pathlib import Path
           from PIL import Image, ImageDraw
-          root=Path('outputs-ci/c0-spherical-dobo')
-          views=['front','side','top','iso']
+          root=Path('outputs-ci/c0-spherical-dobo'); views=['front','side','top','iso']
           imgs=[Image.open(root/'renders'/f'spherical_dobo_{v}.png').convert('RGB') for v in views]
-          sheet=Image.new('RGB',(2048,580),'white')
-          d=ImageDraw.Draw(sheet)
-          d.text((12,10),'DOBO SPHERICAL TEST — alternate origin and dimensions',fill='black')
-          d.text((12,28),'Full 120 mm sphere via Workplane.sphere; existing DOBO emboss capability',fill='black')
+          sheet=Image.new('RGB',(2048,580),'white'); d=ImageDraw.Draw(sheet)
+          d.text((12,10),'DOBO SPHERICAL TEST — front-centered emboss',fill='black')
+          d.text((12,28),'120 mm spherical planter; existing native face decoration capability',fill='black')
           for i,(v,img) in enumerate(zip(views,imgs)):
-              sheet.paste(img,(i*512,60))
-              d.text((i*512+12,44),v,fill='black')
+              sheet.paste(img,(i*512,60)); d.text((i*512+12,44),v,fill='black')
           sheet.save(root/'DOBO_SPHERICAL_REVIEW.jpg',quality=94)
           PY
 
