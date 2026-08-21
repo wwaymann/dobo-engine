@@ -42,7 +42,13 @@ jobs:
           radius = 65.0
           wall = 4.0
           opening_radius = 25.0
-          cut_z = 55.0
+
+          # Keep the exterior sphere intact.  The cavity sphere is shifted upward
+          # just enough to intersect the exterior near the top, producing a circular
+          # planter opening without a long cylindrical cut that can truncate the body.
+          # For R=65, r=61 and target opening radius=25, the small positive root is
+          # approximately 4.36 mm.
+          cavity_offset_z = 4.36
 
           trace = {
               'case_id': 'c0-spherical-dobo-test',
@@ -55,21 +61,21 @@ jobs:
                   'radius_mm': radius,
                   'wall_mm': wall,
                   'opening_radius_mm': opening_radius,
-                  'opening_start_z_mm': cut_z,
+                  'cavity_offset_z_mm': cavity_offset_z,
               },
               'front': {'kind': 'text', 'content': 'DOBO', 'mode': 'emboss', 'depth_mm': 1.8},
           }
           (out/'EXECUTED_SPECIFICATION.json').write_text(json.dumps(trace, indent=2), encoding='utf-8')
 
-          # Existing CadQuery primitive operations only: preserve the spherical body
-          # and remove only a bounded top opening that reaches the existing cavity.
+          # Existing CadQuery primitive operations only.
           outer = cq.Solid.makeSphere(radius)
-          inner = cq.Solid.makeSphere(radius-wall)
-          shell = outer.cut(inner, tol=0.005).clean()
-          opening = cq.Solid.makeCylinder(opening_radius, radius, cq.Vector(0,0,cut_z))
-          base = shell.cut(opening, tol=0.005).clean()
+          inner = cq.Solid.makeSphere(radius-wall, cq.Vector(0, 0, cavity_offset_z))
+          base = outer.cut(inner, tol=0.005).clean()
           if not base.isValid() or len(base.Solids()) != 1:
               raise RuntimeError('Spherical planter base invalid')
+
+          bb = base.BoundingBox()
+          print('SPHERICAL BASE BBOX', [bb.xlen, bb.ylen, bb.zlen])
 
           face = SurfaceFaceSelector().largest_external(base, geom_type='SPHERE')
           text = NativeTextFaceDecorator().decorate(
@@ -90,6 +96,9 @@ jobs:
           final = text.shape.clean()
           if not final.isValid() or len(final.Solids()) != 1:
               raise RuntimeError('Spherical DOBO result invalid')
+
+          bb = final.BoundingBox()
+          print('SPHERICAL FINAL BBOX', [bb.xlen, bb.ylen, bb.zlen])
 
           cq.exporters.export(final, str(out/'dobo_spherical.step'))
           cq.exporters.export(final, str(out/'dobo_spherical.stl'), tolerance=0.03, angularTolerance=0.08)
