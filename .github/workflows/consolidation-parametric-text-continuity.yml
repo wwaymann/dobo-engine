@@ -10,6 +10,14 @@ on:
       - 'tools/dobo_blender_acceptance.py'
       - 'app/product_generators/surface_designer/face_selector.py'
       - 'app/product_generators/surface_designer/native_text_face.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-parametric-text-continuity.yml'
+      - 'tools/dobo_parametric_text_planter.py'
+      - 'tools/dobo_blender_acceptance.py'
+      - 'app/product_generators/surface_designer/face_selector.py'
+      - 'app/product_generators/surface_designer/native_text_face.py'
 
 permissions:
   contents: read
