@@ -1,0 +1,54 @@
+name: DOBO Consolidation Expressive Morphology
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - 'app/product_generators/design_interpreter/structural_morphogenesis.py'
+      - 'app/product_generators/organic_shapes/fields.py'
+      - 'app/product_generators/organic_shapes/specification.py'
+      - 'app/product_generators/design_interpreter/test_consolidation_expressive_morphology.py'
+      - '.github/workflows/consolidation-expressive-morphology.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dobo-consolidation-expressive-morphology
+  cancel-in-progress: true
+
+jobs:
+  expressive-morphology-continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install geometry and evidence dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
+      - name: Compile expressive integration boundary
+        run: |
+          python -m py_compile app/product_generators/organic_shapes/specification.py
+          python -m py_compile app/product_generators/organic_shapes/fields.py
+          python -m py_compile app/product_generators/design_interpreter/structural_morphogenesis.py
+          python -m py_compile app/product_generators/design_interpreter/test_consolidation_expressive_morphology.py
+      - name: Execute expressive morphology continuity
+        run: python -m product_generators.design_interpreter.test_consolidation_expressive_morphology
+      - name: Upload expressive continuity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-expressive-morphology
+          path: outputs/consolidation_expressive_morphology
+          if-no-files-found: warn
+          retention-days: 14
