@@ -117,6 +117,7 @@ class DesignGrammarPlan:
             "column",
             "tapered",
             "faceted_proxy",
+            "spherical",
         }:
             raise ValueError("Unknown body grammar profile.")
         if len(self.features) != expected_features:
@@ -166,6 +167,7 @@ class DesignGrammarResolver:
             "cylindrical": "column",
             "tapered": "tapered",
             "hexagonal": "faceted_proxy",
+            "spherical": "spherical",
         }[program.body.family]
         group_kinds = [group.kind for group in structural.groups]
         component_signature = ",".join(
@@ -269,8 +271,6 @@ class DesignGrammarResolver:
         if normalized & {"geometric", "geometrico", "faceted", "facetado"}:
             return GrammarStyleProfile("geometric", 0.95, 0.90, 2.8)
         if normalized & {"minimal", "minimalist", "minimalista"}:
-            # Preserve the accepted 4U canonical geometry while making the
-            # style explicit in the grammar trace.
             return GrammarStyleProfile("minimal", 1.00, 1.00, 3.6)
         if normalized & {"organic", "organico", "botanical", "botanico"}:
             return GrammarStyleProfile("organic", 1.00, 1.00, 3.8)
