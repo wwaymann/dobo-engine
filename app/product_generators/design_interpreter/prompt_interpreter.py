@@ -10,7 +10,7 @@ from .semantic_contract import DesignSemanticProgram
 from .semantic_parser import SemanticProgramParser
 
 
-PROMPT_INTERPRETER_VERSION = "3C.5"
+PROMPT_INTERPRETER_VERSION = "3C.6"
 DEFAULT_SCHEMA_PATH = Path(__file__).with_name("semantic_program.schema.json")
 
 # Structured Outputs accepts a strict subset of JSON Schema. Keep the canonical
@@ -27,6 +27,11 @@ Rules:
 - Set source.kind to prompt and source.image_reference to null.
 - Use only values permitted by the supplied JSON Schema.
 - Express visible parts as features and spatial structure as relations.
+- Preserve literal user-requested lettering as semantic content, not merely as a generic text feature.
+- Every requested word, name, number or short phrase that must appear on the planter MUST be represented by a required feature with form_hint=text, and feature.concept MUST include the normalized literal content as identifier tokens (for example, literal HELLO -> concept text_hello; never use only concept=text).
+- Preserve the requested text surface treatment exactly: emboss, raised, sobrerrelieve or equivalent wording -> surface_effect=raised; deboss, recessed, bajorrelieve or equivalent wording -> surface_effect=recessed.
+- Preserve explicit placement wording in feature.anchor.region. Front, frontal or al frente -> front; back -> back; left -> left; right -> right; upper/top -> upper; lower/bottom -> lower; all-around -> all_around.
+- Interpret normalized anchor coordinates consistently: horizontal=-1 is left, horizontal=0 is centered, horizontal=1 is right; vertical=0 is bottom, vertical=0.5 is vertically centered, vertical=1 is top. If the user explicitly asks for centered placement, use horizontal=0.
 - Relations may reference feature ids only; never use the body itself as subject_id or object_id.
 - Never create a relation whose subject_id and object_id are the same feature.
 - If the design has only one visible feature and no second feature is needed, return an empty relations array.
