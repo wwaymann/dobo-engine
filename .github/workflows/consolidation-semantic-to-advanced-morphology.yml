@@ -79,6 +79,10 @@ jobs:
           surface = json.loads(Path(result.surface_path).read_text(encoding='utf-8'))
           motor = json.loads(Path(result.motor_path).read_text(encoding='utf-8'))
           mesh = trimesh.load_mesh(result.stl_path, process=False)
+          raw_vertices = int(len(mesh.vertices))
+          # STL stores triangles independently. Reconnect manufacturing-equivalent
+          # vertices at the already accepted 0.01 mm tolerance before topology checks.
+          mesh.merge_vertices(digits_vertex=2)
 
           features = semantic.get('features', [])
           def text_preserved(feature):
@@ -103,6 +107,8 @@ jobs:
               'hierarchy_depth': result.trace.hierarchy_depth,
               'surface_layers': result.trace.surface_layers,
               'color_zones': result.trace.color_zones,
+              'topology_merge_tolerance_mm': 0.01,
+              'raw_stl_vertices': raw_vertices,
               'watertight': bool(mesh.is_watertight),
               'winding_consistent': bool(mesh.is_winding_consistent),
               'vertices': int(len(mesh.vertices)),
