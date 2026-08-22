@@ -11,7 +11,7 @@ from .semantic_contract import DesignSemanticProgram
 
 TOPOLOGY_GRAPH_VERSION = "6A.2"
 SECTION_PROFILE_VERSION = "6B.3"
-STRUCTURAL_SYNTHESIS_VERSION = "6C.3"
+STRUCTURAL_SYNTHESIS_VERSION = "6C.4"
 MORPHOLOGY_ACCEPTANCE_VERSION = "6E.3"
 
 
@@ -38,6 +38,7 @@ class StructuralMorphologyPlan:
             "radial_petal",
             "helical_chain",
             "axial_faceted",
+            "spherical_mass",
         }:
             raise ValueError("Unknown structural morphology profile.")
         if self.axis_mode not in {"bilateral", "radial", "helical", "axial"}:
@@ -70,6 +71,12 @@ class StructuralMorphogenesisResolver:
         if grammar.body_profile == "faceted_proxy":
             result = StructuralMorphologyPlan(
                 "axial_faceted", "axial", 3, 0, 0
+            )
+        elif grammar.body_profile == "spherical":
+            # Spherical is already an accepted semantic/body capability. Keep it
+            # spherical instead of routing it through the generic helical fallback.
+            result = StructuralMorphologyPlan(
+                "spherical_mass", "axial", 3, 0, 0
             )
         elif botanical >= 3:
             result = StructuralMorphologyPlan(
@@ -107,6 +114,7 @@ class StructuralBodySynthesizer:
             "radial_petal": cls._radial,
             "helical_chain": cls._helical,
             "axial_faceted": cls._faceted,
+            "spherical_mass": cls._spherical,
         }[plan.profile](program)
         old_body_ids = set(motor_program["composition"]["field_ids"])
         motor_program["fields"] = [
@@ -149,6 +157,44 @@ class StructuralBodySynthesizer:
             "exponent": exponent,
             "round_mm": max(0.7, 0.035 * min(radii)),
         }
+
+    @classmethod
+    def _spherical(
+        cls, program: DesignSemanticProgram
+    ) -> tuple[list[dict[str, Any]], float]:
+        """Preserve an accepted spherical body with existing superellipsoid fields.
+
+        The three strongly-overlapping fields satisfy the structural multi-section
+        contract without inventing a new primitive or deforming the requested body
+        into a helical chain.  The primary field carries the actual sphere; the two
+        subordinate fields remain fully embedded/overlapping so smooth union stays
+        a single connected surface.
+        """
+        width = program.body.width_mm
+        depth = program.body.depth_mm
+        height = program.body.height_mm
+        primary = [0.48 * width, 0.48 * depth, 0.48 * height]
+        inner = [0.43 * width, 0.43 * depth, 0.43 * height]
+        return [
+            cls._advanced(
+                "body",
+                [0.0, 0.0, 0.0],
+                primary,
+                exponent=2.0,
+            ),
+            cls._advanced(
+                "front_mass",
+                [0.0, -0.01 * depth, 0.0],
+                [0.46 * width, 0.46 * depth, 0.46 * height],
+                exponent=2.0,
+            ),
+            cls._advanced(
+                "body_bridge",
+                [0.0, 0.0, 0.0],
+                inner,
+                exponent=2.0,
+            ),
+        ], 3.6
 
     @classmethod
     def _bilateral(
