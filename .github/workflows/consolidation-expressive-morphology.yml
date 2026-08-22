@@ -7,6 +7,7 @@ on:
       - 'app/product_generators/design_interpreter/structural_morphogenesis.py'
       - 'app/product_generators/organic_shapes/fields.py'
       - 'app/product_generators/organic_shapes/specification.py'
+      - 'app/product_generators/organic_shapes/adaptive_layout.py'
       - 'app/product_generators/design_interpreter/test_consolidation_expressive_morphology.py'
       - '.github/workflows/consolidation-expressive-morphology.yml'
   pull_request:
@@ -15,6 +16,7 @@ on:
       - 'app/product_generators/design_interpreter/structural_morphogenesis.py'
       - 'app/product_generators/organic_shapes/fields.py'
       - 'app/product_generators/organic_shapes/specification.py'
+      - 'app/product_generators/organic_shapes/adaptive_layout.py'
       - 'app/product_generators/design_interpreter/test_consolidation_expressive_morphology.py'
       - '.github/workflows/consolidation-expressive-morphology.yml'
   workflow_dispatch:
@@ -48,6 +50,7 @@ jobs:
         run: |
           python -m py_compile app/product_generators/organic_shapes/specification.py
           python -m py_compile app/product_generators/organic_shapes/fields.py
+          python -m py_compile app/product_generators/organic_shapes/adaptive_layout.py
           python -m py_compile app/product_generators/design_interpreter/structural_morphogenesis.py
           python -m py_compile app/product_generators/design_interpreter/test_consolidation_expressive_morphology.py
       - name: Execute expressive morphology continuity
