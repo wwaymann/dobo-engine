@@ -265,6 +265,13 @@ def evaluate_manufacturability(
         depth_scale = float(
             np.linalg.norm(placement.matrix[:3, depth_axis])
         )
+        # Surface-anchor frames are orthonormal rotations. Numerical round-off
+        # can report their unit depth axis as 0.9999999999999999, which turns an
+        # exactly-on-contract relief depth into a false minimum-depth failure.
+        # Normalize only machine-precision unit transforms; real scaling is
+        # preserved and remains subject to the same manufacturing thresholds.
+        if np.isclose(depth_scale, 1.0, rtol=0.0, atol=1e-12):
+            depth_scale = 1.0
         depth = feature_depth_mm(placement.feature) * depth_scale
         blend = float(placement.feature.blend_mm) * minimum_scale
         feature_sizes.append(minimum_feature)
