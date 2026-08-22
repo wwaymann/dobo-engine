@@ -1,0 +1,148 @@
+name: DOBO Consolidation Semantic To Advanced Morphology
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - '.github/workflows/consolidation-semantic-to-advanced-morphology.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - 'app/product_generators/design_interpreter/structural_compiler.py'
+      - 'app/product_generators/design_interpreter/structural_vocabulary.py'
+      - 'app/product_generators/organic_shapes/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-semantic-to-advanced-morphology.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - 'app/product_generators/design_interpreter/structural_compiler.py'
+      - 'app/product_generators/design_interpreter/structural_vocabulary.py'
+      - 'app/product_generators/organic_shapes/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-to-advanced-morphology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
+      DESIGN_PROMPT: 'Haz una maceta esférica hueca con abertura superior y la palabra DOBO en sobrerrelieve, centrada al frente.'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing semantic and geometry stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema cadquery numpy scipy scikit-image trimesh networkx shapely Pillow
+
+      - name: Execute prompt directly through existing advanced structural pipeline
+        run: |
+          rm -rf outputs-ci/consolidation-semantic-morphology
+          mkdir -p outputs-ci/consolidation-semantic-morphology
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+          import trimesh
+
+          from product_generators.design_interpreter.prompt_interpreter import OpenAIResponsesSemanticClient
+          from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
+
+          root = Path('outputs-ci/consolidation-semantic-morphology')
+          prompt = os.environ['DESIGN_PROMPT']
+          if not os.environ.get('OPENAI_API_KEY', '').strip():
+              raise RuntimeError('OPENAI_API_KEY is not configured; semantic-to-morphology continuity cannot be validated.')
+
+          result = DoboStructuralPipeline(
+              prompt_client=OpenAIResponsesSemanticClient(model=os.environ['DOBO_SEMANTIC_MODEL'])
+          ).generate_from_prompt(prompt, output_root=root)
+          result.validate()
+
+          semantic = json.loads(Path(result.semantic_path).read_text(encoding='utf-8'))
+          structural = json.loads(Path(result.structural_path).read_text(encoding='utf-8'))
+          surface = json.loads(Path(result.surface_path).read_text(encoding='utf-8'))
+          motor = json.loads(Path(result.motor_path).read_text(encoding='utf-8'))
+          mesh = trimesh.load_mesh(result.stl_path, process=False)
+
+          features = semantic.get('features', [])
+          def text_preserved(feature):
+              concept = str(feature.get('concept', '')).lower()
+              tokens = [token for token in concept.split('_') if token]
+              return (
+                  feature.get('form_hint') == 'text'
+                  and 'dobo' in tokens
+                  and feature.get('surface_effect') == 'raised'
+                  and feature.get('anchor', {}).get('region') == 'front'
+              )
+
+          audit = {
+              'schema': 'dobo.consolidation.semantic_to_advanced_morphology.1',
+              'prompt': prompt,
+              'body_family': semantic.get('body', {}).get('family'),
+              'spherical_intent_preserved': semantic.get('body', {}).get('family') == 'spherical',
+              'text_intent_preserved': any(text_preserved(f) for f in features),
+              'semantic_program_id': result.trace.semantic_program_id,
+              'motor_program_id': result.trace.motor_program_id,
+              'complex_profile': result.trace.complex_profile,
+              'hierarchy_depth': result.trace.hierarchy_depth,
+              'surface_layers': result.trace.surface_layers,
+              'color_zones': result.trace.color_zones,
+              'watertight': bool(mesh.is_watertight),
+              'winding_consistent': bool(mesh.is_winding_consistent),
+              'vertices': int(len(mesh.vertices)),
+              'faces': int(len(mesh.faces)),
+              'stl_exists': Path(result.stl_path).is_file(),
+              'three_mf_exists': Path(result.three_mf_path).is_file(),
+              'semantic_artifact_exists': Path(result.semantic_path).is_file(),
+              'structural_artifact_exists': Path(result.structural_path).is_file(),
+              'surface_artifact_exists': Path(result.surface_path).is_file(),
+              'motor_artifact_exists': Path(result.motor_path).is_file(),
+              'structural_body_profile': result.trace.body_profile,
+              'structural_style_profile': result.trace.style_profile,
+              'surface_program_present': bool(surface),
+              'motor_program_present': bool(motor),
+              'structural_program_present': bool(structural),
+          }
+          required = [
+              audit['spherical_intent_preserved'],
+              audit['text_intent_preserved'],
+              audit['watertight'],
+              audit['winding_consistent'],
+              audit['stl_exists'],
+              audit['three_mf_exists'],
+              audit['semantic_artifact_exists'],
+              audit['structural_artifact_exists'],
+              audit['surface_artifact_exists'],
+              audit['motor_artifact_exists'],
+              audit['surface_program_present'],
+              audit['motor_program_present'],
+              audit['structural_program_present'],
+          ]
+          audit['verdict'] = 'PASS' if all(required) else 'FAIL'
+          (root/'CONTINUITY_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          (root/'PROMPT.txt').write_text(prompt + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          if audit['verdict'] != 'PASS':
+              raise RuntimeError('Semantic program did not preserve intent through advanced morphology generation.')
+          PY
+
+      - name: Upload semantic to morphology evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-semantic-to-advanced-morphology
+          path: outputs-ci/consolidation-semantic-morphology
+          if-no-files-found: error
+          retention-days: 30
