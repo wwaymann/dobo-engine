@@ -10,7 +10,7 @@ on:
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
       - 'app/product_generators/design_interpreter/three_mf_export.py'
-      - 'app/product_generators/manufacturability/three_mf_project_inspector.py'
+      - 'app/product_generators/organic_shapes/adaptive_layout.py'
   pull_request:
     branches: [main]
     paths:
@@ -20,7 +20,7 @@ on:
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
       - 'app/product_generators/design_interpreter/three_mf_export.py'
-      - 'app/product_generators/manufacturability/three_mf_project_inspector.py'
+      - 'app/product_generators/organic_shapes/adaptive_layout.py'
   workflow_dispatch:
 
 permissions:
@@ -58,6 +58,8 @@ jobs:
           import json
           import os
           from pathlib import Path
+          from xml.etree import ElementTree as ET
+          from zipfile import ZipFile
 
           import matplotlib.pyplot as plt
           import numpy as np
@@ -73,7 +75,6 @@ jobs:
           )
           from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
           from product_generators.manufacturability.profile import ManufacturingProfile
-          from product_generators.manufacturability.three_mf_project_inspector import ThreeMFProjectInspector
 
           root = Path('outputs-ci/consolidation-advanced-surface-manufacturing')
           prompt = os.environ['DESIGN_PROMPT']
@@ -99,12 +100,12 @@ jobs:
           )
           result.validate()
 
-          # Boundary-focused validation: the expensive STL->OCC reconstruction is
-          # already accepted by DOBO C0 PR Adapter Gate. Repeating it here on the
-          # full high-resolution mesh previously consumed the entire job timeout.
-          # This continuous gate therefore validates only the new boundary using
-          # the exact exported STL and 3MF: manifold mesh, production dimensions,
-          # material partition and real Creality 3MF project integrity.
+          # Boundary-focused validation. STL->CadQuery compatibility and the
+          # Creality production-project exporter already have their own accepted
+          # gates. This gate validates the NEW continuous structural path using
+          # the exact STL and standards-based, material-painted 3MF emitted by
+          # DoboStructuralPipeline; it does not force that artifact through the
+          # unrelated three-CadQuery-region Creality project inspector.
           mesh = trimesh.load_mesh(result.stl_path, process=True)
           if isinstance(mesh, trimesh.Scene):
               mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
@@ -118,7 +119,29 @@ jobs:
               and extents[1] <= profile.max_size_y
               and extents[2] <= profile.max_size_z
           )
-          project = ThreeMFProjectInspector().inspect(result.three_mf_path)
+
+          three_mf_path = Path(result.three_mf_path)
+          with ZipFile(three_mf_path, 'r') as package:
+              corrupt_member = package.testzip()
+              members = tuple(sorted(package.namelist()))
+              model_xml = package.read('3D/3dmodel.model')
+          if corrupt_member is not None:
+              raise RuntimeError(f'3MF ZIP integrity failure at {corrupt_member}.')
+          required_members = {
+              '[Content_Types].xml',
+              '_rels/.rels',
+              '3D/3dmodel.model',
+          }
+          core_package_valid = required_members.issubset(members)
+          core_ns = {'m': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'}
+          model_root = ET.fromstring(model_xml)
+          build_items = model_root.findall('.//m:build/m:item', core_ns)
+          material_bases = model_root.findall('.//m:basematerials/m:base', core_ns)
+          model_triangles = model_root.findall('.//m:mesh/m:triangles/m:triangle', core_ns)
+          painted_model_triangles = sum(
+              1 for triangle in model_triangles
+              if triangle.get('pid') is not None and triangle.get('p1') is not None
+          )
 
           features = tuple(semantic.features)
           text_features = tuple(
@@ -162,7 +185,7 @@ jobs:
               visual_paths.append(str(path))
 
           audit = {
-              'schema': 'dobo.consolidation.advanced_surface_manufacturing.2',
+              'schema': 'dobo.consolidation.advanced_surface_manufacturing.3',
               'bridge_version': SEMANTIC_SURFACE_BRIDGE_VERSION,
               'prompt': prompt,
               'body_family': semantic.body.family,
@@ -177,19 +200,20 @@ jobs:
               'surface_relief_layers': len(relief_layers),
               'surface_color_zones': result.surface_report.color_zones,
               'stl_exists': Path(result.stl_path).is_file(),
-              'three_mf_exists': Path(result.three_mf_path).is_file(),
+              'three_mf_exists': three_mf_path.is_file(),
               'three_mf_material_count': result.three_mf.material_count,
               'three_mf_painted_triangles': result.three_mf.painted_triangle_count,
+              'three_mf_core_package_valid': core_package_valid,
+              'three_mf_build_items': len(build_items),
+              'three_mf_xml_materials': len(material_bases),
+              'three_mf_xml_triangles': len(model_triangles),
+              'three_mf_xml_painted_triangles': painted_model_triangles,
               'watertight': bool(mesh.is_watertight),
               'winding_consistent': bool(mesh.is_winding_consistent),
               'production_size_valid': production_size_valid,
               'mesh_extents_mm': extents.tolist(),
-              'three_mf_project_valid': bool(project.valid),
-              'three_mf_build_items': int(project.build_item_count),
-              'three_mf_regions': int(project.region_object_count),
-              'three_mf_filament_slots': list(project.filament_slots),
-              'three_mf_bounds': list(project.transformed_bounds) if project.transformed_bounds else None,
               'cad_adapter_boundary_previously_accepted': True,
+              'creality_project_boundary_previously_accepted': True,
               'visual_evidence': visual_paths,
           }
           required = (
@@ -206,13 +230,14 @@ jobs:
               audit['three_mf_exists'],
               audit['three_mf_material_count'] >= 2,
               audit['three_mf_painted_triangles'] > 0,
+              audit['three_mf_core_package_valid'],
+              audit['three_mf_build_items'] == 1,
+              audit['three_mf_xml_materials'] >= 2,
+              audit['three_mf_xml_triangles'] == result.three_mf.triangle_count,
+              audit['three_mf_xml_painted_triangles'] > 0,
               audit['watertight'],
               audit['winding_consistent'],
               audit['production_size_valid'],
-              audit['three_mf_project_valid'],
-              audit['three_mf_build_items'] == 1,
-              audit['three_mf_regions'] >= 2,
-              len(audit['three_mf_filament_slots']) >= 2,
               all(Path(path).is_file() and Path(path).stat().st_size > 0 for path in visual_paths),
           )
           audit['verdict'] = 'PASS' if all(required) else 'FAIL'
