@@ -10,7 +10,7 @@ from .semantic_contract import DesignSemanticProgram
 from .semantic_parser import SemanticProgramParser
 
 
-PROMPT_INTERPRETER_VERSION = "3C.4"
+PROMPT_INTERPRETER_VERSION = "3C.5"
 DEFAULT_SCHEMA_PATH = Path(__file__).with_name("semantic_program.schema.json")
 
 # Structured Outputs accepts a strict subset of JSON Schema. Keep the canonical
@@ -27,6 +27,10 @@ Rules:
 - Set source.kind to prompt and source.image_reference to null.
 - Use only values permitted by the supplied JSON Schema.
 - Express visible parts as features and spatial structure as relations.
+- Relations may reference feature ids only; never use the body itself as subject_id or object_id.
+- Never create a relation whose subject_id and object_id are the same feature.
+- If the design has only one visible feature and no second feature is needed, return an empty relations array.
+- Use each feature's anchor to express attachment or placement on the planter body; do not invent a relation just to say that a feature is on the body.
 - Use normalized anchors and real millimetres only where the schema requests them.
 - Record every inferred value as an assumption.
 - Record uncertainty as a non-blocking ambiguity when a safe default exists.
