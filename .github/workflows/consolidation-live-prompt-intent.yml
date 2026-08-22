@@ -8,6 +8,13 @@ on:
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
       - 'app/product_generators/design_interpreter/semantic_program.schema.json'
       - 'app/product_generators/design_interpreter/semantic_contract.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-live-prompt-intent.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
   workflow_dispatch:
 
 permissions:
