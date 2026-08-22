@@ -1,0 +1,63 @@
+name: DOBO Consolidation Capability Composition Boundary
+
+on:
+  pull_request:
+    paths:
+      - 'app/product_generators/design_interpreter/geometry_composer.py'
+      - '.github/workflows/consolidation-capability-composition.yml'
+  workflow_dispatch:
+
+jobs:
+  capability-composition-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate accumulated capability coverage
+        run: |
+          PYTHONPATH=app python - <<'PY'
+          from product_generators.design_interpreter.geometry_composer import (
+              Capability,
+              CapabilityProvider,
+              GeometryComposer,
+              GeometryRepresentation,
+              c0_accumulation_request,
+          )
+
+          plan = GeometryComposer().plan(c0_accumulation_request())
+          plan.validate_coverage()
+          assert plan.complete
+          assert plan.bridge_required
+          provider_names = {p.name for p in plan.providers}
+          assert 'morphological-engine' in provider_names
+          assert 'surface-designer' in provider_names
+          assert 'manufacturability-engine' in provider_names
+          assert 'production-package' in provider_names
+          assert 'legacy-parametric-engine' not in provider_names
+
+          deliberately_incomplete = GeometryComposer(
+              providers=(
+                  CapabilityProvider(
+                      name='mesh-only',
+                      module='probe',
+                      representation=GeometryRepresentation.MESH,
+                      capabilities=frozenset({Capability.MORPHOLOGY, Capability.STL}),
+                  ),
+              )
+          ).plan({Capability.MORPHOLOGY, Capability.TEXT})
+          assert not deliberately_incomplete.complete
+          assert deliberately_incomplete.missing == frozenset({Capability.TEXT})
+          try:
+              deliberately_incomplete.validate_coverage()
+          except RuntimeError as exc:
+              assert 'text' in str(exc)
+          else:
+              raise AssertionError('Capability loss must be explicit')
+
+          print('DOBO capability composition boundary: PASS')
+          print('providers:', ', '.join(sorted(provider_names)))
+          print('covered:', ', '.join(sorted(c.value for c in plan.covered)))
+          print('bridge_required:', plan.bridge_required)
+          PY
