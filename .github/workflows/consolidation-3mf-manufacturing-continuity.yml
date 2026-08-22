@@ -72,10 +72,13 @@ jobs:
 
           log = Path('consolidation-3mf-manufacturing.log').read_text(encoding='utf-8')
           required_markers = (
-              '18 OK',
-              '3 SOURCE_PENDING',
-              '3 NOT_AVAILABLE',
-              '0 blocking errors',
+              'OK 20',
+              'WARNING 1',
+              'ERROR 0',
+              'SOURCE_PENDING 0',
+              'NOT_AVAILABLE 3',
+              'blocking errors 0',
+              'Phase 7.10 Real Product Integration: Valid OK',
           )
           absent = [m for m in required_markers if m not in log]
           if absent:
