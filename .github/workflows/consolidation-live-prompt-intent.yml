@@ -1,0 +1,103 @@
+name: DOBO Consolidation Live Prompt Intent
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - '.github/workflows/consolidation-live-prompt-intent.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: app
+      DESIGN_PROMPT: 'Haz una maceta esférica con la palabra DOBO en sobrerrelieve, centrada al frente.'
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install semantic boundary dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema
+
+      - name: Verify live prompt intent continuity
+        run: |
+          mkdir -p outputs-ci/consolidation-live-prompt
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+
+          from product_generators.design_interpreter.prompt_interpreter import OpenAIResponsesSemanticClient, PromptSemanticInterpreter
+          from product_generators.design_interpreter.semantic_contract import BODY_FAMILIES
+
+          out = Path('outputs-ci/consolidation-live-prompt')
+          prompt = os.environ['DESIGN_PROMPT']
+          if not os.environ.get('OPENAI_API_KEY', '').strip():
+              raise RuntimeError('OPENAI_API_KEY is not configured; live semantic continuity cannot be validated.')
+
+          result = PromptSemanticInterpreter(
+              OpenAIResponsesSemanticClient(model=os.environ['DOBO_SEMANTIC_MODEL'])
+          ).interpret(prompt)
+          semantic = result.program.to_dict()
+          features = semantic.get('features', [])
+
+          def preserves_text(feature):
+              concept = str(feature.get('concept', '')).lower()
+              tokens = [token for token in concept.split('_') if token]
+              return (
+                  feature.get('form_hint') == 'text'
+                  and 'dobo' in tokens
+                  and feature.get('surface_effect') == 'raised'
+                  and feature.get('anchor', {}).get('region') == 'front'
+              )
+
+          audit = {
+              'schema': 'dobo.consolidation.live_prompt_intent.1',
+              'prompt': prompt,
+              'body_family': semantic.get('body', {}).get('family'),
+              'spherical_contract_available': 'spherical' in BODY_FAMILIES,
+              'spherical_intent_preserved': semantic.get('body', {}).get('family') == 'spherical',
+              'dobo_raised_front_text_preserved': any(preserves_text(f) for f in features),
+              'relation_count': len(semantic.get('relations', [])),
+              'interpreter_version': result.trace.interpreter_version,
+          }
+          audit['verdict'] = 'PASS' if all([
+              audit['spherical_contract_available'],
+              audit['spherical_intent_preserved'],
+              audit['dobo_raised_front_text_preserved'],
+          ]) else 'FAIL'
+
+          (out/'PROMPT.txt').write_text(prompt + '\n', encoding='utf-8')
+          (out/'SEMANTIC_PROGRAM.json').write_text(json.dumps(semantic, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          (out/'INTENT_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+
+          if audit['verdict'] != 'PASS':
+              raise RuntimeError('Live prompt semantic intent was not preserved across the consolidation boundary.')
+          PY
+
+      - name: Upload semantic continuity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-live-prompt-intent
+          path: outputs-ci/consolidation-live-prompt
+          if-no-files-found: warn
+          retention-days: 30
