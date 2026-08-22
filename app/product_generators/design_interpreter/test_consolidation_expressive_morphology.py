@@ -20,7 +20,23 @@ CASES = (
 
 
 def _semantic(case_id: str, tags: list[str], *, continuity: bool = False):
-    features = []
+    # The current semantic contract requires at least one visible feature. Keep
+    # routing-only cases valid with a generic surface probe that does not select
+    # or alter the body morphology family under test.
+    features = [
+        _feature(
+            f"{case_id}_surface_probe",
+            "ridge",
+            "slit",
+            "recessed",
+            region="front",
+            horizontal=0.0,
+            vertical=0.30,
+            width=0.18,
+            height=0.035,
+            depth=0.8,
+        )
+    ]
     if continuity:
         features = [
             _feature(
