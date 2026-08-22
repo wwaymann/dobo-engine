@@ -1,0 +1,235 @@
+name: DOBO Consolidation Advanced Surface Manufacturing Continuity
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - '.github/workflows/consolidation-advanced-surface-manufacturing-continuity.yml'
+      - 'app/product_generators/design_interpreter/semantic_surface_bridge.py'
+      - 'app/product_generators/design_interpreter/intelligent_surfaces.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/three_mf_export.py'
+      - 'app/product_generators/surface_designer/advanced_body_adapter.py'
+      - 'app/product_generators/manufacturability/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-advanced-surface-manufacturing-continuity.yml'
+      - 'app/product_generators/design_interpreter/semantic_surface_bridge.py'
+      - 'app/product_generators/design_interpreter/intelligent_surfaces.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/three_mf_export.py'
+      - 'app/product_generators/surface_designer/advanced_body_adapter.py'
+      - 'app/product_generators/manufacturability/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advanced-surface-manufacturing-continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      PYTHONPATH: app
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
+      DESIGN_PROMPT: 'Haz una maceta esférica hueca con abertura superior, la palabra DOBO en sobrerrelieve centrada al frente y debajo un motivo decorativo de hojas en sobrerrelieve.'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing consolidated stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema cadquery numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib
+
+      - name: Execute one continuous prompt to manufacturing case
+        run: |
+          rm -rf outputs-ci/consolidation-advanced-surface-manufacturing
+          mkdir -p outputs-ci/consolidation-advanced-surface-manufacturing
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          import matplotlib.pyplot as plt
+          import numpy as np
+          import trimesh
+
+          from product_generators.design_interpreter.prompt_interpreter import (
+              OpenAIResponsesSemanticClient,
+              PromptSemanticInterpreter,
+          )
+          from product_generators.design_interpreter.semantic_surface_bridge import (
+              SEMANTIC_SURFACE_BRIDGE_VERSION,
+              SemanticSurfaceIntentBridge,
+          )
+          from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
+          from product_generators.manufacturability.final_product_validation import FinalProductAnalyzer
+          from product_generators.manufacturability.production_validation import ProductionAnalyzer
+          from product_generators.manufacturability.profile import ManufacturingProfile
+          from product_generators.surface_designer.advanced_body_adapter import (
+              load_advanced_stl_as_cadquery_shape,
+          )
+
+          root = Path('outputs-ci/consolidation-advanced-surface-manufacturing')
+          prompt = os.environ['DESIGN_PROMPT']
+          api_key = os.environ.get('OPENAI_API_KEY', '').strip()
+          if not api_key:
+              raise RuntimeError('OPENAI_API_KEY is not configured; live continuity cannot be validated.')
+
+          client = OpenAIResponsesSemanticClient(model=os.environ['DOBO_SEMANTIC_MODEL'])
+          interpreted = PromptSemanticInterpreter(client).interpret(prompt)
+          semantic = interpreted.program
+          semantic.validate()
+
+          surface_intents = SemanticSurfaceIntentBridge.compile(semantic)
+          if not surface_intents:
+              raise RuntimeError('Semantic surface bridge produced no layers.')
+
+          result = DoboStructuralPipeline().generate_from_semantic(
+              semantic,
+              output_root=root,
+              interpreter_version=interpreted.trace.interpreter_version,
+              model=interpreted.trace.model,
+              response_id=interpreted.trace.response_id,
+              surface_intents=surface_intents,
+          )
+          result.validate()
+
+          mesh = trimesh.load_mesh(result.stl_path, process=True)
+          shape = load_advanced_stl_as_cadquery_shape(result.stl_path)
+          final_report = FinalProductAnalyzer().analyze(
+              shape=shape,
+              minimum_face_area=0.0,
+              minimum_edge_length=0.0,
+          )
+          profile = ManufacturingProfile()
+          size_report = ProductionAnalyzer().physical_size(
+              shape=shape,
+              max_x=profile.max_size_x,
+              max_y=profile.max_size_y,
+              max_z=profile.max_size_z,
+          )
+
+          features = tuple(semantic.features)
+          text_features = tuple(
+              feature for feature in features
+              if feature.form_hint == 'text'
+              and 'dobo' in feature.concept.lower().split('_')
+              and feature.surface_effect == 'raised'
+              and feature.anchor.region == 'front'
+          )
+          decoration_features = tuple(
+              feature for feature in features
+              if feature.form_hint != 'text'
+              and feature.surface_effect in {'raised', 'recessed', 'marking'}
+          )
+          layers = result.surface_program.layers
+          text_layers = tuple(layer for layer in layers if layer.kind == 'text')
+          relief_layers = tuple(layer for layer in layers if layer.kind == 'procedural_relief')
+
+          # Lightweight four-view evidence from the exact STL that was validated.
+          vertices = np.asarray(mesh.vertices, dtype=float)
+          stride = max(1, len(vertices) // 7000)
+          sample = vertices[::stride]
+          views = (
+              ('front', 0, 0),
+              ('side', 0, 90),
+              ('top', 90, -90),
+              ('iso', 28, 42),
+          )
+          visual_paths = []
+          spans = np.maximum(np.ptp(sample, axis=0), 1.0)
+          for name, elev, azim in views:
+              fig = plt.figure(figsize=(6, 6))
+              ax = fig.add_subplot(111, projection='3d')
+              ax.scatter(sample[:, 0], sample[:, 1], sample[:, 2], s=0.2)
+              ax.view_init(elev=elev, azim=azim)
+              ax.set_box_aspect(tuple(spans))
+              ax.set_axis_off()
+              fig.tight_layout(pad=0)
+              path = root / f'{name}.png'
+              fig.savefig(path, dpi=180, bbox_inches='tight', pad_inches=0)
+              plt.close(fig)
+              visual_paths.append(str(path))
+
+          audit = {
+              'schema': 'dobo.consolidation.advanced_surface_manufacturing.1',
+              'bridge_version': SEMANTIC_SURFACE_BRIDGE_VERSION,
+              'prompt': prompt,
+              'body_family': semantic.body.family,
+              'opening_shape': semantic.body.opening_shape,
+              'opening_width_ratio': semantic.body.opening_width_ratio,
+              'opening_depth_ratio': semantic.body.opening_depth_ratio,
+              'text_intent_preserved': bool(text_features),
+              'decoration_intent_preserved': bool(decoration_features),
+              'semantic_feature_count': len(features),
+              'surface_layer_count': len(layers),
+              'surface_text_layers': len(text_layers),
+              'surface_relief_layers': len(relief_layers),
+              'surface_color_zones': result.surface_report.color_zones,
+              'stl_exists': Path(result.stl_path).is_file(),
+              'three_mf_exists': Path(result.three_mf_path).is_file(),
+              'three_mf_material_count': result.three_mf.material_count,
+              'three_mf_painted_triangles': result.three_mf.painted_triangle_count,
+              'watertight': bool(mesh.is_watertight),
+              'winding_consistent': bool(mesh.is_winding_consistent),
+              'cad_valid': bool(final_report.cad_valid),
+              'cad_connected': bool(final_report.connected),
+              'cad_degenerate_geometry_ok': bool(final_report.degenerate_geometry_ok),
+              'cad_solid_count': int(final_report.solid_count),
+              'production_size_valid': bool(size_report.valid),
+              'visual_evidence': visual_paths,
+          }
+          required = (
+              audit['body_family'] == 'spherical',
+              audit['opening_shape'] in {'circular', 'elliptical'},
+              0.15 <= audit['opening_width_ratio'] < 0.95,
+              0.15 <= audit['opening_depth_ratio'] < 0.95,
+              audit['text_intent_preserved'],
+              audit['decoration_intent_preserved'],
+              audit['surface_text_layers'] >= 1,
+              audit['surface_relief_layers'] >= 1,
+              audit['surface_color_zones'] >= 2,
+              audit['stl_exists'],
+              audit['three_mf_exists'],
+              audit['three_mf_material_count'] >= 2,
+              audit['three_mf_painted_triangles'] > 0,
+              audit['watertight'],
+              audit['winding_consistent'],
+              audit['cad_valid'],
+              audit['cad_connected'],
+              audit['cad_degenerate_geometry_ok'],
+              audit['cad_solid_count'] == 1,
+              audit['production_size_valid'],
+              all(Path(path).is_file() and Path(path).stat().st_size > 0 for path in visual_paths),
+          )
+          audit['verdict'] = 'PASS' if all(required) else 'FAIL'
+          (root / 'CONTINUITY_AUDIT.json').write_text(
+              json.dumps(audit, indent=2, ensure_ascii=False) + '\n',
+              encoding='utf-8',
+          )
+          (root / 'PROMPT.txt').write_text(prompt + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          if audit['verdict'] != 'PASS':
+              raise RuntimeError('Advanced morphology did not preserve surface/manufacturing continuity.')
+          PY
+
+      - name: Upload continuous integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-advanced-surface-manufacturing
+          path: outputs-ci/consolidation-advanced-surface-manufacturing
+          if-no-files-found: error
+          retention-days: 30
