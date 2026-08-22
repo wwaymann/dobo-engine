@@ -184,6 +184,30 @@ def placement_node_id(placement_id: str) -> str:
     return node.split("[", 1)[0].split(".mirror_", 1)[0]
 
 
+def _aabb_clearance_mm(
+    first_center: np.ndarray,
+    first_extents: np.ndarray,
+    second_center: np.ndarray,
+    second_extents: np.ndarray,
+) -> float:
+    """Return conservative Euclidean separation between world-space AABBs.
+
+    The previous layout check collapsed each feature to one XZ footprint radius.
+    That made a wide but thin horizontal relief consume its full width in the
+    vertical direction and falsely reject another feature placed safely above or
+    below it. World-space AABBs preserve the independent X/Y/Z extents while
+    remaining conservative for rotated implicit features.
+    """
+    axis_gaps = np.abs(first_center - second_center) - first_extents - second_extents
+    separated = np.maximum(axis_gaps, 0.0)
+    if np.any(separated > 0.0):
+        return float(np.linalg.norm(separated))
+    # AABB overlap is a real clearance violation. Keep a signed diagnostic
+    # rather than flattening all overlaps to zero; the least-overlapped axis is
+    # the minimum translation required to separate the two bounding boxes.
+    return float(np.max(axis_gaps))
+
+
 def evaluate_layout(
     placements: Iterable[Any],
     contract: LayoutConstraintContract,
@@ -201,9 +225,8 @@ def evaluate_layout(
         extents = feature_half_extents(placement.feature)
         world_extents = np.abs(placement.matrix[:3, :3]) @ extents
         center = np.asarray(placement.matrix[:3, 3], dtype=np.float64)
-        footprint_radius = float(max(world_extents[0], world_extents[2]))
         node_id = placement_node_id(placement.id)
-        geometry.append((placement, node_id, center, world_extents, footprint_radius))
+        geometry.append((placement, node_id, center, world_extents))
         checks[f"{placement.id}/base_clearance"] = (
             center[2] - world_extents[2]
             >= base_z_mm + contract.base_clearance_mm
@@ -230,8 +253,9 @@ def evaluate_layout(
                 ignored += 1
                 continue
             evaluated += 1
-            distance = float(np.linalg.norm(first[2] - second[2]))
-            clearance = distance - first[4] - second[4]
+            clearance = _aabb_clearance_mm(
+                first[2], first[3], second[2], second[3]
+            )
             clearances.append(clearance)
             name = f"pair/{first[1]}--{second[1]}/clearance"
             checks[name] = clearance >= contract.minimum_clearance_mm
