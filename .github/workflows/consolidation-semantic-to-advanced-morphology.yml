@@ -6,18 +6,22 @@ on:
     paths:
       - '.github/workflows/consolidation-semantic-to-advanced-morphology.yml'
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/design_grammar.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - 'app/product_generators/design_interpreter/structural_compiler.py'
       - 'app/product_generators/design_interpreter/structural_vocabulary.py'
+      - 'app/product_generators/design_interpreter/structural_morphogenesis.py'
       - 'app/product_generators/organic_shapes/**'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/consolidation-semantic-to-advanced-morphology.yml'
       - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/design_grammar.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - 'app/product_generators/design_interpreter/structural_compiler.py'
       - 'app/product_generators/design_interpreter/structural_vocabulary.py'
+      - 'app/product_generators/design_interpreter/structural_morphogenesis.py'
       - 'app/product_generators/organic_shapes/**'
   workflow_dispatch:
 
@@ -129,6 +133,7 @@ jobs:
               audit['surface_program_present'],
               audit['motor_program_present'],
               audit['structural_program_present'],
+              audit['structural_body_profile'] == 'spherical',
           ]
           audit['verdict'] = 'PASS' if all(required) else 'FAIL'
           (root/'CONTINUITY_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
