@@ -415,11 +415,14 @@ class SemanticToMotorCompiler:
                 round_mm=max(0.4, 0.25 * minimum_feature_mm),
             )
         else:
+            half_sizes = [0.5 * width, depth, 0.5 * height]
+            requested_round = max(0.4, min(width, height) * 0.12)
+            round_mm = min(requested_round, 0.9 * min(half_sizes))
             base.update(
                 kind="rounded_box",
                 center=[0.0, 0.0, 0.0],
-                half_sizes=[0.5 * width, depth, 0.5 * height],
-                round_mm=max(0.4, min(width, height) * 0.12),
+                half_sizes=half_sizes,
+                round_mm=round_mm,
             )
         return base, transform
 
