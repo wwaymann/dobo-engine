@@ -32,6 +32,7 @@ jobs:
           python -m pip install openai jsonschema numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib cadquery
       - name: Execute real product combination audit
         run: |
+          # Audit cases independently so one failed product never hides the others.
           rm -rf outputs-ci/combinatorial-product-benchmark
           python -m product_generators.design_interpreter.combinatorial_product_benchmark
       - name: Upload real combinatorial benchmark evidence
