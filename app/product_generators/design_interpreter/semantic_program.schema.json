@@ -11,7 +11,7 @@
     "product_kind": {"const": "planter"},
     "source": {"$ref": "#/$defs/source"},
     "body": {"$ref": "#/$defs/body"},
-    "features": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/feature"}},
+    "features": {"type": "array", "items": {"$ref": "#/$defs/feature"}},
     "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
     "manufacturing": {"$ref": "#/$defs/manufacturing"},
     "assumptions": {"type": "array", "items": {"$ref": "#/$defs/assumption"}},
