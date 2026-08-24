@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 from .image_interpreter import ImageModelClient, ImageSemanticInterpreter
 from .intelligent_surfaces import (
@@ -24,8 +25,8 @@ from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
 
-STRUCTURAL_PIPELINE_VERSION = "8.1"
-STRUCTURAL_FUSION_VERSION = "7C.1"
+STRUCTURAL_PIPELINE_VERSION = "8.2"
+STRUCTURAL_FUSION_VERSION = "7C.2"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
 
@@ -179,6 +180,13 @@ class DoboStructuralPipeline:
             repair.program, structural
         )
         motor = compilation.motor_program
+
+        # Consolidation bridge: body-family expansion already existed as a
+        # tested capability, but the production structural E2E never invoked it.
+        # Apply it here after the generic structural compilation so explicit
+        # planter body families survive all the way into the physical vessel.
+        GeneralBodyFamilyExpander.apply(motor, repair.program)
+
         if compilation.report.complex_profile != "surface_only":
             motor["output"]["max_generation_seconds"] = max(
                 float(motor["output"]["max_generation_seconds"]),
