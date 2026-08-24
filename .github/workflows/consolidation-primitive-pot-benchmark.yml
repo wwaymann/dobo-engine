@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/consolidation-primitive-pot-benchmark.yml'
       - 'app/product_generators/design_interpreter/primitive_pot_benchmark.py'
+      - 'app/product_generators/design_interpreter/body_family_expansion.py'
   workflow_dispatch:
 
 permissions:
