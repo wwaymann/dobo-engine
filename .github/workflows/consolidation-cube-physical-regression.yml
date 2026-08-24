@@ -1,0 +1,42 @@
+name: DOBO Consolidation Cube Physical Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-cube-physical-regression.yml'
+      - 'app/product_generators/design_interpreter/body_family_expansion.py'
+      - 'app/product_generators/design_interpreter/cube_physical_regression.py'
+      - 'app/product_generators/design_interpreter/fixtures/primitive_cube.semantic.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cube-physical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: app
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install consolidated runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install jsonschema numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib cadquery
+      - name: Run cube physical regression without model/API
+        run: python -m product_generators.design_interpreter.cube_physical_regression
+      - name: Upload cube evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-cube-physical-regression
+          path: outputs-ci/cube-physical-regression
+          if-no-files-found: warn
+          retention-days: 30
