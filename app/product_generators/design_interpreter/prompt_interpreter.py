@@ -1,21 +1,20 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
 from typing import Any, Protocol
+import unicodedata
 
 from .semantic_contract import DesignSemanticProgram
 from .semantic_parser import SemanticProgramParser
 
 
-PROMPT_INTERPRETER_VERSION = "3C.7"
+PROMPT_INTERPRETER_VERSION = "3C.8"
 DEFAULT_SCHEMA_PATH = Path(__file__).with_name("semantic_program.schema.json")
 
-# Structured Outputs accepts a strict subset of JSON Schema. Keep the canonical
-# 3A.1 schema unchanged for local validation and remove only constraints that
-# the Responses API cannot accept from the copy sent to OpenAI.
 _OPENAI_UNSUPPORTED_SCHEMA_KEYWORDS = frozenset({"uniqueItems"})
 
 SYSTEM_INSTRUCTIONS = """You are the semantic design interpreter for DOBO.
@@ -29,7 +28,7 @@ Rules:
 - Preserve explicit body geometry. When the user names a primitive or body family, that body intent MUST survive in body.family and/or body.style_tags rather than being replaced by a generic cylindrical or organic body.
 - For a cube/cubic body use a style tag such as cuboid or cube. For a rectangular prism use rectangular_prism. For a cylinder/cylindrical body keep body.family=cylindrical and include cylindrical when useful. For a cone/truncated cone use body.family=tapered and a conical/tapered tag. For a sphere use body.family=spherical. For an ovoid/ellipsoid use body.family=organic with style tag ovoid. For a triangular prism use a triangular_prism style tag and a polygonal opening when appropriate.
 - Do not reinterpret an explicitly requested primitive as sculptural, flowing, helical, organic-asymmetric or another expressive family unless the user asks for that style.
-- Express visible decorative parts as features and spatial structure as relations.
+- Express visible decorative parts as features and spatial structure as relations. A plain planter may have an empty features array.
 - Functional vessel drainage is NOT a decorative visible feature. If the user merely asks for a normal drainage hole or drainage at the bottom, set manufacturing.drainage_required=true and do not create a drainage feature. Create a drainage-related feature only when the user explicitly asks for a special visible drainage geometry or decorative drainage pattern beyond the normal vessel drain.
 - Preserve literal user-requested lettering as semantic content, not merely as a generic text feature.
 - Every requested word, name, number or short phrase that must appear on the planter MUST be represented by a required feature with form_hint=text, and feature.concept MUST include the normalized literal content as identifier tokens (for example, literal HELLO -> concept text_hello; never use only concept=text).
@@ -50,6 +49,88 @@ Rules:
   manufacturing.minimum_wall_mm. Prefer a conservative relief depth no greater
   than half the wall thickness when the user does not provide exact values.
 """
+
+
+def _plain_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value.lower())
+    return "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    )
+
+
+def _normalize_functional_prompt_output(prompt: str, output: dict[str, Any]) -> dict[str, Any]:
+    """Preserve explicit primitive intent and keep normal drainage in the vessel contract."""
+    data = deepcopy(output)
+    text = _plain_text(prompt)
+    body = data.get("body")
+    if isinstance(body, dict):
+        raw_tags = body.get("style_tags", [])
+        tags = [str(tag) for tag in raw_tags] if isinstance(raw_tags, list) else []
+        shape_tags = {
+            "cuboid", "cube", "cubic", "rectangular", "rectangular_prism",
+            "cylindrical", "cylinder", "tapered", "tapered_revolution", "conical",
+            "truncated_cone", "frustum", "spherical", "sphere", "ovoid", "ellipsoidal",
+            "triangular", "triangular_prism", "triangle_prism",
+        }
+        tags = [tag for tag in tags if tag not in shape_tags]
+        if "prisma triangular" in text or "triangular prism" in text:
+            body["family"] = "organic"
+            body["opening_shape"] = "polygonal"
+            tags.append("triangular_prism")
+        elif "prisma rectangular" in text or "rectangular prism" in text or "jardinera rectangular" in text:
+            body["family"] = "organic"
+            body["opening_shape"] = "polygonal"
+            tags.append("rectangular_prism")
+        elif any(token in text for token in ("troncocon", "tronco de cono", "truncated cone", "frustum")) or ("cono" in text and "cono" not in "icono"):
+            body["family"] = "tapered"
+            tags.append("tapered_revolution")
+        elif any(token in text for token in ("cilindrica", "cilindrico", "cilindro", "cylindrical", "cylinder")):
+            body["family"] = "cylindrical"
+            tags.append("cylindrical")
+        elif any(token in text for token in ("esferica", "esferico", "esfera", "spherical", "sphere")):
+            body["family"] = "spherical"
+            tags.append("spherical")
+        elif any(token in text for token in ("ovoide", "ovoidal", "elipsoidal", "ovoid", "ellipsoid")):
+            body["family"] = "organic"
+            tags.append("ovoid")
+        elif any(token in text for token in ("cubo", "cubica", "cubico", "cube", "cubic")):
+            body["family"] = "organic"
+            body["opening_shape"] = "polygonal"
+            tags.append("cuboid")
+        body["style_tags"] = list(dict.fromkeys(tags or ["functional"]))
+
+    manufacturing = data.get("manufacturing")
+    ordinary_drainage = isinstance(manufacturing, dict) and bool(manufacturing.get("drainage_required"))
+    custom_drainage = any(
+        phrase in text
+        for phrase in (
+            "patron de drenaje", "patron drenaje", "decoracion de drenaje",
+            "decorative drainage", "drainage pattern", "multiple drainage",
+        )
+    )
+    features = data.get("features")
+    if ordinary_drainage and not custom_drainage and isinstance(features, list):
+        kept: list[dict[str, Any]] = []
+        removed_ids: set[str] = set()
+        for feature in features:
+            if not isinstance(feature, dict):
+                continue
+            identity = " ".join((str(feature.get("id", "")), str(feature.get("concept", "")))).lower()
+            if "drain" in identity or "dren" in identity:
+                removed_ids.add(str(feature.get("id", "")))
+            else:
+                kept.append(feature)
+        data["features"] = kept
+        if removed_ids:
+            relations = data.get("relations")
+            if isinstance(relations, list):
+                data["relations"] = [
+                    relation for relation in relations
+                    if isinstance(relation, dict)
+                    and str(relation.get("subject_id", "")) not in removed_ids
+                    and str(relation.get("object_id", "")) not in removed_ids
+                ]
+    return data
 
 
 def _json_schema_type(value: Any) -> str:
@@ -153,7 +234,8 @@ class PromptSemanticInterpreter:
         )
         if not isinstance(response.output, dict):
             raise TypeError("Semantic model output must be a JSON object.")
-        program = SemanticProgramParser().parse_dict(response.output)
+        normalized_output = _normalize_functional_prompt_output(normalized, response.output)
+        program = SemanticProgramParser().parse_dict(normalized_output)
         if program.source.kind != "prompt":
             raise ValueError("Prompt interpretation must set source.kind to prompt.")
         if program.source.prompt != normalized:
