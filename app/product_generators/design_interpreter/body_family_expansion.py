@@ -7,7 +7,7 @@ from typing import Any
 from .semantic_contract import DesignSemanticProgram
 
 
-BODY_FAMILY_EXPANSION_VERSION = "B28.3"
+BODY_FAMILY_EXPANSION_VERSION = "B28.4"
 
 
 def _normalized(value: str) -> str:
@@ -87,12 +87,17 @@ class GeneralBodyFamilyExpander:
             return fields, max(2.4, minimum * 0.030)
 
         if profile == "cuboid":
+            # Keep the cube visibly square while giving adjacent axial fields
+            # enough overlap for the implicit shell to remain one closed
+            # surface after cavity and drain subtraction. The former profile
+            # had a narrow mid section and very sharp exponent transition that
+            # could create an open marching-cubes seam on equal X/Y dimensions.
             fields = [
-                cls._superellipsoid("body", [0.0, 0.0, -0.24 * height], [0.47 * width, 0.47 * depth, 0.27 * height], exponent=8.0, round_mm=max(0.9, minimum * 0.014)),
-                cls._superellipsoid("cuboid_mid", [0.0, 0.0, 0.0], [0.48 * width, 0.48 * depth, 0.25 * height], exponent=9.0, round_mm=max(0.9, minimum * 0.014)),
-                cls._superellipsoid("cuboid_upper", [0.0, 0.0, 0.25 * height], [0.47 * width, 0.47 * depth, 0.27 * height], exponent=8.0, round_mm=max(0.9, minimum * 0.014)),
+                cls._superellipsoid("body", [0.0, 0.0, -0.25 * height], [0.49 * width, 0.49 * depth, 0.29 * height], exponent=7.0, round_mm=max(1.0, minimum * 0.015)),
+                cls._superellipsoid("cuboid_mid", [0.0, 0.0, 0.0], [0.49 * width, 0.49 * depth, 0.29 * height], exponent=7.5, round_mm=max(1.0, minimum * 0.015)),
+                cls._superellipsoid("cuboid_upper", [0.0, 0.0, 0.25 * height], [0.49 * width, 0.49 * depth, 0.29 * height], exponent=7.0, round_mm=max(1.0, minimum * 0.015)),
             ]
-            return fields, max(1.8, minimum * 0.022)
+            return fields, max(2.4, minimum * 0.028)
 
         if profile == "rectangular_prism":
             fields = [
