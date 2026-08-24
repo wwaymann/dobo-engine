@@ -1,0 +1,42 @@
+name: Consolidation - Macroblock D Compatibility
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - 'app/product_generators/design_interpreter/**'
+      - 'app/product_generators/organic_shapes/**'
+      - '.github/workflows/consolidation-macroblock-d-compatibility.yml'
+  workflow_dispatch:
+
+jobs:
+  macroblock-d-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install numpy scipy trimesh scikit-image matplotlib shapely
+      - name: Run D1 compatibility benchmark
+        env:
+          PYTHONPATH: app
+          MPLBACKEND: Agg
+        run: python -m product_generators.design_interpreter.visual_macroblock_d_benchmark
+      - name: Run D2 compatibility benchmark
+        env:
+          PYTHONPATH: app
+          MPLBACKEND: Agg
+        run: python -m product_generators.design_interpreter.visual_macroblock_d2_benchmark
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macroblock-d-compatibility-evidence
+          path: |
+            outputs/consolidation_macroblock_d/**
+            outputs/consolidation_macroblock_d2/**
+          if-no-files-found: warn
+          retention-days: 14
