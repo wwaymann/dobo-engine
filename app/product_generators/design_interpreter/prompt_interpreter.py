@@ -10,7 +10,7 @@ from .semantic_contract import DesignSemanticProgram
 from .semantic_parser import SemanticProgramParser
 
 
-PROMPT_INTERPRETER_VERSION = "3C.6"
+PROMPT_INTERPRETER_VERSION = "3C.7"
 DEFAULT_SCHEMA_PATH = Path(__file__).with_name("semantic_program.schema.json")
 
 # Structured Outputs accepts a strict subset of JSON Schema. Keep the canonical
@@ -26,7 +26,11 @@ Rules:
 - Preserve the user's prompt exactly in source.prompt.
 - Set source.kind to prompt and source.image_reference to null.
 - Use only values permitted by the supplied JSON Schema.
-- Express visible parts as features and spatial structure as relations.
+- Preserve explicit body geometry. When the user names a primitive or body family, that body intent MUST survive in body.family and/or body.style_tags rather than being replaced by a generic cylindrical or organic body.
+- For a cube/cubic body use a style tag such as cuboid or cube. For a rectangular prism use rectangular_prism. For a cylinder/cylindrical body keep body.family=cylindrical and include cylindrical when useful. For a cone/truncated cone use body.family=tapered and a conical/tapered tag. For a sphere use body.family=spherical. For an ovoid/ellipsoid use body.family=organic with style tag ovoid. For a triangular prism use a triangular_prism style tag and a polygonal opening when appropriate.
+- Do not reinterpret an explicitly requested primitive as sculptural, flowing, helical, organic-asymmetric or another expressive family unless the user asks for that style.
+- Express visible decorative parts as features and spatial structure as relations.
+- Functional vessel drainage is NOT a decorative visible feature. If the user merely asks for a normal drainage hole or drainage at the bottom, set manufacturing.drainage_required=true and do not create a drainage feature. Create a drainage-related feature only when the user explicitly asks for a special visible drainage geometry or decorative drainage pattern beyond the normal vessel drain.
 - Preserve literal user-requested lettering as semantic content, not merely as a generic text feature.
 - Every requested word, name, number or short phrase that must appear on the planter MUST be represented by a required feature with form_hint=text, and feature.concept MUST include the normalized literal content as identifier tokens (for example, literal HELLO -> concept text_hello; never use only concept=text).
 - Preserve the requested text surface treatment exactly: emboss, raised, sobrerrelieve or equivalent wording -> surface_effect=raised; deboss, recessed, bajorrelieve or equivalent wording -> surface_effect=recessed.
