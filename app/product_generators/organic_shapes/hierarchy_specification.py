@@ -85,8 +85,10 @@ class HierarchicalFeatureSpecification:
 
     def validate(self) -> None:
         self.vessel_specification.validate()
-        if not self.templates or not self.roots:
-            raise ValueError("Hierarchy requires templates and root nodes.")
+        if bool(self.templates) != bool(self.roots):
+            raise ValueError(
+                "Hierarchy templates and roots must either both be empty for a plain vessel or both be populated."
+            )
         template_ids: set[str] = set()
         for template in self.templates:
             template.validate()
