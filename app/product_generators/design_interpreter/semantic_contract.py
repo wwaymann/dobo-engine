@@ -294,8 +294,6 @@ class DesignSemanticProgram:
         self.source.validate()
         self.body.validate()
         self.manufacturing.validate()
-        if not self.features:
-            raise ValueError("Semantic program requires at least one feature.")
         feature_ids: set[str] = set()
         for feature in self.features:
             feature.validate()
