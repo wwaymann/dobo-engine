@@ -7,7 +7,7 @@ from typing import Any
 from .semantic_contract import DesignSemanticProgram
 
 
-BODY_FAMILY_EXPANSION_VERSION = "B28.2"
+BODY_FAMILY_EXPANSION_VERSION = "B28.3"
 
 
 def _normalized(value: str) -> str:
@@ -33,7 +33,9 @@ class GeneralBodyFamilyExpander:
         ("tapered_revolution", {"tapered", "tapered_revolution", "truncated_cone", "conical", "frustum"}),
         ("rectangular_prism", {"rectangular", "rectangular_prism", "elongated_planter", "oblong"}),
         ("cuboid", {"cuboid", "cubic", "cube", "architectural_cube", "boxy"}),
+        ("triangular_prism", {"triangular", "triangular_prism", "triangle_prism"}),
         ("ovoid", {"ovoid", "egg", "ellipsoidal", "bulbous"}),
+        ("cylindrical", {"cylindrical", "cylinder", "straight_cylinder"}),
         ("compound_multivolume", {"compound_multivolume", "multivolume", "multi_volume", "compound_body"}),
     )
 
@@ -50,12 +52,33 @@ class GeneralBodyFamilyExpander:
     def _superellipsoid(field_id: str, center: list[float], radii: list[float], *, exponent: float, round_mm: float) -> dict[str, Any]:
         return {"id": field_id, "kind": "superellipsoid", "center": center, "radii": radii, "exponent": exponent, "round_mm": round_mm}
 
+    @staticmethod
+    def _faceted(field_id: str, center: list[float], radii: list[float], *, sides: int, exponent: float, round_mm: float, rotation_degrees: float = 0.0) -> dict[str, Any]:
+        return {
+            "id": field_id,
+            "kind": "faceted_ellipsoid",
+            "center": center,
+            "radii": radii,
+            "exponent": exponent,
+            "sides": sides,
+            "rotation_degrees": rotation_degrees,
+            "round_mm": round_mm,
+        }
+
     @classmethod
     def _fields_for(cls, profile: str, program: DesignSemanticProgram) -> tuple[list[dict[str, Any]], float]:
         width = float(program.body.width_mm)
         depth = float(program.body.depth_mm)
         height = float(program.body.height_mm)
         minimum = min(width, depth, height)
+
+        if profile == "cylindrical":
+            fields = [
+                cls._superellipsoid("body", [0.0, 0.0, -0.27 * height], [0.48 * width, 0.48 * depth, 0.26 * height], exponent=4.8, round_mm=max(0.8, minimum * 0.012)),
+                cls._superellipsoid("cylindrical_mid", [0.0, 0.0, 0.0], [0.49 * width, 0.49 * depth, 0.27 * height], exponent=5.2, round_mm=max(0.8, minimum * 0.012)),
+                cls._superellipsoid("cylindrical_upper", [0.0, 0.0, 0.27 * height], [0.48 * width, 0.48 * depth, 0.26 * height], exponent=4.8, round_mm=max(0.8, minimum * 0.012)),
+            ]
+            return fields, max(2.0, minimum * 0.022)
 
         if profile == "tapered_revolution":
             fields: list[dict[str, Any]] = []
@@ -79,6 +102,14 @@ class GeneralBodyFamilyExpander:
             ]
             return fields, max(1.8, minimum * 0.020)
 
+        if profile == "triangular_prism":
+            fields = [
+                cls._faceted("body", [0.0, 0.0, -0.25 * height], [0.48 * width, 0.48 * depth, 0.27 * height], sides=3, exponent=7.5, round_mm=max(0.8, minimum * 0.012), rotation_degrees=30.0),
+                cls._faceted("triangular_mid", [0.0, 0.0, 0.0], [0.49 * width, 0.49 * depth, 0.26 * height], sides=3, exponent=8.0, round_mm=max(0.8, minimum * 0.012), rotation_degrees=30.0),
+                cls._faceted("triangular_upper", [0.0, 0.0, 0.25 * height], [0.48 * width, 0.48 * depth, 0.27 * height], sides=3, exponent=7.5, round_mm=max(0.8, minimum * 0.012), rotation_degrees=30.0),
+            ]
+            return fields, max(1.8, minimum * 0.020)
+
         if profile == "ovoid":
             fields = [
                 cls._superellipsoid("body", [0.0, 0.0, -0.20 * height], [0.39 * width, 0.39 * depth, 0.34 * height], exponent=2.15, round_mm=max(1.0, minimum * 0.018)),
@@ -88,10 +119,6 @@ class GeneralBodyFamilyExpander:
             return fields, max(3.0, minimum * 0.032)
 
         if profile == "compound_multivolume":
-            # A compound vessel needs a common load-bearing plinth under the
-            # separate sculptural masses. This is a reusable structural rule,
-            # not a benchmark-specific patch: every multivolume body receives
-            # one centered low base field before the expressive masses.
             fields = [
                 cls._superellipsoid("body", [0.0, 0.0, -0.42 * height], [0.40 * width, 0.38 * depth, 0.15 * height], exponent=4.5, round_mm=max(1.0, minimum * 0.014)),
                 cls._superellipsoid("compound_left", [-0.18 * width, 0.02 * depth, -0.12 * height], [0.34 * width, 0.39 * depth, 0.42 * height], exponent=2.5, round_mm=max(1.0, minimum * 0.016)),
