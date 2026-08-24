@@ -190,21 +190,10 @@ def _aabb_clearance_mm(
     second_center: np.ndarray,
     second_extents: np.ndarray,
 ) -> float:
-    """Return conservative Euclidean separation between world-space AABBs.
-
-    The previous layout check collapsed each feature to one XZ footprint radius.
-    That made a wide but thin horizontal relief consume its full width in the
-    vertical direction and falsely reject another feature placed safely above or
-    below it. World-space AABBs preserve the independent X/Y/Z extents while
-    remaining conservative for rotated implicit features.
-    """
     axis_gaps = np.abs(first_center - second_center) - first_extents - second_extents
     separated = np.maximum(axis_gaps, 0.0)
     if np.any(separated > 0.0):
         return float(np.linalg.norm(separated))
-    # AABB overlap is a real clearance violation. Keep a signed diagnostic
-    # rather than flattening all overlaps to zero; the least-overlapped axis is
-    # the minimum translation required to separate the two bounding boxes.
     return float(np.max(axis_gaps))
 
 
@@ -247,8 +236,6 @@ def evaluate_layout(
     clearances: list[float] = []
     for index, first in enumerate(geometry):
         for second in geometry[index + 1 :]:
-            # Multiple templates owned by one hierarchy node intentionally
-            # overlap to form a single compound structural feature.
             if first[1] == second[1] or contract.ignores(first[1], second[1]):
                 ignored += 1
                 continue
@@ -259,13 +246,12 @@ def evaluate_layout(
             clearances.append(clearance)
             name = f"pair/{first[1]}--{second[1]}/clearance"
             checks[name] = clearance >= contract.minimum_clearance_mm
-    report = LayoutReport(
+    return LayoutReport(
         checks=checks,
         evaluated_pairs=evaluated,
         ignored_pairs=ignored,
         minimum_pair_clearance_mm=min(clearances, default=float("inf")),
     )
-    return report
 
 
 def evaluate_manufacturability(
@@ -289,11 +275,6 @@ def evaluate_manufacturability(
         depth_scale = float(
             np.linalg.norm(placement.matrix[:3, depth_axis])
         )
-        # Surface-anchor frames are orthonormal rotations. Numerical round-off
-        # can report their unit depth axis as 0.9999999999999999, which turns an
-        # exactly-on-contract relief depth into a false minimum-depth failure.
-        # Normalize only machine-precision unit transforms; real scaling is
-        # preserved and remains subject to the same manufacturing thresholds.
         if np.isclose(depth_scale, 1.0, rtol=0.0, atol=1e-12):
             depth_scale = 1.0
         depth = feature_depth_mm(placement.feature) * depth_scale
@@ -324,7 +305,7 @@ def evaluate_manufacturability(
             )
     return ManufacturabilityReport(
         checks=checks,
-        minimum_feature_mm=min(feature_sizes),
-        minimum_relief_depth_mm=min(relief_depths),
-        maximum_relief_depth_mm=max(relief_depths),
+        minimum_feature_mm=min(feature_sizes, default=float("inf")),
+        minimum_relief_depth_mm=min(relief_depths, default=0.0),
+        maximum_relief_depth_mm=max(relief_depths, default=0.0),
     )
