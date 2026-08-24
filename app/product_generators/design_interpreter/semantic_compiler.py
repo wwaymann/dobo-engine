@@ -8,7 +8,7 @@ from typing import Any
 from .semantic_contract import DesignSemanticProgram, FeatureIntent, SemanticAnchor
 
 
-COMPILER_VERSION = "3B.1"
+COMPILER_VERSION = "3B.2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,9 +78,16 @@ class SemanticToMotorCompiler:
             0.4,
             0.4 * manufacturing.minimum_feature_mm,
         )
+        default_relief_depth_mm = min(
+            0.8,
+            max(0.1, 0.5 * manufacturing.maximum_relief_depth_mm),
+        )
         minimum_relief_depth_mm = min(
             0.8,
-            min(feature.size.depth_mm for feature in program.features),
+            min(
+                (feature.size.depth_mm for feature in program.features),
+                default=default_relief_depth_mm,
+            ),
         )
 
         templates: list[dict[str, Any]] = []
@@ -358,11 +365,6 @@ class SemanticToMotorCompiler:
                 0.5 * height,
                 0.5 * minimum_feature_mm,
             )
-            # A capsule requires distinct start/end points. Semantic inputs can
-            # legitimately describe a square or vertical "slit" (for example,
-            # a stylized eye), where height >= width. Capping the radius below
-            # half the width preserves a real center segment instead of
-            # emitting a degenerate capsule rejected by the Motor contract.
             radius = min(requested_radius, 0.45 * width)
             half_segment = max(0.0, 0.5 * width - radius)
             base.update(
@@ -378,9 +380,6 @@ class SemanticToMotorCompiler:
             transform = {
                 "scale": [1.0, effective_depth / radius, 1.0],
             }
-            # Manufacturability evaluates the blend after applying the node
-            # transform. Reserve enough nominal blend for a shallow capsule so
-            # its effective blend still satisfies the Motor contract.
             depth_scale = min(1.0, effective_depth / radius)
             base["blend_mm"] = max(
                 float(base["blend_mm"]),
