@@ -1,0 +1,35 @@
+name: DOBO Consolidation Primitive Pots Offline
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - 'app/product_generators/design_interpreter/primitive_pot_offline_benchmark.py'
+      - 'app/product_generators/design_interpreter/**'
+      - 'app/product_generators/organic_shapes/**'
+      - '.github/workflows/consolidation-primitive-pots-offline.yml'
+  workflow_dispatch:
+
+jobs:
+  primitive-pots-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install geometry stack
+        run: python -m pip install numpy scipy trimesh scikit-image shapely Pillow
+      - name: Execute 7 fixed semantic programs directly through Motor DOBO
+        env:
+          PYTHONPATH: app
+        run: python -m product_generators.design_interpreter.primitive_pot_offline_benchmark
+      - name: Upload physical evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-primitive-pots-offline-evidence
+          path: outputs-ci/primitive-pot-offline/**
+          if-no-files-found: error
+          retention-days: 30
