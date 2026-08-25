@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from .semantic_contract import DesignSemanticProgram
 from .semantic_parser import SemanticProgramParser
@@ -61,6 +62,14 @@ def _relation(kind: str, subject: str, target: str) -> dict:
     }
 
 
+def _normalized_program_id(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9_]+", "_", value.strip().lower())
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    if len(normalized) < 2:
+        normalized = f"dobo_{normalized or 'design'}"
+    return normalized[:64].rstrip("_")
+
+
 def _program(
     case_id: str,
     prompt: str,
@@ -78,7 +87,7 @@ def _program(
 ) -> DesignSemanticProgram:
     data = {
         "schema_version": "3A.1",
-        "id": case_id,
+        "id": _normalized_program_id(case_id),
         "product_kind": "planter",
         "source": {
             "kind": "prompt",
