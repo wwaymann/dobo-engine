@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install geometry stack
-        run: python -m pip install numpy scipy trimesh scikit-image shapely Pillow
+        run: python -m pip install cadquery numpy scipy trimesh scikit-image shapely Pillow
       - name: Execute 7 fixed semantic programs directly through Motor DOBO
         env:
           PYTHONPATH: app
