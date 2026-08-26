@@ -17,7 +17,23 @@ from dobo_retry_repairs import install_retry_repairs
 # Install the repairs before the first generation request and make the base lab
 # construct the repaired structural pipeline.
 install_retry_repairs()
-lab.DoboStructuralPipeline = install()
+LivePipeline = install()
+
+# The exact WALTER regression already proved that semantic text needs the
+# temporary 120-second diagnostic budget before mesh generation. The live lab
+# must use the same path; applying the budget after generate_from_semantic()
+# returns is too late because the structural result validates internally.
+_original_live_generate_from_semantic = LivePipeline.generate_from_semantic
+
+
+def _live_generate_from_semantic(self, program, **kwargs):
+    if any(feature.form_hint == "text" for feature in program.features):
+        kwargs.setdefault("generation_budget_seconds", 120.0)
+    return _original_live_generate_from_semantic(self, program, **kwargs)
+
+
+LivePipeline.generate_from_semantic = _live_generate_from_semantic
+lab.DoboStructuralPipeline = LivePipeline
 
 
 def _plain(value: str) -> str:
