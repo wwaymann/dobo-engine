@@ -4,6 +4,7 @@ on:
   push:
     branches: [integration-consolidation-core]
     paths:
+      - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_capability_repairs_check.py'
       - 'tools/dobo_capability_lab_live.py'
@@ -11,6 +12,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_capability_repairs_check.py'
       - 'tools/dobo_capability_lab_live.py'
