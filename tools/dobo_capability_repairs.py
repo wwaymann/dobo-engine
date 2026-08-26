@@ -5,7 +5,8 @@ from __future__ import annotations
 This module deliberately limits itself to defects exposed by the live lab:
 - neutral primitive envelopes (no unsolicited axial bands),
 - safe vessel voxel resolution,
-- physical stroke text for semantic text features.
+- physical stroke text for semantic text features,
+- curvature-aware wrapping so wide raised text remains attached to vessels.
 
 The bridge is installed only by ``dobo_capability_lab_live.py`` so every repaired
 behaviour remains directly observable before it is promoted deeper into the core.
@@ -19,16 +20,19 @@ import unicodedata
 import numpy as np
 
 from product_generators.design_interpreter.body_family_expansion import GeneralBodyFamilyExpander
+from product_generators.design_interpreter.semantic_compiler import SemanticToMotorCompiler
 from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
 from product_generators.organic_shapes.feature_program_engine import FeatureProgramVesselEngine
 from product_generators.organic_shapes.vessel_specification import OrganicVesselParser
 
 
 _TEXT_TEMPLATES: dict[str, str] = {}
+_TEXT_WRAP_RADIUS: dict[str, float] = {}
 _ORIGINAL_FIELD = FeatureProgramVesselEngine._feature_field
 _ORIGINAL_FIELDS_FOR = GeneralBodyFamilyExpander._fields_for
 _ORIGINAL_REQUESTED_PROFILE = GeneralBodyFamilyExpander.requested_profile
 _ORIGINAL_PARSE = OrganicVesselParser.parse_dict
+_ORIGINAL_COMPILE_FEATURE = SemanticToMotorCompiler._compile_feature.__func__
 
 
 def _plain(value: str) -> str:
@@ -135,6 +139,17 @@ def _safe_parse(self, data: dict[str, Any]):
     return _ORIGINAL_PARSE(self, repaired)
 
 
+def _compile_feature_with_text(cls, feature, **kwargs):
+    template, transform = _ORIGINAL_COMPILE_FEATURE(cls, feature, **kwargs)
+    if feature.form_hint == "text":
+        # Keep the actual literal visible in the Motor JSON. The geometric
+        # primitive remains parser-compatible while the live engine evaluates
+        # it as stroke text instead of as an anonymous rounded box.
+        template["semantic_kind"] = "text_stroke"
+        template["text_literal"] = _literal_from_concept(feature.concept)
+    return template, transform
+
+
 # A compact stroke font. Coordinates are normalized in a character cell.
 _SEG = {
     "a": ((-0.38, 0.50), (0.38, 0.50)),
@@ -154,7 +169,7 @@ _SEG = {
 _GLYPH = {
     "A": "abcefg", "B": "abcdefg", "C": "adef", "D": "abcdef", "E": "adefg",
     "F": "aefg", "G": "acdefg", "H": "bcefg", "I": "adlm", "J": "bcde",
-    "K": "efhik", "L": "def", "M": "bcefh i".replace(" ", ""), "N": "bcefhk",
+    "K": "efhik", "L": "def", "M": "bcefhi", "N": "bcefhk",
     "O": "abcdef", "P": "abefg", "Q": "abcdefk", "R": "abefgk", "S": "acdfg",
     "T": "alm", "U": "bcdef", "V": "efjk", "W": "bcefjk", "X": "hijk",
     "Y": "hilm", "Z": "adij", "0": "abcdef", "1": "bc", "2": "abdeg",
@@ -177,22 +192,28 @@ def _segment_prism(x, y, z, x1, z1, x2, z2, radius, half_depth):
     return outside + inside
 
 
-def _text_field(feature, text: str, x, y, z):
+def _wrapped_depth_coordinate(local_x, local_y, wrap_radius: float | None):
+    if wrap_radius is None or wrap_radius <= 0.0:
+        return local_y
+    radius = float(wrap_radius)
+    limited_x = np.clip(local_x, -0.96 * radius, 0.96 * radius)
+    sagitta = radius - np.sqrt(np.maximum(radius * radius - limited_x * limited_x, 0.0))
+    # Hierarchy surface frames point local +Y inward. Moving the text centre by
+    # the cylinder sagitta keeps every glyph embedded by the same local depth
+    # instead of leaving the edge letters floating off a tangent plane.
+    return local_y - sagitta
+
+
+def _text_field(feature, text: str, x, y, z, *, wrap_radius: float | None = None):
     half_sizes = feature.half_sizes
     if half_sizes is None:
         return _ORIGINAL_FIELD(feature, x, y, z)
 
-    # FeatureProgramCompiler already resolves the requested surface placement
-    # into feature.center. Stroke geometry must therefore be evaluated in that
-    # feature-local frame. The previous bridge evaluated x/y/z as global
-    # coordinates, causing every word to be generated around the vessel origin
-    # even when its semantic anchor was on the front wall. That could leave the
-    # text floating inside/outside the vessel and made smooth union fail under
-    # every recovery profile.
     center = feature.center or (0.0, 0.0, 0.0)
     local_x = x - float(center[0])
     local_y = y - float(center[1])
     local_z = z - float(center[2])
+    local_y = _wrapped_depth_coordinate(local_x, local_y, wrap_radius)
 
     total_width = 2.0 * float(half_sizes[0])
     total_height = 2.0 * float(half_sizes[2])
@@ -222,16 +243,29 @@ def _text_field(feature, text: str, x, y, z):
 def _feature_field(feature, x, y, z):
     text = _TEXT_TEMPLATES.get(feature.id)
     if text:
-        return _text_field(feature, text, x, y, z)
+        return _text_field(
+            feature,
+            text,
+            x,
+            y,
+            z,
+            wrap_radius=_TEXT_WRAP_RADIUS.get(feature.id),
+        )
     return _ORIGINAL_FIELD(feature, x, y, z)
 
 
 class RepairedStructuralPipeline(DoboStructuralPipeline):
     def generate_from_semantic(self, program, **kwargs):
         _TEXT_TEMPLATES.clear()
+        _TEXT_WRAP_RADIUS.clear()
+        profile = GeneralBodyFamilyExpander.requested_profile(program)
         for feature in program.features:
-            if feature.form_hint == "text":
-                _TEXT_TEMPLATES[f"{feature.id}_template"] = _literal_from_concept(feature.concept)
+            if feature.form_hint != "text":
+                continue
+            template_id = f"{feature.id}_template"
+            _TEXT_TEMPLATES[template_id] = _literal_from_concept(feature.concept)
+            if profile in {"cylindrical", "tapered_revolution"}:
+                _TEXT_WRAP_RADIUS[template_id] = 0.49 * float(program.body.width_mm)
         return super().generate_from_semantic(program, **kwargs)
 
 
@@ -239,5 +273,6 @@ def install() -> type[DoboStructuralPipeline]:
     GeneralBodyFamilyExpander._fields_for = classmethod(_neutral_fields_for)
     GeneralBodyFamilyExpander.requested_profile = classmethod(_requested_profile)
     OrganicVesselParser.parse_dict = _safe_parse
+    SemanticToMotorCompiler._compile_feature = classmethod(_compile_feature_with_text)
     FeatureProgramVesselEngine._feature_field = staticmethod(_feature_field)
     return RepairedStructuralPipeline
