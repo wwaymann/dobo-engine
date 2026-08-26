@@ -1,0 +1,35 @@
+name: DOBO Capability Lab Repairs
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - 'tools/dobo_capability_repairs.py'
+      - 'tools/dobo_capability_repairs_check.py'
+      - 'tools/dobo_capability_lab_live.py'
+      - '.github/workflows/consolidation-capability-lab-repairs.yml'
+  workflow_dispatch:
+
+jobs:
+  capability-lab-repairs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install geometry stack
+        run: python -m pip install cadquery numpy scipy trimesh scikit-image shapely Pillow
+      - name: Validate neutral primitives, vessel resolution and text geometry
+        env:
+          PYTHONPATH: app:tools
+        run: python tools/dobo_capability_repairs_check.py
+      - name: Upload repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-capability-lab-repair-evidence
+          path: outputs-ci/capability-repairs/**
+          if-no-files-found: warn
+          retention-days: 30
