@@ -144,26 +144,50 @@ class OrganicShapeEngine:
         field: np.ndarray,
     ) -> trimesh.Trimesh:
         voxel = specification.grid.voxel_mm
-        vertices, faces, normals, _ = marching_cubes(
-            field,
-            level=0.0,
-            spacing=(voxel, voxel, voxel),
-            gradient_direction="ascent",
-            allow_degenerate=False,
-            method="lewiner",
-        )
-        vertices += np.asarray(specification.grid.minimum, dtype=np.float64)
-        mesh = trimesh.Trimesh(
-            vertices=vertices,
-            faces=faces,
-            vertex_normals=normals,
-            process=True,
-            validate=True,
-        )
-        mesh = OrganicShapeEngine._remove_numerical_islands(mesh, voxel)
-        mesh.remove_unreferenced_vertices()
-        if not mesh.is_winding_consistent or mesh.volume < 0.0:
-            mesh.fix_normals(multibody=True)
+
+        def extract_once(*, allow_degenerate: bool) -> trimesh.Trimesh:
+            vertices, faces, normals, _ = marching_cubes(
+                field,
+                level=0.0,
+                spacing=(voxel, voxel, voxel),
+                gradient_direction="ascent",
+                allow_degenerate=allow_degenerate,
+                method="lewiner",
+            )
+            vertices += np.asarray(specification.grid.minimum, dtype=np.float64)
+            candidate = trimesh.Trimesh(
+                vertices=vertices,
+                faces=faces,
+                vertex_normals=normals,
+                process=True,
+                validate=True,
+            )
+            candidate = OrganicShapeEngine._remove_numerical_islands(candidate, voxel)
+            candidate.remove_unreferenced_vertices()
+            if not candidate.is_winding_consistent or candidate.volume < 0.0:
+                candidate.fix_normals(multibody=True)
+            return candidate
+
+        # Preferred path preserves the historical extraction behaviour.
+        mesh = extract_once(allow_degenerate=False)
+        if mesh.is_watertight:
+            return mesh
+
+        # Some scikit-image/numpy combinations can drop zero-area triangles at
+        # perfectly symmetric grid intersections, leaving a numerical crack in
+        # an otherwise closed implicit surface. Re-extract with those triangles
+        # preserved, then let Trimesh merge/validate them as a topology-aware
+        # cleanup. This fallback only runs after the normal extractor produced
+        # a non-watertight mesh; it does not bypass boundary or component checks.
+        fallback = extract_once(allow_degenerate=True)
+        if not fallback.is_watertight:
+            trimesh.repair.fill_holes(fallback)
+            fallback.remove_unreferenced_vertices()
+            fallback.process(validate=True)
+            if not fallback.is_winding_consistent or fallback.volume < 0.0:
+                fallback.fix_normals(multibody=True)
+        if fallback.is_watertight:
+            return fallback
         return mesh
 
     @staticmethod
