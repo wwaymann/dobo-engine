@@ -20,34 +20,59 @@ from product_generators.organic_shapes.vessel_specification import OrganicVessel
 Pipeline = install()
 
 def program(profile: str, *, text: bool = False):
-    family, tag, opening = {
-        "cuboid": ("organic", "cuboid", "polygonal"),
-        "cylindrical": ("cylindrical", "cylindrical", "circular"),
-        "ovoid": ("organic", "ovoid", "elliptical"),
-        "triangular_prism": ("hexagonal", "triangular_prism", "polygonal"),
-        "spherical": ("spherical", "spherical", "circular"),
+    family, tag, opening, dims = {
+        "cuboid": ("organic", "cuboid", "polygonal", (110.0, 110.0, 110.0)),
+        "rectangular_prism": ("organic", "rectangular_prism", "polygonal", (105.0, 145.0, 95.0)),
+        "cylindrical": ("cylindrical", "cylindrical", "circular", (115.0, 110.0, 110.0)),
+        "tapered_revolution": ("tapered", "tapered_revolution", "circular", (120.0, 120.0, 120.0)),
+        "ovoid": ("organic", "ovoid", "elliptical", (125.0, 112.0, 106.0)),
+        "triangular_prism": ("hexagonal", "triangular_prism", "polygonal", (112.0, 120.0, 120.0)),
+        "spherical": ("spherical", "spherical", "circular", (112.0, 122.0, 122.0)),
     }[profile]
+    height, width, depth = dims
     features = []
     if text:
         features.append(_feature("front_text", "text_dobo", "text", "raised", region="front", horizontal=0.0, vertical=0.52, width=0.38, height=0.16, depth=1.8))
     return _program(
         f"repair_{profile}_{'text' if text else 'plain'}",
         f"Maceta {profile}" + (" con texto DOBO" if text else ""),
-        family=family, height=110.0, width=110.0, depth=110.0,
+        family=family, height=height, width=width, depth=depth,
         opening_shape=opening, opening_width=0.58, opening_depth=0.58,
         style_tags=[tag], features=features, relations=[],
     )
 
 def check_neutral_profiles():
     report = {}
-    for profile in ("cuboid", "cylindrical", "ovoid", "triangular_prism", "spherical"):
+    for profile in ("cuboid", "rectangular_prism", "cylindrical", "tapered_revolution", "ovoid", "triangular_prism", "spherical"):
         p = program(profile)
         resolved = GeneralBodyFamilyExpander.requested_profile(p)
         fields, _ = GeneralBodyFamilyExpander._fields_for(resolved, p)
         centers = [round(float(field["center"][2]), 6) for field in fields]
-        if len(set(centers)) != 1:
+        if profile != "tapered_revolution" and len(set(centers)) != 1:
             raise RuntimeError(f"{profile} still contains unsolicited axial sections: {centers}")
         report[profile] = {"profile": resolved, "axial_centers": centers}
+    return report
+
+def check_primitive_geometry():
+    out = ROOT / "outputs-ci" / "capability-repairs" / "primitives"
+    report = {}
+    for profile in ("cuboid", "rectangular_prism", "cylindrical", "tapered_revolution", "spherical", "ovoid", "triangular_prism"):
+        print(f"GENERATING_PRIMITIVE={profile}", flush=True)
+        result = Pipeline().generate_from_semantic(program(profile), output_root=out / profile)
+        result.validate()
+        mesh = result.mesh_result
+        if not mesh.watertight or not mesh.winding_consistent or mesh.component_count != 1:
+            raise RuntimeError(
+                f"Primitive {profile} topology invalid: watertight={mesh.watertight}, winding={mesh.winding_consistent}, components={mesh.component_count}"
+            )
+        report[profile] = {
+            "watertight": mesh.watertight,
+            "winding_consistent": mesh.winding_consistent,
+            "components": mesh.component_count,
+            "vertices": mesh.vertex_count,
+            "faces": mesh.face_count,
+            "stl": result.stl_path,
+        }
     return report
 
 def check_voxel_repair():
@@ -90,6 +115,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     report = {
         "neutral_profiles": check_neutral_profiles(),
+        "primitive_geometry": check_primitive_geometry(),
         "voxel_repair": check_voxel_repair(),
         "text_geometry": check_text_geometry(),
     }
