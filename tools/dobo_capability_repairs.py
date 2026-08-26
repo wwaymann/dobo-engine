@@ -28,6 +28,7 @@ from product_generators.organic_shapes.vessel_specification import OrganicVessel
 
 _TEXT_TEMPLATES: dict[str, str] = {}
 _TEXT_WRAP_RADIUS: dict[str, float] = {}
+_TEXT_GENERATION_BUDGET_SECONDS = 120.0
 _ORIGINAL_FIELD = FeatureProgramVesselEngine._feature_field
 _ORIGINAL_FIELDS_FOR = GeneralBodyFamilyExpander._fields_for
 _ORIGINAL_REQUESTED_PROFILE = GeneralBodyFamilyExpander.requested_profile
@@ -142,39 +143,29 @@ def _safe_parse(self, data: dict[str, Any]):
 def _compile_feature_with_text(cls, feature, **kwargs):
     template, transform = _ORIGINAL_COMPILE_FEATURE(cls, feature, **kwargs)
     if feature.form_hint == "text":
-        # Keep the actual literal visible in the Motor JSON. The geometric
-        # primitive remains parser-compatible while the live engine evaluates
-        # it as stroke text instead of as an anonymous rounded box.
         template["semantic_kind"] = "text_stroke"
         template["text_literal"] = _literal_from_concept(feature.concept)
     return template, transform
 
 
-# A compact stroke font. Coordinates are normalized in a character cell.
 _SEG = {
-    "a": ((-0.38, 0.50), (0.38, 0.50)),
-    "b": ((0.38, 0.50), (0.38, 0.00)),
-    "c": ((0.38, 0.00), (0.38, -0.50)),
-    "d": ((-0.38, -0.50), (0.38, -0.50)),
-    "e": ((-0.38, 0.00), (-0.38, -0.50)),
-    "f": ((-0.38, 0.50), (-0.38, 0.00)),
-    "g": ((-0.38, 0.00), (0.38, 0.00)),
-    "h": ((-0.38, 0.50), (0.00, 0.00)),
-    "i": ((0.38, 0.50), (0.00, 0.00)),
-    "j": ((-0.38, -0.50), (0.00, 0.00)),
-    "k": ((0.38, -0.50), (0.00, 0.00)),
-    "l": ((0.00, 0.50), (0.00, 0.00)),
+    "a": ((-0.38, 0.50), (0.38, 0.50)), "b": ((0.38, 0.50), (0.38, 0.00)),
+    "c": ((0.38, 0.00), (0.38, -0.50)), "d": ((-0.38, -0.50), (0.38, -0.50)),
+    "e": ((-0.38, 0.00), (-0.38, -0.50)), "f": ((-0.38, 0.50), (-0.38, 0.00)),
+    "g": ((-0.38, 0.00), (0.38, 0.00)), "h": ((-0.38, 0.50), (0.00, 0.00)),
+    "i": ((0.38, 0.50), (0.00, 0.00)), "j": ((-0.38, -0.50), (0.00, 0.00)),
+    "k": ((0.38, -0.50), (0.00, 0.00)), "l": ((0.00, 0.50), (0.00, 0.00)),
     "m": ((0.00, 0.00), (0.00, -0.50)),
 }
 _GLYPH = {
     "A": "abcefg", "B": "abcdefg", "C": "adef", "D": "abcdef", "E": "adefg",
     "F": "aefg", "G": "acdefg", "H": "bcefg", "I": "adlm", "J": "bcde",
-    "K": "efhik", "L": "def", "M": "bcefhi", "N": "bcefhk",
-    "O": "abcdef", "P": "abefg", "Q": "abcdefk", "R": "abefgk", "S": "acdfg",
-    "T": "alm", "U": "bcdef", "V": "efjk", "W": "bcefjk", "X": "hijk",
-    "Y": "hilm", "Z": "adij", "0": "abcdef", "1": "bc", "2": "abdeg",
-    "3": "abcdg", "4": "bcfg", "5": "acdfg", "6": "acdefg", "7": "abc",
-    "8": "abcdefg", "9": "abcdfg", "-": "g",
+    "K": "efhik", "L": "def", "M": "bcefhi", "N": "bcefhk", "O": "abcdef",
+    "P": "abefg", "Q": "abcdefk", "R": "abefgk", "S": "acdfg", "T": "alm",
+    "U": "bcdef", "V": "efjk", "W": "bcefjk", "X": "hijk", "Y": "hilm",
+    "Z": "adij", "0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg",
+    "4": "bcfg", "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg",
+    "9": "abcdfg", "-": "g",
 }
 
 
@@ -198,9 +189,6 @@ def _wrapped_depth_coordinate(local_x, local_y, wrap_radius: float | None):
     radius = float(wrap_radius)
     limited_x = np.clip(local_x, -0.96 * radius, 0.96 * radius)
     sagitta = radius - np.sqrt(np.maximum(radius * radius - limited_x * limited_x, 0.0))
-    # Hierarchy surface frames point local +Y inward. Moving the text centre by
-    # the cylinder sagitta keeps every glyph embedded by the same local depth
-    # instead of leaving the edge letters floating off a tangent plane.
     return local_y - sagitta
 
 
@@ -208,13 +196,11 @@ def _text_field(feature, text: str, x, y, z, *, wrap_radius: float | None = None
     half_sizes = feature.half_sizes
     if half_sizes is None:
         return _ORIGINAL_FIELD(feature, x, y, z)
-
     center = feature.center or (0.0, 0.0, 0.0)
     local_x = x - float(center[0])
     local_y = y - float(center[1])
     local_z = z - float(center[2])
     local_y = _wrapped_depth_coordinate(local_x, local_y, wrap_radius)
-
     total_width = 2.0 * float(half_sizes[0])
     total_height = 2.0 * float(half_sizes[2])
     half_depth = float(half_sizes[1])
@@ -243,14 +229,7 @@ def _text_field(feature, text: str, x, y, z, *, wrap_radius: float | None = None
 def _feature_field(feature, x, y, z):
     text = _TEXT_TEMPLATES.get(feature.id)
     if text:
-        return _text_field(
-            feature,
-            text,
-            x,
-            y,
-            z,
-            wrap_radius=_TEXT_WRAP_RADIUS.get(feature.id),
-        )
+        return _text_field(feature, text, x, y, z, wrap_radius=_TEXT_WRAP_RADIUS.get(feature.id))
     return _ORIGINAL_FIELD(feature, x, y, z)
 
 
@@ -259,14 +238,22 @@ class RepairedStructuralPipeline(DoboStructuralPipeline):
         _TEXT_TEMPLATES.clear()
         _TEXT_WRAP_RADIUS.clear()
         profile = GeneralBodyFamilyExpander.requested_profile(program)
+        has_text = False
         for feature in program.features:
             if feature.form_hint != "text":
                 continue
+            has_text = True
             template_id = f"{feature.id}_template"
             _TEXT_TEMPLATES[template_id] = _literal_from_concept(feature.concept)
             if profile in {"cylindrical", "tapered_revolution"}:
                 _TEXT_WRAP_RADIUS[template_id] = 0.49 * float(program.body.width_mm)
-        return super().generate_from_semantic(program, **kwargs)
+        result = super().generate_from_semantic(program, **kwargs)
+        if has_text:
+            # Diagnostic budget only for the semantic-text route. This separates
+            # geometric correctness from performance without relaxing the rest
+            # of the structural pipeline.
+            object.__setattr__(result.mesh_result, "max_generation_seconds", _TEXT_GENERATION_BUDGET_SECONDS)
+        return result
 
 
 def install() -> type[DoboStructuralPipeline]:
