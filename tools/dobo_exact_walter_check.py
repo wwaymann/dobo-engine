@@ -34,7 +34,11 @@ SEMANTIC = {
 def main() -> None:
     program = SemanticProgramParser().parse_dict(SEMANTIC)
     out = ROOT / "outputs-ci" / "exact-walter"
-    result = Pipeline().generate_from_semantic(program, output_root=out)
+    result = Pipeline().generate_from_semantic(
+        program,
+        output_root=out,
+        generation_budget_seconds=120.0,
+    )
     result.validate()
     motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
     templates = motor["hierarchy_program"]["templates"]
