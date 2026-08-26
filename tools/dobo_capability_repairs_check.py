@@ -19,7 +19,7 @@ from product_generators.organic_shapes.vessel_specification import OrganicVessel
 
 Pipeline = install()
 
-def program(profile: str, *, text: bool = False):
+def program(profile: str, *, text_literal: str | None = None):
     family, tag, opening, dims = {
         "cuboid": ("organic", "cuboid", "polygonal", (110.0, 110.0, 110.0)),
         "rectangular_prism": ("organic", "rectangular_prism", "polygonal", (105.0, 145.0, 95.0)),
@@ -31,11 +31,11 @@ def program(profile: str, *, text: bool = False):
     }[profile]
     height, width, depth = dims
     features = []
-    if text:
-        features.append(_feature("front_text", "text_dobo", "text", "raised", region="front", horizontal=0.0, vertical=0.52, width=0.38, height=0.16, depth=1.8))
+    if text_literal:
+        features.append(_feature("front_text", f"text_{text_literal.lower()}", "text", "raised", region="front", horizontal=0.0, vertical=0.52, width=0.38, height=0.16, depth=1.8))
     return _program(
-        f"repair_{profile}_{'text' if text else 'plain'}",
-        f"Maceta {profile}" + (" con texto DOBO" if text else ""),
+        f"repair_{profile}_{text_literal.lower() if text_literal else 'plain'}",
+        f"Maceta {profile}" + (f" con texto {text_literal}" if text_literal else ""),
         family=family, height=height, width=width, depth=depth,
         opening_shape=opening, opening_width=0.58, opening_depth=0.58,
         style_tags=[tag], features=features, relations=[],
@@ -87,28 +87,37 @@ def check_voxel_repair():
     return {"before_voxel_mm": before, "after_voxel_mm": after, "wall_mm": parsed.vessel.wall_mm}
 
 def check_text_geometry():
-    out = ROOT / "outputs-ci" / "capability-repairs"
-    result = Pipeline().generate_from_semantic(program("cylindrical", text=True), output_root=out)
-    result.validate()
-    semantic = json.loads(Path(result.semantic_path).read_text(encoding="utf-8"))
-    motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
-    feature = next(item for item in semantic["features"] if item["form_hint"] == "text")
-    if feature["concept"] != "text_dobo":
-        raise RuntimeError("Text literal was not preserved semantically.")
-    if not result.mesh_result.watertight or not result.mesh_result.winding_consistent:
-        raise RuntimeError("Text planter is not physically valid.")
-    if not Path(result.stl_path).is_file() or Path(result.stl_path).stat().st_size <= 0:
-        raise RuntimeError("Text planter STL was not generated.")
-    return {
-        "text_concept": feature["concept"],
-        "profile": result.trace.body_profile,
-        "morphology": motor.get("morphogenesis", {}).get("profile"),
-        "watertight": result.mesh_result.watertight,
-        "winding_consistent": result.mesh_result.winding_consistent,
-        "vertices": result.mesh_result.vertex_count,
-        "stl": result.stl_path,
-        "three_mf": result.three_mf_path,
-    }
+    out = ROOT / "outputs-ci" / "capability-repairs" / "text"
+    report = {}
+    for literal in ("DOBO", "WALTER"):
+        print(f"GENERATING_TEXT={literal}", flush=True)
+        result = Pipeline().generate_from_semantic(program("cylindrical", text_literal=literal), output_root=out / literal.lower())
+        result.validate()
+        semantic = json.loads(Path(result.semantic_path).read_text(encoding="utf-8"))
+        motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
+        feature = next(item for item in semantic["features"] if item["form_hint"] == "text")
+        expected = f"text_{literal.lower()}"
+        if feature["concept"] != expected:
+            raise RuntimeError(f"Text literal was not preserved semantically: {feature['concept']} != {expected}")
+        mesh = result.mesh_result
+        if not mesh.watertight or not mesh.winding_consistent or mesh.component_count != 1:
+            raise RuntimeError(
+                f"Text {literal} topology invalid: watertight={mesh.watertight}, winding={mesh.winding_consistent}, components={mesh.component_count}"
+            )
+        if not Path(result.stl_path).is_file() or Path(result.stl_path).stat().st_size <= 0:
+            raise RuntimeError(f"Text planter STL was not generated for {literal}.")
+        report[literal] = {
+            "text_concept": feature["concept"],
+            "profile": result.trace.body_profile,
+            "morphology": motor.get("morphogenesis", {}).get("profile"),
+            "watertight": mesh.watertight,
+            "winding_consistent": mesh.winding_consistent,
+            "components": mesh.component_count,
+            "vertices": mesh.vertex_count,
+            "stl": result.stl_path,
+            "three_mf": result.three_mf_path,
+        }
+    return report
 
 def main():
     out = ROOT / "outputs-ci" / "capability-repairs"
