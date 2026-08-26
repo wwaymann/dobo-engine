@@ -181,6 +181,19 @@ def _text_field(feature, text: str, x, y, z):
     half_sizes = feature.half_sizes
     if half_sizes is None:
         return _ORIGINAL_FIELD(feature, x, y, z)
+
+    # FeatureProgramCompiler already resolves the requested surface placement
+    # into feature.center. Stroke geometry must therefore be evaluated in that
+    # feature-local frame. The previous bridge evaluated x/y/z as global
+    # coordinates, causing every word to be generated around the vessel origin
+    # even when its semantic anchor was on the front wall. That could leave the
+    # text floating inside/outside the vessel and made smooth union fail under
+    # every recovery profile.
+    center = feature.center or (0.0, 0.0, 0.0)
+    local_x = x - float(center[0])
+    local_y = y - float(center[1])
+    local_z = z - float(center[2])
+
     total_width = 2.0 * float(half_sizes[0])
     total_height = 2.0 * float(half_sizes[2])
     half_depth = float(half_sizes[1])
@@ -197,7 +210,7 @@ def _text_field(feature, text: str, x, y, z):
         for name in segments:
             (sx1, sz1), (sx2, sz2) = _SEG[name]
             distance = _segment_prism(
-                x, y, z,
+                local_x, local_y, local_z,
                 center_x + sx1 * cell_width, sz1 * total_height,
                 center_x + sx2 * cell_width, sz2 * total_height,
                 stroke, half_depth,
