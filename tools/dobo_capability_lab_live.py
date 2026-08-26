@@ -11,10 +11,12 @@ import unicodedata
 
 import dobo_capability_lab as lab
 from dobo_capability_repairs import install
+from dobo_retry_repairs import install_retry_repairs
 
 
 # Install the repairs before the first generation request and make the base lab
 # construct the repaired structural pipeline.
+install_retry_repairs()
 lab.DoboStructuralPipeline = install()
 
 
