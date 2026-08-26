@@ -8,6 +8,13 @@ on:
       - 'tools/dobo_capability_repairs_check.py'
       - 'tools/dobo_capability_lab_live.py'
       - '.github/workflows/consolidation-capability-lab-repairs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/dobo_capability_repairs.py'
+      - 'tools/dobo_capability_repairs_check.py'
+      - 'tools/dobo_capability_lab_live.py'
+      - '.github/workflows/consolidation-capability-lab-repairs.yml'
   workflow_dispatch:
 
 jobs:
