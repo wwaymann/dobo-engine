@@ -6,6 +6,7 @@ on:
     paths:
       - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
+      - 'tools/dobo_retry_repairs.py'
       - 'tools/dobo_capability_repairs_check.py'
       - 'tools/dobo_capability_lab_live.py'
       - '.github/workflows/consolidation-capability-lab-repairs.yml'
@@ -14,6 +15,7 @@ on:
     paths:
       - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
+      - 'tools/dobo_retry_repairs.py'
       - 'tools/dobo_capability_repairs_check.py'
       - 'tools/dobo_capability_lab_live.py'
       - '.github/workflows/consolidation-capability-lab-repairs.yml'
@@ -30,10 +32,16 @@ jobs:
           python-version: '3.11'
       - name: Install geometry stack
         run: python -m pip install cadquery numpy scipy trimesh scikit-image shapely Pillow
-      - name: Validate neutral primitives, vessel resolution and text geometry
+      - name: Validate live-lab recovery path end to end
         env:
           PYTHONPATH: app:tools
-        run: python tools/dobo_capability_repairs_check.py
+        run: |
+          python - <<'PY'
+          from dobo_retry_repairs import install_retry_repairs
+          install_retry_repairs()
+          import runpy
+          runpy.run_path('tools/dobo_capability_repairs_check.py', run_name='__main__')
+          PY
       - name: Upload repair evidence
         if: always()
         uses: actions/upload-artifact@v4
