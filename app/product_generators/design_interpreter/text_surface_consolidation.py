@@ -19,7 +19,7 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
 
 
-TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.1-multiline-surface-quality"
+TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.2-multiline-surface-quality"
 _INSTALLED = False
 
 # Do not capture GeneralBodyFamilyExpander.apply here. This module is imported
@@ -79,6 +79,27 @@ def _remove_plumbing_helpers(motor_program, program) -> None:
     ]
 
 
+def _minimum_safe_text_blend(hierarchy: dict) -> float:
+    manufacturability = hierarchy.get("feature_manufacturability")
+    proportional = hierarchy.get("proportional_scaling")
+    minimum_blend = 0.4
+    minimum_scale = 1.0
+    if isinstance(manufacturability, dict):
+        minimum_blend = max(
+            1e-6,
+            float(manufacturability.get("minimum_blend_mm", minimum_blend)),
+        )
+    if isinstance(proportional, dict):
+        minimum_scale = max(
+            1e-6,
+            float(proportional.get("minimum_scale", minimum_scale)),
+        )
+    # Manufacturability validates blend after the placement scale is applied.
+    # Keep the smallest legal pre-scale blend to preserve glyph corners while
+    # guaranteeing minimum_blend after the worst allowed proportional scaling.
+    return 1.01 * minimum_blend / minimum_scale
+
+
 def _apply_consolidated(cls, motor_program, program):
     # Always extend the promoted C0R text contract directly. Calling a captured
     # pre-install apply here regresses text back to the generic rounded_box.
@@ -117,11 +138,13 @@ def _apply_consolidated(cls, motor_program, program):
             refinement["detail_subdivision_passes"] = max(
                 2, int(refinement.get("detail_subdivision_passes", 0))
             )
-        # Large smooth-union radii soften and destroy glyph corners. Text needs
-        # contact with the wall, not a plaque-like morphological flare.
+        safe_text_blend = _minimum_safe_text_blend(hierarchy)
+        # Large smooth-union radii soften and destroy glyph corners. Use exactly
+        # the smallest blend that still satisfies the existing manufacturability
+        # contract after the worst proportional placement scale.
         for template in hierarchy.get("templates", []):
             if isinstance(template, dict) and str(template.get("id")) in _core._TEXT_TEMPLATES:
-                template["blend_mm"] = min(float(template.get("blend_mm", 0.35)), 0.35)
+                template["blend_mm"] = safe_text_blend
 
     _remove_plumbing_helpers(motor_program, program)
     return result
