@@ -1,5 +1,7 @@
 """Semantic design interpretation contracts for the DOBO platform."""
 
+from importlib.util import find_spec as _find_spec
+
 from .semantic_contract import (
     Ambiguity,
     Assumption,
@@ -47,14 +49,36 @@ from .design_pipeline import (
     DesignPipelineTrace,
     DoboDesignPipeline,
 )
-from .core_capability_reconnection import (
-    CORE_CAPABILITY_RECONNECTION_VERSION,
-    install_core_capability_reconnection,
+
+# Keep lightweight semantic imports lightweight. The promoted reconnection uses
+# the full geometry stack and is activated automatically only when those
+# dependencies are present. This preserves the dependency contracts of the
+# semantic/body-family boundary tests while keeping one canonical runtime path.
+_CORE_GEOMETRY_DEPENDENCIES = (
+    "numpy",
+    "scipy",
+    "trimesh",
+    "skimage",
+    "shapely",
+    "cadquery",
+)
+_CORE_GEOMETRY_READY = all(
+    _find_spec(module_name) is not None
+    for module_name in _CORE_GEOMETRY_DEPENDENCIES
 )
 
-# Promote the behaviours already proven by the Capability Lab into the
-# canonical reusable classes before StructuralPipeline imports them.
-install_core_capability_reconnection()
+if _CORE_GEOMETRY_READY:
+    from .core_capability_reconnection import (
+        CORE_CAPABILITY_RECONNECTION_VERSION,
+        install_core_capability_reconnection,
+    )
+
+    install_core_capability_reconnection()
+else:
+    CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.1-deferred"
+
+    def install_core_capability_reconnection() -> str:
+        return CORE_CAPABILITY_RECONNECTION_VERSION
 
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 from .structural_vocabulary import (
