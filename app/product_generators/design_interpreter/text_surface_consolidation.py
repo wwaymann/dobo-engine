@@ -19,10 +19,13 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
 
 
-TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6-multiline-surface-quality"
+TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.1-multiline-surface-quality"
 _INSTALLED = False
 
-_PREVIOUS_APPLY = GeneralBodyFamilyExpander.apply.__func__
+# Do not capture GeneralBodyFamilyExpander.apply here. This module is imported
+# before install_core_capability_reconnection() runs from package __init__, so a
+# module-level snapshot would point at the pre-C0R implementation and silently
+# bypass real glyph reconnection, restoring the old rounded-box plaque.
 _PREVIOUS_PLACED_FIELD = HierarchicalFeatureVesselEngine._placed_field.__func__
 
 
@@ -77,7 +80,9 @@ def _remove_plumbing_helpers(motor_program, program) -> None:
 
 
 def _apply_consolidated(cls, motor_program, program):
-    result = _PREVIOUS_APPLY(cls, motor_program, program)
+    # Always extend the promoted C0R text contract directly. Calling a captured
+    # pre-install apply here regresses text back to the generic rounded_box.
+    result = _core._apply_with_text_contract(cls, motor_program, program)
     text_features = tuple(feature for feature in program.features if feature.form_hint == "text")
     if not text_features:
         return result
