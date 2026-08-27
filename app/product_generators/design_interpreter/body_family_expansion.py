@@ -7,7 +7,7 @@ from typing import Any
 from .semantic_contract import DesignSemanticProgram
 
 
-BODY_FAMILY_EXPANSION_VERSION = "B28.5"
+BODY_FAMILY_EXPANSION_VERSION = "B28.6"
 
 
 def _normalized(value: str) -> str:
@@ -65,6 +65,18 @@ class GeneralBodyFamilyExpander:
             "round_mm": round_mm,
         }
 
+    @staticmethod
+    def _cylinder(field_id: str, center: list[float], *, radius: float, half_height: float) -> dict[str, Any]:
+        return {
+            "id": field_id,
+            "kind": "capped_cylinder",
+            "center": center,
+            "radii": [radius, radius, half_height],
+            "exponent": 2.0,
+            "sides": 6,
+            "round_mm": min(0.6, 0.25 * radius, 0.25 * half_height),
+        }
+
     @classmethod
     def _fields_for(cls, profile: str, program: DesignSemanticProgram) -> tuple[list[dict[str, Any]], float]:
         width = float(program.body.width_mm)
@@ -73,12 +85,12 @@ class GeneralBodyFamilyExpander:
         minimum = min(width, depth, height)
 
         if profile == "cylindrical":
+            radius = 0.49 * min(width, depth)
             fields = [
-                cls._superellipsoid("body", [0.0, 0.0, -0.27 * height], [0.48 * width, 0.48 * depth, 0.26 * height], exponent=4.8, round_mm=max(0.8, minimum * 0.012)),
-                cls._superellipsoid("cylindrical_mid", [0.0, 0.0, 0.0], [0.49 * width, 0.49 * depth, 0.27 * height], exponent=5.2, round_mm=max(0.8, minimum * 0.012)),
-                cls._superellipsoid("cylindrical_upper", [0.0, 0.0, 0.27 * height], [0.48 * width, 0.48 * depth, 0.26 * height], exponent=4.8, round_mm=max(0.8, minimum * 0.012)),
+                cls._cylinder("body", [0.0, 0.0, 0.0], radius=radius, half_height=0.47 * height),
+                cls._cylinder("cylindrical_support", [0.0, 0.0, 0.0], radius=0.985 * radius, half_height=0.985 * 0.47 * height),
             ]
-            return fields, max(2.0, minimum * 0.022)
+            return fields, max(0.8, minimum * 0.010)
 
         if profile == "tapered_revolution":
             fields: list[dict[str, Any]] = []
@@ -87,9 +99,6 @@ class GeneralBodyFamilyExpander:
             return fields, max(2.4, minimum * 0.030)
 
         if profile == "cuboid":
-            # Keep the cube visibly square while giving adjacent axial fields
-            # enough overlap for the implicit shell to remain one closed
-            # surface after cavity and drain subtraction.
             fields = [
                 cls._superellipsoid("body", [0.0, 0.0, -0.25 * height], [0.49 * width, 0.49 * depth, 0.29 * height], exponent=7.0, round_mm=max(1.0, minimum * 0.015)),
                 cls._superellipsoid("cuboid_mid", [0.0, 0.0, 0.0], [0.49 * width, 0.49 * depth, 0.29 * height], exponent=7.5, round_mm=max(1.0, minimum * 0.015)),
@@ -98,9 +107,6 @@ class GeneralBodyFamilyExpander:
             return fields, max(2.4, minimum * 0.028)
 
         if profile == "rectangular_prism":
-            # The elongated rectangular shell needs the same axial continuity
-            # margin as the cube. Extra Z overlap prevents a marching-cubes seam
-            # after the cavity/opening subtraction while preserving X/Y aspect.
             fields = [
                 cls._superellipsoid("body", [0.0, 0.0, -0.25 * height], [0.48 * width, 0.47 * depth, 0.29 * height], exponent=7.2, round_mm=max(1.0, minimum * 0.015)),
                 cls._superellipsoid("rectangular_mid", [0.0, 0.0, 0.0], [0.49 * width, 0.48 * depth, 0.29 * height], exponent=7.8, round_mm=max(1.0, minimum * 0.015)),
