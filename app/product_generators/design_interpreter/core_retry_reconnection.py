@@ -12,9 +12,10 @@ from copy import deepcopy
 from typing import Any
 
 from .design_pipeline import DoboDesignPipeline
+from .text_surface_consolidation import install_text_surface_consolidation
 
 
-CORE_RETRY_RECONNECTION_VERSION = "3F.R1"
+CORE_RETRY_RECONNECTION_VERSION = "3F.R2-text-surface"
 _INSTALLED = False
 _ORIGINAL_PROFILES = DoboDesignPipeline._mesh_quality_profiles
 
@@ -144,5 +145,6 @@ def install_core_retry_reconnection() -> str:
     if _INSTALLED:
         return CORE_RETRY_RECONNECTION_VERSION
     DoboDesignPipeline._mesh_quality_profiles = staticmethod(_profiles)
+    install_text_surface_consolidation()
     _INSTALLED = True
     return CORE_RETRY_RECONNECTION_VERSION
