@@ -6,6 +6,7 @@ on:
     paths:
       - 'app/product_generators/design_interpreter/__init__.py'
       - 'app/product_generators/design_interpreter/core_capability_reconnection.py'
+      - 'app/product_generators/design_interpreter/core_retry_reconnection.py'
       - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_retry_repairs.py'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'app/product_generators/design_interpreter/__init__.py'
       - 'app/product_generators/design_interpreter/core_capability_reconnection.py'
+      - 'app/product_generators/design_interpreter/core_retry_reconnection.py'
       - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_retry_repairs.py'

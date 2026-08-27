@@ -72,13 +72,22 @@ if _CORE_GEOMETRY_READY:
         CORE_CAPABILITY_RECONNECTION_VERSION,
         install_core_capability_reconnection,
     )
+    from .core_retry_reconnection import (
+        CORE_RETRY_RECONNECTION_VERSION,
+        install_core_retry_reconnection,
+    )
 
     install_core_capability_reconnection()
+    install_core_retry_reconnection()
 else:
     CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.1-deferred"
+    CORE_RETRY_RECONNECTION_VERSION = "3F.R1-deferred"
 
     def install_core_capability_reconnection() -> str:
         return CORE_CAPABILITY_RECONNECTION_VERSION
+
+    def install_core_retry_reconnection() -> str:
+        return CORE_RETRY_RECONNECTION_VERSION
 
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 from .structural_vocabulary import (
@@ -204,6 +213,8 @@ __all__ = (
     "DoboDesignPipeline",
     "CORE_CAPABILITY_RECONNECTION_VERSION",
     "install_core_capability_reconnection",
+    "CORE_RETRY_RECONNECTION_VERSION",
+    "install_core_retry_reconnection",
     "ThreeMFExportResult",
     "ThreeMFMeshExporter",
     "StructuralAnchor",
