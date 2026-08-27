@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-"""Final text/surface consolidation layer for the promoted DOBO core.
+"""Canonical text/surface consolidation for the promoted DOBO core.
 
-This module deliberately extends the existing C0R reconnection instead of
-introducing a second text engine. It preserves the cached real-glyph SDF path,
-adds explicit N-line layout, increases final spatial fidelity for text-bearing
-parts, and removes semantic plumbing features already owned by the vessel
-(opening/cavity/drain) so they cannot survive as visible helper geometry.
+Keep real glyph SDF text and explicit multiline layout, but never improve text
+by globally shrinking the vessel voxel grid. Detail refinement is localized to
+feature surfaces. Opening, cavity and drain remain owned by the vessel contract,
+so semantic helper solids for those concepts are removed from the hierarchy.
 """
 
 import re
@@ -19,13 +18,8 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
 
 
-TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.3.1-multiline-fidelity-vessel-safe"
+TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.4-local-text-refinement-vessel-topology"
 _INSTALLED = False
-
-# Do not capture GeneralBodyFamilyExpander.apply here. This module is imported
-# before install_core_capability_reconnection() runs from package __init__, so a
-# module-level snapshot would point at the pre-C0R implementation and silently
-# bypass real glyph reconnection, restoring the old rounded-box plaque.
 _PREVIOUS_PLACED_FIELD = HierarchicalFeatureVesselEngine._placed_field.__func__
 
 
@@ -35,13 +29,10 @@ def _plain(value: str) -> str:
 
 
 def _prompt_lines(prompt: str | None) -> tuple[str, ...]:
-    """Extract explicit N-line text without depending on model feature splitting."""
     if not prompt:
         return ()
     raw = str(prompt)
 
-    # Accept a quoted text block containing either real newlines or the literal
-    # two-character sequence ``\\n`` used by the Capability Lab prompt box.
     for match in re.finditer(r'[\"“”]([^\"“”]+)[\"“”]', raw, flags=re.DOTALL):
         payload = match.group(1)
         if "\\n" in payload or "\n" in payload:
@@ -50,8 +41,6 @@ def _prompt_lines(prompt: str | None) -> tuple[str, ...]:
             if len(lines) >= 2:
                 return tuple(line.upper() for line in lines)
 
-    # Explicit assignments are the strongest contract:
-    # línea 1 = "PLANTA"; línea 2 = "UNA"; línea 3 = "IDEA".
     assignment = re.compile(
         r"(?:linea|línea)\s*(\d+)\s*(?:=|:)\s*[\"'“”]?\s*(.*?)\s*[\"'“”]?\s*"
         r"(?=(?:;|,)?\s*(?:linea|línea)\s*\d+\s*(?:=|:)|(?:[.;]\s*)?$)",
@@ -72,10 +61,12 @@ def _prompt_lines(prompt: str | None) -> tuple[str, ...]:
 def _plumbing_name(value: object) -> bool:
     normalized = _plain(str(value)).replace("-", "_").replace(" ", "_")
     tokens = set(filter(None, normalized.split("_")))
-    return bool(tokens & {
-        "drain", "drainage", "drenaje", "drenajeinferior",
-        "opening", "abertura", "boca", "cavity", "cavidad", "hueco", "hollow",
-    })
+    plumbing = {
+        "drain", "drainage", "drenaje", "drenajeinferior", "agujero",
+        "opening", "abertura", "boca", "apertura",
+        "cavity", "cavidad", "hueco", "hollow", "interior",
+    }
+    return bool(tokens & plumbing)
 
 
 def _plumbing_feature(feature) -> bool:
@@ -87,13 +78,30 @@ def _plumbing_feature(feature) -> bool:
 
 
 def _remove_plumbing_helpers(motor_program, program) -> None:
-    """Remove helper geometry for vessel-owned opening/cavity/drain semantics."""
     hierarchy = motor_program.get("hierarchy_program")
     if not isinstance(hierarchy, dict):
         return
 
-    remove_ids = {str(feature.id) for feature in program.features if _plumbing_feature(feature)}
+    remove_ids = {
+        str(feature.id) for feature in program.features if _plumbing_feature(feature)
+    }
     remove_templates = {f"{feature_id}_template" for feature_id in remove_ids}
+
+    # Also inspect the compiled template semantics. This catches model-generated
+    # helper IDs whose names are generic even though their semantic role is
+    # opening/cavity/drain.
+    for template in hierarchy.get("templates", []):
+        if not isinstance(template, dict):
+            continue
+        template_id = str(template.get("id", ""))
+        semantic_values = (
+            template.get("semantic_kind", ""),
+            template.get("concept", ""),
+            template.get("role", ""),
+            template.get("purpose", ""),
+        )
+        if _plumbing_name(template_id) or any(_plumbing_name(v) for v in semantic_values):
+            remove_templates.add(template_id)
 
     def helper_node(node: dict) -> bool:
         node_id = str(node.get("id", ""))
@@ -129,16 +137,11 @@ def _remove_plumbing_helpers(motor_program, program) -> None:
         if kept is not None:
             cleaned_roots.append(kept)
     hierarchy["roots"] = cleaned_roots
-
     hierarchy["templates"] = [
         template
         for template in hierarchy.get("templates", [])
         if not isinstance(template, dict)
-        or (
-            str(template.get("id", "")) not in remove_templates
-            and not _plumbing_name(template.get("id", ""))
-            and not _plumbing_name(template.get("semantic_kind", ""))
-        )
+        or str(template.get("id", "")) not in remove_templates
     ]
 
 
@@ -157,11 +160,10 @@ def _minimum_safe_text_blend(hierarchy: dict) -> float:
             1e-6,
             float(proportional.get("minimum_scale", minimum_scale)),
         )
-    # Manufacturability validates blend after the placement scale is applied.
     return 1.01 * minimum_blend / minimum_scale
 
 
-def _remove_extra_text_features(hierarchy: dict, keep_feature_id: str, extra_ids: set[str]) -> None:
+def _remove_extra_text_features(hierarchy: dict, extra_ids: set[str]) -> None:
     if not extra_ids:
         return
     extra_templates = {f"{feature_id}_template" for feature_id in extra_ids}
@@ -172,22 +174,26 @@ def _remove_extra_text_features(hierarchy: dict, keep_feature_id: str, extra_ids
         if node_id in extra_ids or bool(template_ids & extra_templates):
             return None
         cleaned = dict(node)
-        cleaned["children"] = [
-            kept
-            for child in node.get("children", [])
-            if isinstance(child, dict)
-            for kept in (prune(child),)
-            if kept is not None
-        ]
+        children = []
+        for child in node.get("children", []):
+            if not isinstance(child, dict):
+                children.append(child)
+                continue
+            kept = prune(child)
+            if kept is not None:
+                children.append(kept)
+        cleaned["children"] = children
         return cleaned
 
-    hierarchy["roots"] = [
-        kept
-        for root in hierarchy.get("roots", [])
-        if isinstance(root, dict)
-        for kept in (prune(root),)
-        if kept is not None
-    ]
+    cleaned_roots = []
+    for root in hierarchy.get("roots", []):
+        if not isinstance(root, dict):
+            cleaned_roots.append(root)
+            continue
+        kept = prune(root)
+        if kept is not None:
+            cleaned_roots.append(kept)
+    hierarchy["roots"] = cleaned_roots
     hierarchy["templates"] = [
         template
         for template in hierarchy.get("templates", [])
@@ -199,11 +205,32 @@ def _remove_extra_text_features(hierarchy: dict, keep_feature_id: str, extra_ids
         _core._TEXT_WRAP_RADIUS.pop(template_id, None)
 
 
+def _configure_local_text_refinement(hierarchy: dict) -> None:
+    refinement = hierarchy.get("adaptive_refinement")
+    if not isinstance(refinement, dict):
+        return
+
+    # Keep the base vessel lattice unchanged. The hierarchy engine already has
+    # a feature-weighted subdivision path; use its maximum legal two passes and
+    # tighten the influence band around feature surfaces only.
+    refinement["detail_subdivision_passes"] = 2
+    surface_band = max(0.35, float(refinement.get("surface_band_mm", 0.5)))
+    refinement["surface_band_mm"] = surface_band
+    refinement["maximum_band_mm"] = max(
+        surface_band,
+        min(float(refinement.get("maximum_band_mm", 4.0)), 3.0),
+    )
+    refinement["size_band_ratio"] = min(
+        max(float(refinement.get("size_band_ratio", 0.12)), 0.08),
+        0.18,
+    )
+
+
 def _apply_consolidated(cls, motor_program, program):
-    # Always extend the promoted C0R text contract directly. Calling a captured
-    # pre-install apply here regresses text back to the generic rounded_box.
     result = _core._apply_with_text_contract(cls, motor_program, program)
-    text_features = tuple(feature for feature in program.features if feature.form_hint == "text")
+    text_features = tuple(
+        feature for feature in program.features if feature.form_hint == "text"
+    )
     if not text_features:
         return result
 
@@ -212,13 +239,10 @@ def _apply_consolidated(cls, motor_program, program):
     hierarchy = motor_program.get("hierarchy_program", {})
 
     if lines:
-        # Explicit multiline syntax is one text block, even when the semantic
-        # model independently emitted several text features. Keep the first
-        # anchor and suppress the redundant model-generated text nodes.
         text_feature = text_features[0]
         extra_ids = {str(feature.id) for feature in text_features[1:]}
         if isinstance(hierarchy, dict):
-            _remove_extra_text_features(hierarchy, str(text_feature.id), extra_ids)
+            _remove_extra_text_features(hierarchy, extra_ids)
 
         template_id = f"{text_feature.id}_template"
         literal = "\n".join(lines)
@@ -231,23 +255,19 @@ def _apply_consolidated(cls, motor_program, program):
                     template["text_lines"] = list(lines)
                     template["semantic_kind"] = "text_glyph_contour_multiline"
 
-    # The glyph SDF remains cached and fast. Visible faceting is dominated by
-    # the final 3D lattice, so improve that lattice rather than reintroducing the
-    # six-minute per-triangle glyph path. 0.45 mm is intentionally conservative:
-    # noticeably finer than C0R.6.2 while still using the cached field route.
-    grid = motor_program.get("grid")
-    if isinstance(grid, dict):
-        grid["voxel_mm"] = min(float(grid.get("voxel_mm", 1.0)), 0.45)
     if isinstance(hierarchy, dict):
-        refinement = hierarchy.get("adaptive_refinement")
-        if isinstance(refinement, dict):
-            # Contract permits only 1..2. Use the maximum legal value.
-            refinement["detail_subdivision_passes"] = 2
+        _configure_local_text_refinement(hierarchy)
         safe_text_blend = _minimum_safe_text_blend(hierarchy)
         for template in hierarchy.get("templates", []):
-            if isinstance(template, dict) and str(template.get("id")) in _core._TEXT_TEMPLATES:
+            if not isinstance(template, dict):
+                continue
+            template_id = str(template.get("id", ""))
+            if template_id in _core._TEXT_TEMPLATES:
                 template["blend_mm"] = safe_text_blend
 
+    # Important: do not set grid.voxel_mm here. Global voxel reduction was the
+    # source of the ~765k-vertex / ~38s regression while glyph edges still looked
+    # faceted. Text detail is now handled by localized adaptive subdivision.
     _remove_plumbing_helpers(motor_program, program)
     return result
 
@@ -278,7 +298,9 @@ def _multiline_font_field(feature, text: str, u, depth_coordinate, v):
             np.asarray(u) / scale,
             (np.asarray(v) - center_v) / scale,
         ) * scale
-        fields.append(_core._extruded_2d_distance(planar, depth_coordinate, half_depth))
+        fields.append(
+            _core._extruded_2d_distance(planar, depth_coordinate, half_depth)
+        )
 
     result = fields[0]
     for field in fields[1:]:
@@ -304,9 +326,6 @@ def _placed_field_consolidated(cls, placement, x, y, z):
     outward = -inward_column / scale_n
     vertical = vertical_column / scale_v
 
-    # Develop the actual cylindrical receiving surface into arc length. Depth is
-    # radial distance from that same surface, so every glyph sample follows the
-    # local cylindrical normal instead of a guessed planar normal.
     center_x = float(origin[0] - outward[0] * radius)
     center_y = float(origin[1] - outward[1] * radius)
     dx = x - center_x
@@ -321,10 +340,18 @@ def _placed_field_consolidated(cls, placement, x, y, z):
     world_dx = x - float(origin[0])
     world_dy = y - float(origin[1])
     world_dz = z - float(origin[2])
-    v = (world_dx * vertical[0] + world_dy * vertical[1] + world_dz * vertical[2]) / scale_v
+    v = (
+        world_dx * vertical[0]
+        + world_dy * vertical[1]
+        + world_dz * vertical[2]
+    ) / scale_v
 
     return _multiline_font_field(
-        placement.feature, text, u, depth_coordinate, v
+        placement.feature,
+        text,
+        u,
+        depth_coordinate,
+        v,
     ) * placement.distance_scale
 
 
@@ -333,6 +360,8 @@ def install_text_surface_consolidation() -> str:
     if _INSTALLED:
         return TEXT_SURFACE_CONSOLIDATION_VERSION
     GeneralBodyFamilyExpander.apply = classmethod(_apply_consolidated)
-    HierarchicalFeatureVesselEngine._placed_field = classmethod(_placed_field_consolidated)
+    HierarchicalFeatureVesselEngine._placed_field = classmethod(
+        _placed_field_consolidated
+    )
     _INSTALLED = True
     return TEXT_SURFACE_CONSOLIDATION_VERSION
