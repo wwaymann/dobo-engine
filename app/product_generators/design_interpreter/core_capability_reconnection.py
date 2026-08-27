@@ -3,16 +3,19 @@ from __future__ import annotations
 """Canonical reconnection of semantic text into the DOBO structural engine.
 
 Text geometry is evaluated against the resolved receiving surface instead of a
-guessed local curvature, and glyphs reuse CadQuery text contours rather than a
-coarse segment-display alphabet.
+guessed local curvature. Real CadQuery glyph contours are converted once into a
+cached 2D signed-distance field, so the structural voxel field can evaluate text
+without repeating expensive per-triangle geometry work at every sample point.
 """
 
 from copy import deepcopy
 from functools import lru_cache
+import math
 import unicodedata
 
 import cadquery as cq
 import numpy as np
+from scipy.ndimage import distance_transform_edt
 
 from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
@@ -25,7 +28,7 @@ from product_generators.organic_shapes.hierarchy_engine import (
 )
 
 
-CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.4-resolved-surface-glyphs"
+CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.5-resolved-surface-glyph-sdf"
 _TEXT_GENERATION_BUDGET_SECONDS = 120.0
 _TEXT_TEMPLATES: dict[str, str] = {}
 _TEXT_WRAP_RADIUS: dict[str, float] = {}
@@ -156,7 +159,9 @@ def _apply_with_text_contract(cls, motor_program, program):
                 )
 
     hierarchy = motor_program.get("hierarchy_program", {})
-    template_items = hierarchy.get("templates", []) if isinstance(hierarchy, dict) else []
+    template_items = (
+        hierarchy.get("templates", []) if isinstance(hierarchy, dict) else []
+    )
     templates = {
         str(item.get("id")): item
         for item in template_items
@@ -179,6 +184,9 @@ def _apply_with_text_contract(cls, motor_program, program):
         if isinstance(hierarchy, dict):
             node = _find_node(hierarchy.get("roots", []), feature.id)
             if node is not None:
+                # Text must contribute exactly its real glyph geometry. Generic
+                # connector/flare helper templates are not allowed to survive
+                # as visible plaques around the opening or side wall.
                 node["template_ids"] = [template_id]
 
     return result
@@ -222,8 +230,11 @@ def _glyph_triangles(text: str):
 
     triangle_rows: list[tuple[tuple[float, float], ...]] = []
     points: list[tuple[float, float]] = []
+    # The contour itself remains real OCC typography. Tessellation only feeds a
+    # one-time 2D SDF cache, so this can stay reasonably fine without exploding
+    # the 3D field evaluation cost.
     for face in _bottom_faces(shape):
-        vertices, triangles = face.tessellate(0.035, 0.08)
+        vertices, triangles = face.tessellate(0.045, 0.10)
         for triangle in triangles:
             row = tuple(
                 (float(vertices[int(index)].x), float(vertices[int(index)].y))
@@ -247,30 +258,97 @@ def _glyph_triangles(text: str):
     return triangles_array, float(size[0]), float(size[1])
 
 
-def _segment_distance_2d(px, pz, ax, az, bx, bz):
-    dx = bx - ax
-    dz = bz - az
-    denominator = max(dx * dx + dz * dz, 1e-12)
-    t = np.clip(((px - ax) * dx + (pz - az) * dz) / denominator, 0.0, 1.0)
-    qx = ax + t * dx
-    qz = az + t * dz
-    return np.sqrt((px - qx) ** 2 + (pz - qz) ** 2)
-
-
-def _triangle_distance_2d(px, pz, triangle):
+def _triangle_mask(xx, zz, triangle):
     (ax, az), (bx, bz), (cx, cz) = triangle
-    d0 = _segment_distance_2d(px, pz, ax, az, bx, bz)
-    d1 = _segment_distance_2d(px, pz, bx, bz, cx, cz)
-    d2 = _segment_distance_2d(px, pz, cx, cz, ax, az)
-    distance = np.minimum(d0, np.minimum(d1, d2))
-
-    c0 = (bx - ax) * (pz - az) - (bz - az) * (px - ax)
-    c1 = (cx - bx) * (pz - bz) - (cz - bz) * (px - bx)
-    c2 = (ax - cx) * (pz - cz) - (az - cz) * (px - cx)
-    inside = ((c0 >= 0.0) & (c1 >= 0.0) & (c2 >= 0.0)) | (
+    c0 = (bx - ax) * (zz - az) - (bz - az) * (xx - ax)
+    c1 = (cx - bx) * (zz - bz) - (cz - bz) * (xx - bx)
+    c2 = (ax - cx) * (zz - cz) - (az - cz) * (xx - cx)
+    return ((c0 >= 0.0) & (c1 >= 0.0) & (c2 >= 0.0)) | (
         (c0 <= 0.0) & (c1 <= 0.0) & (c2 <= 0.0)
     )
-    return np.where(inside, -distance, distance)
+
+
+@lru_cache(maxsize=64)
+def _glyph_sdf(text: str):
+    triangles, natural_width, natural_height = _glyph_triangles(text or "TEXT")
+
+    # 256 pixels through the glyph height is enough to preserve curved letter
+    # contours well beyond the final vessel voxel resolution. Width follows the
+    # real text aspect ratio and is capped only to avoid pathological strings.
+    height_px = 256
+    width_px = int(
+        np.clip(
+            math.ceil(height_px * natural_width / natural_height),
+            128,
+            2048,
+        )
+    )
+    margin = 0.08 * max(natural_width, natural_height)
+    x_min = -0.5 * natural_width - margin
+    x_max = 0.5 * natural_width + margin
+    z_min = -0.5 * natural_height - margin
+    z_max = 0.5 * natural_height + margin
+    xs = np.linspace(x_min, x_max, width_px, dtype=np.float64)
+    zs = np.linspace(z_min, z_max, height_px, dtype=np.float64)
+    occupancy = np.zeros((height_px, width_px), dtype=bool)
+
+    dx = (x_max - x_min) / max(width_px - 1, 1)
+    dz = (z_max - z_min) / max(height_px - 1, 1)
+
+    for triangle in triangles:
+        tx_min = float(np.min(triangle[:, 0]))
+        tx_max = float(np.max(triangle[:, 0]))
+        tz_min = float(np.min(triangle[:, 1]))
+        tz_max = float(np.max(triangle[:, 1]))
+        ix0 = max(0, int(math.floor((tx_min - x_min) / dx)) - 1)
+        ix1 = min(width_px, int(math.ceil((tx_max - x_min) / dx)) + 2)
+        iz0 = max(0, int(math.floor((tz_min - z_min) / dz)) - 1)
+        iz1 = min(height_px, int(math.ceil((tz_max - z_min) / dz)) + 2)
+        if ix0 >= ix1 or iz0 >= iz1:
+            continue
+        xx, zz = np.meshgrid(xs[ix0:ix1], zs[iz0:iz1])
+        occupancy[iz0:iz1, ix0:ix1] |= _triangle_mask(xx, zz, triangle)
+
+    if not np.any(occupancy):
+        raise RuntimeError("Text contour rasterization produced an empty mask.")
+
+    outside = distance_transform_edt(~occupancy, sampling=(dz, dx))
+    inside = distance_transform_edt(occupancy, sampling=(dz, dx))
+    sdf = outside - inside
+    return sdf.astype(np.float32), x_min, x_max, z_min, z_max, natural_width, natural_height
+
+
+def _sample_glyph_sdf(text: str, x, z):
+    sdf, x_min, x_max, z_min, z_max, _, _ = _glyph_sdf(text or "TEXT")
+    height_px, width_px = sdf.shape
+
+    x_array = np.asarray(x, dtype=np.float64)
+    z_array = np.asarray(z, dtype=np.float64)
+    fx = (x_array - x_min) * (width_px - 1) / (x_max - x_min)
+    fz = (z_array - z_min) * (height_px - 1) / (z_max - z_min)
+
+    clipped_x = np.clip(fx, 0.0, width_px - 1.0)
+    clipped_z = np.clip(fz, 0.0, height_px - 1.0)
+    x0 = np.floor(clipped_x).astype(np.int64)
+    z0 = np.floor(clipped_z).astype(np.int64)
+    x1 = np.minimum(x0 + 1, width_px - 1)
+    z1 = np.minimum(z0 + 1, height_px - 1)
+    wx = clipped_x - x0
+    wz = clipped_z - z0
+
+    sampled = (
+        (1.0 - wx) * (1.0 - wz) * sdf[z0, x0]
+        + wx * (1.0 - wz) * sdf[z0, x1]
+        + (1.0 - wx) * wz * sdf[z1, x0]
+        + wx * wz * sdf[z1, x1]
+    )
+
+    # Outside the cached rectangle, extend the SDF with the Euclidean distance
+    # to the rectangle instead of clamping to a false near-surface value.
+    outside_x = np.maximum(np.maximum(x_min - x_array, x_array - x_max), 0.0)
+    outside_z = np.maximum(np.maximum(z_min - z_array, z_array - z_max), 0.0)
+    outside_distance = np.sqrt(outside_x * outside_x + outside_z * outside_z)
+    return sampled + outside_distance
 
 
 def _extruded_2d_distance(planar_distance, depth_coordinate, half_depth):
@@ -291,17 +369,12 @@ def _font_text_field(feature, text: str, u, depth_coordinate, v):
     total_width = 2.0 * float(half_sizes[0])
     total_height = 2.0 * float(half_sizes[2])
     half_depth = float(half_sizes[1])
-    triangles, natural_width, natural_height = _glyph_triangles(text or "TEXT")
+    _, _, _, _, _, natural_width, natural_height = _glyph_sdf(text or "TEXT")
     scale = min(total_width / natural_width, total_height / natural_height)
-    scaled = triangles * scale
-
-    planar = None
-    for triangle in scaled:
-        distance = _triangle_distance_2d(u, v, triangle)
-        planar = distance if planar is None else np.minimum(planar, distance)
-
-    if planar is None:
+    if scale <= 0.0:
         return _ORIGINAL_FIELD(feature, u, depth_coordinate, v)
+
+    planar = _sample_glyph_sdf(text or "TEXT", np.asarray(u) / scale, np.asarray(v) / scale) * scale
     return _extruded_2d_distance(planar, depth_coordinate, half_depth)
 
 
