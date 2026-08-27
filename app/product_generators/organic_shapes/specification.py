@@ -52,6 +52,7 @@ ADVANCED_FIELD_KINDS = frozenset(
     {
         "superellipsoid",
         "faceted_ellipsoid",
+        "capped_cylinder",
         "leaf",
         "pointed",
         "lobed_ellipsoid",
