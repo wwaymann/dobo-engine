@@ -61,12 +61,9 @@ def _neutral_fields_for(cls, profile: str, program):
     round_mm = max(0.8, minimum * 0.012)
 
     if profile == "cylindrical":
-        field = cls._faceted(
-            "body", [0.0, 0.0, 0.0],
-            [0.49 * width, 0.49 * depth, 0.47 * height],
-            sides=64, exponent=8.0, round_mm=round_mm,
-        )
-        return _paired(field, "cylindrical_support"), max(1.0, minimum * 0.012)
+        # Cylinders are now a native implicit core field. Do not approximate
+        # them with a faceted envelope in the lab.
+        return _ORIGINAL_FIELDS_FOR(profile, program)
 
     if profile in {"cuboid", "rectangular_prism"}:
         field = cls._superellipsoid(
