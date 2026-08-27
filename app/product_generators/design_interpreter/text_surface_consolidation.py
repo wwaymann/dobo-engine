@@ -19,7 +19,7 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
 
 
-TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.3-multiline-fidelity-vessel-safe"
+TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.3.1-multiline-fidelity-vessel-safe"
 _INSTALLED = False
 
 # Do not capture GeneralBodyFamilyExpander.apply here. This module is imported
@@ -241,9 +241,8 @@ def _apply_consolidated(cls, motor_program, program):
     if isinstance(hierarchy, dict):
         refinement = hierarchy.get("adaptive_refinement")
         if isinstance(refinement, dict):
-            refinement["detail_subdivision_passes"] = max(
-                3, int(refinement.get("detail_subdivision_passes", 0))
-            )
+            # Contract permits only 1..2. Use the maximum legal value.
+            refinement["detail_subdivision_passes"] = 2
         safe_text_blend = _minimum_safe_text_blend(hierarchy)
         for template in hierarchy.get("templates", []):
             if isinstance(template, dict) and str(template.get("id")) in _core._TEXT_TEMPLATES:
