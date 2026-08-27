@@ -6,14 +6,13 @@ This module deliberately limits itself to defects exposed by the live lab:
 - neutral primitive envelopes (no unsolicited axial bands),
 - safe vessel voxel resolution,
 - physical stroke text for semantic text features,
-- curvature-aware wrapping so wide raised text remains attached to vessels.
+- curvature-aware wrapping so raised text follows curved vessels.
 
 The bridge is installed only by ``dobo_capability_lab_live.py`` so every repaired
 behaviour remains directly observable before it is promoted deeper into the core.
 """
 
 from copy import deepcopy
-from math import sqrt
 from typing import Any
 import unicodedata
 
@@ -65,7 +64,7 @@ def _neutral_fields_for(cls, profile: str, program):
         field = cls._faceted(
             "body", [0.0, 0.0, 0.0],
             [0.49 * width, 0.49 * depth, 0.47 * height],
-            sides=16, exponent=8.0, round_mm=round_mm,
+            sides=64, exponent=8.0, round_mm=round_mm,
         )
         return _paired(field, "cylindrical_support"), max(1.0, minimum * 0.012)
 
@@ -183,13 +182,16 @@ def _segment_prism(x, y, z, x1, z1, x2, z2, radius, half_depth):
     return outside + inside
 
 
-def _wrapped_depth_coordinate(local_x, local_y, wrap_radius: float | None):
+def _cylindrical_text_coordinates(local_x, local_y, wrap_radius: float | None):
     if wrap_radius is None or wrap_radius <= 0.0:
-        return local_y
+        return local_x, local_y
     radius = float(wrap_radius)
-    limited_x = np.clip(local_x, -0.96 * radius, 0.96 * radius)
-    sagitta = radius - np.sqrt(np.maximum(radius * radius - limited_x * limited_x, 0.0))
-    return local_y - sagitta
+    centre_y = radius - local_y
+    angle = np.arctan2(local_x, centre_y)
+    arc_x = radius * angle
+    radial_distance = np.sqrt(local_x * local_x + centre_y * centre_y)
+    depth = radius - radial_distance
+    return arc_x, depth
 
 
 def _text_field(feature, text: str, x, y, z, *, wrap_radius: float | None = None):
@@ -200,7 +202,7 @@ def _text_field(feature, text: str, x, y, z, *, wrap_radius: float | None = None
     local_x = x - float(center[0])
     local_y = y - float(center[1])
     local_z = z - float(center[2])
-    local_y = _wrapped_depth_coordinate(local_x, local_y, wrap_radius)
+    local_x, local_y = _cylindrical_text_coordinates(local_x, local_y, wrap_radius)
     total_width = 2.0 * float(half_sizes[0])
     total_height = 2.0 * float(half_sizes[2])
     half_depth = float(half_sizes[1])
@@ -249,9 +251,6 @@ class RepairedStructuralPipeline(DoboStructuralPipeline):
                 _TEXT_WRAP_RADIUS[template_id] = 0.49 * float(program.body.width_mm)
         result = super().generate_from_semantic(program, **kwargs)
         if has_text:
-            # Diagnostic budget only for the semantic-text route. This separates
-            # geometric correctness from performance without relaxing the rest
-            # of the structural pipeline.
             object.__setattr__(result.mesh_result, "max_generation_seconds", _TEXT_GENERATION_BUDGET_SECONDS)
         return result
 
