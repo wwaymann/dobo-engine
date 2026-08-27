@@ -47,6 +47,15 @@ from .design_pipeline import (
     DesignPipelineTrace,
     DoboDesignPipeline,
 )
+from .core_capability_reconnection import (
+    CORE_CAPABILITY_RECONNECTION_VERSION,
+    install_core_capability_reconnection,
+)
+
+# Promote the behaviours already proven by the Capability Lab into the
+# canonical reusable classes before StructuralPipeline imports them.
+install_core_capability_reconnection()
+
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 from .structural_vocabulary import (
     StructuralAnchor,
@@ -169,6 +178,8 @@ __all__ = (
     "DesignPipelineResult",
     "DesignPipelineTrace",
     "DoboDesignPipeline",
+    "CORE_CAPABILITY_RECONNECTION_VERSION",
+    "install_core_capability_reconnection",
     "ThreeMFExportResult",
     "ThreeMFMeshExporter",
     "StructuralAnchor",
