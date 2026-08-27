@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-"""Promote proven Capability Lab repairs into the canonical DOBO core path.
+"""Promote the proven curved-text repair into the canonical DOBO path.
 
-This module does not create a second pipeline.  It installs the behaviours that
-were already exercised by ``tools/dobo_capability_repairs.py`` onto the reusable
-classes consumed by ``DoboStructuralPipeline``:
-
-- neutral primitive envelopes,
-- safe vessel voxel resolution,
-- physical stroke text instead of a rounded-box plate,
-- curvature-aware text wrapping for cylindrical/tapered vessels,
-- a generation budget appropriate for physical text extraction.
-
-The goal is transitional consolidation: the standard pipeline gets the proven
-behaviour directly, while the laboratory patch remains only as historical
-regression evidence.
+This module intentionally touches only the capability being consolidated:
+semantic text -> physical glyph strokes -> curvature-aware placement -> one
+printable body.  Body-family geometry, vessel parsing and morphology remain on
+the pre-existing canonical implementations so a text consolidation cannot
+silently redefine unrelated capabilities.
 """
 
 from copy import deepcopy
@@ -29,12 +21,9 @@ from .semantic_compiler import SemanticToMotorCompiler
 from product_generators.organic_shapes.feature_program_engine import (
     FeatureProgramVesselEngine,
 )
-from product_generators.organic_shapes.vessel_specification import (
-    OrganicVesselParser,
-)
 
 
-CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.1"
+CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.2-text-only"
 _TEXT_GENERATION_BUDGET_SECONDS = 120.0
 _TEXT_TEMPLATES: dict[str, str] = {}
 _TEXT_WRAP_RADIUS: dict[str, float] = {}
@@ -42,10 +31,7 @@ _TEXT_MIN_STROKE: dict[str, float] = {}
 _INSTALLED = False
 
 _ORIGINAL_FIELD = FeatureProgramVesselEngine._feature_field
-_ORIGINAL_FIELDS_FOR = GeneralBodyFamilyExpander._fields_for
-_ORIGINAL_REQUESTED_PROFILE = GeneralBodyFamilyExpander.requested_profile
 _ORIGINAL_APPLY = GeneralBodyFamilyExpander.apply.__func__
-_ORIGINAL_PARSE = OrganicVesselParser.parse_dict
 _ORIGINAL_COMPILE_FEATURE = SemanticToMotorCompiler._compile_feature.__func__
 _ORIGINAL_GENERATE_WITH_RETRY = DoboDesignPipeline._generate_with_retry.__func__
 
@@ -74,124 +60,6 @@ def _literal_from_concept(concept: str) -> str:
     return " ".join(literal or tokens).upper()[:24]
 
 
-def _paired(field: dict[str, Any], second_id: str) -> list[dict[str, Any]]:
-    other = deepcopy(field)
-    other["id"] = second_id
-    return [field, other]
-
-
-def _neutral_fields_for(cls, profile: str, program):
-    width = float(program.body.width_mm)
-    depth = float(program.body.depth_mm)
-    height = float(program.body.height_mm)
-    minimum = min(width, depth, height)
-    round_mm = max(0.8, minimum * 0.012)
-
-    if profile == "cylindrical":
-        # Keep the native cylindrical field from the canonical family expander.
-        return _ORIGINAL_FIELDS_FOR(profile, program)
-
-    if profile in {"cuboid", "rectangular_prism"}:
-        field = cls._superellipsoid(
-            "body",
-            [0.0, 0.0, 0.0],
-            [0.49 * width, 0.49 * depth, 0.47 * height],
-            exponent=8.0,
-            round_mm=max(1.0, minimum * 0.014),
-        )
-        return _paired(field, f"{profile}_support"), max(
-            1.0, minimum * 0.012
-        )
-
-    if profile == "triangular_prism":
-        field = cls._faceted(
-            "body",
-            [0.0, 0.0, 0.0],
-            [0.49 * width, 0.49 * depth, 0.47 * height],
-            sides=3,
-            exponent=8.0,
-            round_mm=round_mm,
-            rotation_degrees=30.0,
-        )
-        return _paired(field, "triangular_support"), max(
-            0.9, minimum * 0.010
-        )
-
-    if profile in {"ovoid", "spherical"}:
-        exponent = 2.0 if profile == "spherical" else 2.15
-        radii = (
-            [0.49 * width, 0.49 * depth, 0.47 * height]
-            if profile == "spherical"
-            else [0.46 * width, 0.44 * depth, 0.49 * height]
-        )
-        field = cls._superellipsoid(
-            "body",
-            [0.0, 0.0, 0.0],
-            radii,
-            exponent=exponent,
-            round_mm=max(1.0, minimum * 0.014),
-        )
-        return _paired(field, f"{profile}_support"), max(
-            1.0, minimum * 0.012
-        )
-
-    if profile == "tapered_revolution":
-        fields: list[dict[str, Any]] = []
-        sections = (
-            (-0.36, 0.34),
-            (-0.24, 0.36),
-            (-0.12, 0.38),
-            (0.00, 0.405),
-            (0.12, 0.43),
-            (0.24, 0.455),
-            (0.36, 0.48),
-        )
-        for index, (z_ratio, radius_ratio) in enumerate(sections):
-            fields.append(
-                cls._superellipsoid(
-                    "body" if index == 0 else f"tapered_section_{index}",
-                    [0.0, 0.0, z_ratio * height],
-                    [
-                        radius_ratio * width,
-                        radius_ratio * depth,
-                        0.17 * height,
-                    ],
-                    exponent=3.0,
-                    round_mm=round_mm,
-                )
-            )
-        return fields, max(2.2, minimum * 0.025)
-
-    return _ORIGINAL_FIELDS_FOR(profile, program)
-
-
-def _requested_profile(cls, program):
-    family = _plain(program.body.family).replace("-", "_").replace(" ", "_")
-    tags = {
-        _plain(tag).replace("-", "_").replace(" ", "_")
-        for tag in program.body.style_tags
-    }
-    if family == "spherical" or "spherical" in tags or "sphere" in tags:
-        return "spherical"
-    return _ORIGINAL_REQUESTED_PROFILE(program)
-
-
-def _safe_parse(self, data: dict[str, Any]):
-    repaired = deepcopy(data)
-    grid = repaired.get("grid")
-    vessel = repaired.get("vessel")
-    if isinstance(grid, dict) and isinstance(vessel, dict):
-        voxel = float(grid.get("voxel_mm", 1.0))
-        wall = float(vessel.get("wall_mm", 0.0))
-        bottom = float(vessel.get("cavity_floor_z_mm", 0.0)) - float(
-            vessel.get("base_z_mm", 0.0)
-        )
-        spans = [value for value in (wall, bottom) if value > 0.0]
-        if spans:
-            grid["voxel_mm"] = min(voxel, min(spans) / 3.05)
-    return _ORIGINAL_PARSE(self, repaired)
-
-
 def _compile_feature_with_text(cls, feature, **kwargs):
     template, transform = _ORIGINAL_COMPILE_FEATURE(cls, feature, **kwargs)
     if feature.form_hint != "text":
@@ -201,14 +69,16 @@ def _compile_feature_with_text(cls, feature, **kwargs):
     template["semantic_kind"] = "text_stroke"
     template["text_literal"] = literal
 
-    # The old generic fallback represented text as a rounded box.  Keep that
-    # template envelope only as the placement/bounding contract; the field
-    # evaluator below replaces the box with physical glyph strokes.
+    # The generic compiler still provides the placement envelope.  Geometry is
+    # replaced below by physical strokes, so the rounded box never reaches the
+    # final mesh as a plaque.
     if template.get("kind") == "rounded_box" and template.get("half_sizes"):
         half_sizes = [float(value) for value in template["half_sizes"]]
         minimum_feature = float(kwargs.get("minimum_feature_mm", 0.0))
         minimum_relief = float(kwargs.get("minimum_relief_depth_mm", 0.0))
-        maximum_relief = float(kwargs.get("maximum_relief_depth_mm", half_sizes[1]))
+        maximum_relief = float(
+            kwargs.get("maximum_relief_depth_mm", half_sizes[1])
+        )
         safe_half_depth = max(
             half_sizes[1],
             0.65 * minimum_feature,
@@ -225,6 +95,8 @@ def _apply_with_text_contract(cls, motor_program, program):
     _TEXT_WRAP_RADIUS.clear()
     _TEXT_MIN_STROKE.clear()
 
+    # Preserve the canonical body-family expansion exactly as it was before
+    # this reconnection.
     result = _ORIGINAL_APPLY(cls, motor_program, program)
     profile = cls.requested_profile(program)
     wrap_radius = (
@@ -369,7 +241,9 @@ def _text_field(
     local_y = y - float(center[1])
     local_z = z - float(center[2])
     local_x, local_y = _cylindrical_text_coordinates(
-        local_x, local_y, wrap_radius
+        local_x,
+        local_y,
+        wrap_radius,
     )
     total_width = 2.0 * float(half_sizes[0])
     total_height = 2.0 * float(half_sizes[2])
@@ -401,11 +275,7 @@ def _text_field(
                 half_depth,
             )
             result = distance if result is None else np.minimum(result, distance)
-    return (
-        result
-        if result is not None
-        else _ORIGINAL_FIELD(feature, x, y, z)
-    )
+    return result if result is not None else _ORIGINAL_FIELD(feature, x, y, z)
 
 
 def _feature_field(feature, x, y, z):
@@ -441,15 +311,12 @@ def _generate_with_text_budget(cls, motor_program, *, parser, engine):
 
 
 def install_core_capability_reconnection() -> str:
-    """Install the proven reconnection once for the canonical engine process."""
+    """Install the text reconnection once for the canonical engine process."""
     global _INSTALLED
     if _INSTALLED:
         return CORE_CAPABILITY_RECONNECTION_VERSION
 
-    GeneralBodyFamilyExpander._fields_for = classmethod(_neutral_fields_for)
-    GeneralBodyFamilyExpander.requested_profile = classmethod(_requested_profile)
     GeneralBodyFamilyExpander.apply = classmethod(_apply_with_text_contract)
-    OrganicVesselParser.parse_dict = _safe_parse
     SemanticToMotorCompiler._compile_feature = classmethod(
         _compile_feature_with_text
     )
