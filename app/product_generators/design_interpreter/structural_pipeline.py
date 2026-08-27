@@ -14,6 +14,12 @@ from .intelligent_surfaces import (
     IntelligentSurfaceReport,
     SurfaceLayerIntent,
 )
+from .native_text_pipeline_adapter import (
+    body_program_without_text,
+    decorate_mesh_result_with_native_text,
+    strip_text_from_motor,
+    uses_native_cylindrical_text,
+)
 from .prompt_interpreter import PromptSemanticInterpreter, SemanticModelClient
 from .proposal_repair import SemanticProposalRepairer, SemanticRepairResult
 from .semantic_contract import DesignSemanticProgram
@@ -21,10 +27,11 @@ from .structural_compiler import StructuralCompilationResult, StructuralSemantic
 from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
-STRUCTURAL_PIPELINE_VERSION = "8.2"
-STRUCTURAL_FUSION_VERSION = "7C.2"
+STRUCTURAL_PIPELINE_VERSION = "8.3-native-text-routing"
+STRUCTURAL_FUSION_VERSION = "7C.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
+
 
 @dataclass(frozen=True, slots=True)
 class StructuralPipelineTrace:
@@ -52,6 +59,7 @@ class StructuralPipelineTrace:
     negative_volumes: int
     surface_layers: int
     color_zones: int
+
 
 @dataclass(frozen=True, slots=True)
 class StructuralPipelineResult:
@@ -88,29 +96,68 @@ class StructuralPipelineResult:
             raise RuntimeError("Unexpected structural fusion version.")
         if self.mesh_result.generation_seconds > self.mesh_result.max_generation_seconds:
             raise RuntimeError("Structural pipeline exceeded its generation budget.")
-        for path in (self.semantic_path, self.structural_path, self.surface_path, self.motor_path, self.repair_report_path, self.manifest_path, self.stl_path, self.three_mf_path):
+        for path in (
+            self.semantic_path,
+            self.structural_path,
+            self.surface_path,
+            self.motor_path,
+            self.repair_report_path,
+            self.manifest_path,
+            self.stl_path,
+            self.three_mf_path,
+        ):
             target = Path(path)
             if not target.is_file() or target.stat().st_size <= 0:
                 raise RuntimeError(f"Structural pipeline artifact is missing: {target}")
 
+
 class DoboStructuralPipeline:
-    def __init__(self, *, prompt_client: SemanticModelClient | None = None, image_client: ImageModelClient | None = None, repairer: SemanticProposalRepairer | None = None, engine: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        prompt_client: SemanticModelClient | None = None,
+        image_client: ImageModelClient | None = None,
+        repairer: SemanticProposalRepairer | None = None,
+        engine: Any | None = None,
+    ) -> None:
         self.prompt_client = prompt_client
         self.image_client = image_client
         self.repairer = repairer or SemanticProposalRepairer()
         self.engine = engine
 
-    def generate_from_prompt(self, prompt: str, *, output_root: str | Path) -> StructuralPipelineResult:
+    def generate_from_prompt(
+        self,
+        prompt: str,
+        *,
+        output_root: str | Path,
+    ) -> StructuralPipelineResult:
         if self.prompt_client is None:
             raise RuntimeError("Structural prompt pipeline requires a model client.")
         interpreted = PromptSemanticInterpreter(self.prompt_client).interpret(prompt)
-        return self.generate_from_semantic(interpreted.program, output_root=output_root, interpreter_version=interpreted.trace.interpreter_version, model=interpreted.trace.model, response_id=interpreted.trace.response_id)
+        return self.generate_from_semantic(
+            interpreted.program,
+            output_root=output_root,
+            interpreter_version=interpreted.trace.interpreter_version,
+            model=interpreted.trace.model,
+            response_id=interpreted.trace.response_id,
+        )
 
-    def generate_from_image(self, image_path: str | Path, *, output_root: str | Path) -> StructuralPipelineResult:
+    def generate_from_image(
+        self,
+        image_path: str | Path,
+        *,
+        output_root: str | Path,
+    ) -> StructuralPipelineResult:
         if self.image_client is None:
             raise RuntimeError("Structural image pipeline requires a vision client.")
         interpreted = ImageSemanticInterpreter(self.image_client).interpret_file(image_path)
-        return self.generate_from_semantic(interpreted.program, output_root=output_root, interpreter_version=interpreted.trace.interpreter_version, model=interpreted.trace.model, response_id=interpreted.trace.response_id)
+        return self.generate_from_semantic(
+            interpreted.program,
+            output_root=output_root,
+            interpreter_version=interpreted.trace.interpreter_version,
+            model=interpreted.trace.model,
+            response_id=interpreted.trace.response_id,
+        )
 
     def generate_from_semantic(
         self,
@@ -124,21 +171,42 @@ class DoboStructuralPipeline:
         base_color: str = "#E8E1D5",
         generation_budget_seconds: float | None = None,
     ) -> StructuralPipelineResult:
-        from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
-        from product_generators.organic_shapes.hierarchy_specification import HierarchicalFeatureParser
+        from product_generators.organic_shapes.hierarchy_engine import (
+            HierarchicalFeatureVesselEngine,
+        )
+        from product_generators.organic_shapes.hierarchy_specification import (
+            HierarchicalFeatureParser,
+        )
 
         repair = self.repairer.repair(program)
         structural = StructuralVocabularyResolver.resolve(repair.program)
         compilation = StructuralSemanticCompiler.compile(repair.program, structural)
         motor = compilation.motor_program
-        GeneralBodyFamilyExpander.apply(motor, repair.program)
+
+        # Consolidation routing rule: the semantic program remains complete, but
+        # cylindrical text is not sent through the voxel body expander. The
+        # existing native CAD text capability owns that surface operation later.
+        expansion_program = (
+            body_program_without_text(repair.program)
+            if uses_native_cylindrical_text(repair.program)
+            else repair.program
+        )
+        GeneralBodyFamilyExpander.apply(motor, expansion_program)
+        if uses_native_cylindrical_text(repair.program):
+            strip_text_from_motor(motor, repair.program)
 
         if compilation.report.complex_profile != "surface_only":
-            motor["output"]["max_generation_seconds"] = max(float(motor["output"]["max_generation_seconds"]), STRUCTURAL_GENERATION_BUDGET_SECONDS)
+            motor["output"]["max_generation_seconds"] = max(
+                float(motor["output"]["max_generation_seconds"]),
+                STRUCTURAL_GENERATION_BUDGET_SECONDS,
+            )
         elif compilation.report.adaptive_quality:
             motor["output"]["max_generation_seconds"] = ADVANCED_GENERATION_BUDGET_SECONDS
         else:
-            motor["output"]["max_generation_seconds"] = max(float(motor["output"]["max_generation_seconds"]), STRUCTURAL_GENERATION_BUDGET_SECONDS)
+            motor["output"]["max_generation_seconds"] = max(
+                float(motor["output"]["max_generation_seconds"]),
+                STRUCTURAL_GENERATION_BUDGET_SECONDS,
+            )
         if generation_budget_seconds is not None:
             requested_budget = float(generation_budget_seconds)
             if requested_budget <= 0.0:
@@ -150,24 +218,37 @@ class DoboStructuralPipeline:
         motor["output"]["directory"] = str(output_directory)
         motor["output"]["basename"] = motor_id
         output_directory.mkdir(parents=True, exist_ok=True)
-        surface_program, surface_report = IntelligentSurfaceCompiler.compile(repair.program, motor, surface_intents, base_color=base_color)
+        surface_program, surface_report = IntelligentSurfaceCompiler.compile(
+            repair.program,
+            motor,
+            surface_intents,
+            base_color=base_color,
+        )
 
         semantic_path = output_directory / f"{motor_id}.semantic.json"
         structural_path = output_directory / f"{motor_id}.structural.json"
         surface_path = output_directory / f"{motor_id}.surface.json"
         motor_path = output_directory / f"{motor_id}.motor.json"
         repair_path = output_directory / f"{motor_id}.repair.json"
-        semantic_path.write_text(json.dumps(repair.program.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        semantic_path.write_text(
+            json.dumps(repair.program.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         structural.write_json(structural_path)
         surface_program.write_json(surface_path)
-        motor_path.write_text(json.dumps(motor, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        motor_path.write_text(
+            json.dumps(motor, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         repair.write_report(repair_path)
 
         parser = HierarchicalFeatureParser()
         specification = parser.parse_dict(motor)
         anchors = HierarchicalFeatureVesselEngine.surface_anchor_checks(specification)
         layout = HierarchicalFeatureVesselEngine.layout_report(specification)
-        manufacturing = HierarchicalFeatureVesselEngine.feature_manufacturability_report(specification)
+        manufacturing = HierarchicalFeatureVesselEngine.feature_manufacturability_report(
+            specification
+        )
         if not all(anchors.values()):
             failed = [name for name, passed in anchors.items() if not passed]
             raise RuntimeError(f"Structural anchor preflight failed: {failed}")
@@ -175,26 +256,109 @@ class DoboStructuralPipeline:
         manufacturing.validate()
 
         engine = self.engine or HierarchicalFeatureVesselEngine()
-        mesh_result, selected_motor, attempts, profile = DoboDesignPipeline._generate_with_retry(motor, parser=parser, engine=engine)
-        motor_path.write_text(json.dumps(selected_motor, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        three_mf = ThreeMFMeshExporter.export(mesh_result.mesh, output_directory / f"{motor_id}.3mf", name=motor_id, surface_program=surface_program)
+        mesh_result, selected_motor, attempts, profile = DoboDesignPipeline._generate_with_retry(
+            motor,
+            parser=parser,
+            engine=engine,
+        )
+
+        # Existing capability reconnection: after the structural body is proven,
+        # decorate the same generated body with native CadQuery/OCC text before
+        # the final STL/3MF artifact is exported.
+        if uses_native_cylindrical_text(repair.program):
+            mesh_result = decorate_mesh_result_with_native_text(
+                mesh_result,
+                selected_motor,
+                repair.program,
+            )
+
+        motor_path.write_text(
+            json.dumps(selected_motor, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        three_mf = ThreeMFMeshExporter.export(
+            mesh_result.mesh,
+            output_directory / f"{motor_id}.3mf",
+            name=motor_id,
+            surface_program=surface_program,
+        )
         trace = StructuralPipelineTrace(
-            pipeline_version=STRUCTURAL_PIPELINE_VERSION, fusion_version=STRUCTURAL_FUSION_VERSION,
-            source_kind=repair.program.source.kind, interpreter_version=interpreter_version, model=model, response_id=response_id,
-            semantic_program_id=repair.program.id, motor_program_id=motor_id, body_profile=compilation.report.body_profile,
-            style_profile=compilation.report.style_profile, grammar_signature=compilation.report.grammar_signature,
-            silhouette_features=compilation.report.silhouette_features, compound_children=compilation.report.compound_children,
-            repair_actions=len(repair.report.actions), generation_attempts=attempts, mesh_quality_profile=profile,
-            vertex_count=mesh_result.vertex_count, face_count=mesh_result.face_count, generation_seconds=mesh_result.generation_seconds,
-            complex_profile=compilation.report.complex_profile, hierarchy_depth=compilation.report.hierarchy_depth,
-            negative_volumes=compilation.report.negative_volumes, surface_layers=surface_report.layer_count, color_zones=surface_report.color_zones,
+            pipeline_version=STRUCTURAL_PIPELINE_VERSION,
+            fusion_version=STRUCTURAL_FUSION_VERSION,
+            source_kind=repair.program.source.kind,
+            interpreter_version=interpreter_version,
+            model=model,
+            response_id=response_id,
+            semantic_program_id=repair.program.id,
+            motor_program_id=motor_id,
+            body_profile=compilation.report.body_profile,
+            style_profile=compilation.report.style_profile,
+            grammar_signature=compilation.report.grammar_signature,
+            silhouette_features=compilation.report.silhouette_features,
+            compound_children=compilation.report.compound_children,
+            repair_actions=len(repair.report.actions),
+            generation_attempts=attempts,
+            mesh_quality_profile=profile,
+            vertex_count=mesh_result.vertex_count,
+            face_count=mesh_result.face_count,
+            generation_seconds=mesh_result.generation_seconds,
+            complex_profile=compilation.report.complex_profile,
+            hierarchy_depth=compilation.report.hierarchy_depth,
+            negative_volumes=compilation.report.negative_volumes,
+            surface_layers=surface_report.layer_count,
+            color_zones=surface_report.color_zones,
         )
         manifest_path = output_directory / f"{motor_id}.manifest.json"
-        manifest_path.write_text(json.dumps({
-            "trace": asdict(trace),
-            "artifacts": {"semantic": str(semantic_path), "structural": str(structural_path), "surface": str(surface_path), "motor": str(motor_path), "repair_report": str(repair_path), "stl": str(mesh_result.stl_path), "three_mf": three_mf.path},
-            "validation": {"watertight": mesh_result.watertight, "winding_consistent": mesh_result.winding_consistent, "component_count": mesh_result.component_count, "surface_anchor_checks": len(anchors), "layout_checks": len(layout.checks), "manufacturability_checks": len(manufacturing.checks), "complex_topology_nodes": compilation.report.complex_nodes, "complex_topology_edges": compilation.report.complex_edges, "hierarchy_depth": compilation.report.hierarchy_depth, "negative_volumes": compilation.report.negative_volumes, "surface_layers": surface_report.layer_count, "color_zones": surface_report.color_zones, "painted_triangles": three_mf.painted_triangle_count},
-        }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        result = StructuralPipelineResult(repair=repair, compilation=compilation, mesh_result=mesh_result, three_mf=three_mf, surface_program=surface_program, surface_report=surface_report, semantic_path=str(semantic_path), structural_path=str(structural_path), surface_path=str(surface_path), motor_path=str(motor_path), repair_report_path=str(repair_path), manifest_path=str(manifest_path), trace=trace)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "trace": asdict(trace),
+                    "artifacts": {
+                        "semantic": str(semantic_path),
+                        "structural": str(structural_path),
+                        "surface": str(surface_path),
+                        "motor": str(motor_path),
+                        "repair_report": str(repair_path),
+                        "stl": str(mesh_result.stl_path),
+                        "three_mf": three_mf.path,
+                    },
+                    "validation": {
+                        "watertight": mesh_result.watertight,
+                        "winding_consistent": mesh_result.winding_consistent,
+                        "component_count": mesh_result.component_count,
+                        "surface_anchor_checks": len(anchors),
+                        "layout_checks": len(layout.checks),
+                        "manufacturability_checks": len(manufacturing.checks),
+                        "complex_topology_nodes": compilation.report.complex_nodes,
+                        "complex_topology_edges": compilation.report.complex_edges,
+                        "hierarchy_depth": compilation.report.hierarchy_depth,
+                        "negative_volumes": compilation.report.negative_volumes,
+                        "surface_layers": surface_report.layer_count,
+                        "color_zones": surface_report.color_zones,
+                        "painted_triangles": three_mf.painted_triangle_count,
+                        "native_cad_text": uses_native_cylindrical_text(repair.program),
+                    },
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        result = StructuralPipelineResult(
+            repair=repair,
+            compilation=compilation,
+            mesh_result=mesh_result,
+            three_mf=three_mf,
+            surface_program=surface_program,
+            surface_report=surface_report,
+            semantic_path=str(semantic_path),
+            structural_path=str(structural_path),
+            surface_path=str(surface_path),
+            motor_path=str(motor_path),
+            repair_report_path=str(repair_path),
+            manifest_path=str(manifest_path),
+            trace=trace,
+        )
         result.validate()
         return result
