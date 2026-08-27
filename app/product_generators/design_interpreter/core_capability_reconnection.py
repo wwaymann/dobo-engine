@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-"""Promote the proven curved-text repair into the canonical DOBO path.
+"""Canonical reconnection of semantic text into the DOBO structural engine.
 
-This module intentionally touches only the capability being consolidated:
-semantic text -> physical glyph strokes -> curvature-aware placement -> one
-printable body.  Body-family geometry, vessel parsing and morphology remain on
-the pre-existing canonical implementations so a text consolidation cannot
-silently redefine unrelated capabilities.
+Text geometry is evaluated against the resolved receiving surface instead of a
+guessed local curvature, and glyphs reuse CadQuery text contours rather than a
+coarse segment-display alphabet.
 """
 
 from copy import deepcopy
-from typing import Any
+from functools import lru_cache
 import unicodedata
 
+import cadquery as cq
 import numpy as np
 
 from .body_family_expansion import GeneralBodyFamilyExpander
@@ -21,16 +20,19 @@ from .semantic_compiler import SemanticToMotorCompiler
 from product_generators.organic_shapes.feature_program_engine import (
     FeatureProgramVesselEngine,
 )
+from product_generators.organic_shapes.hierarchy_engine import (
+    HierarchicalFeatureVesselEngine,
+)
 
 
-CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.3-text-invariants"
+CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.4-resolved-surface-glyphs"
 _TEXT_GENERATION_BUDGET_SECONDS = 120.0
 _TEXT_TEMPLATES: dict[str, str] = {}
 _TEXT_WRAP_RADIUS: dict[str, float] = {}
-_TEXT_MIN_STROKE: dict[str, float] = {}
 _INSTALLED = False
 
 _ORIGINAL_FIELD = FeatureProgramVesselEngine._feature_field
+_ORIGINAL_PLACED_FIELD = HierarchicalFeatureVesselEngine._placed_field.__func__
 _ORIGINAL_APPLY = GeneralBodyFamilyExpander.apply.__func__
 _ORIGINAL_COMPILE_FEATURE = SemanticToMotorCompiler._compile_feature.__func__
 _ORIGINAL_GENERATE_WITH_RETRY = DoboDesignPipeline._generate_with_retry.__func__
@@ -66,14 +68,9 @@ def _compile_feature_with_text(cls, feature, **kwargs):
         return template, transform
 
     literal = _literal_from_concept(feature.concept)
-    template["semantic_kind"] = "text_stroke"
+    template["semantic_kind"] = "text_glyph_contour"
     template["text_literal"] = literal
 
-    # The generic compiler still provides the placement envelope. Geometry is
-    # replaced below by physical strokes, so the rounded box never reaches the
-    # final mesh as a plaque. Any envelope adjustment must nevertheless remain
-    # a valid rounded_box because proposal repair parses it before glyph
-    # replacement is evaluated.
     if template.get("kind") == "rounded_box" and template.get("half_sizes"):
         half_sizes = [float(value) for value in template["half_sizes"]]
         minimum_feature = float(kwargs.get("minimum_feature_mm", 0.0))
@@ -97,28 +94,49 @@ def _compile_feature_with_text(cls, feature, **kwargs):
     return template, transform
 
 
+def _body_cylinder_radius(motor_program) -> float | None:
+    for field in motor_program.get("fields", []):
+        if not isinstance(field, dict):
+            continue
+        if str(field.get("id")) != "body":
+            continue
+        if str(field.get("kind")) != "capped_cylinder":
+            continue
+        radii = field.get("radii")
+        if isinstance(radii, list) and radii:
+            radius = float(radii[0])
+            if radius > 0.0:
+                return radius
+    return None
+
+
+def _find_node(nodes, feature_id: str):
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("id")) == feature_id:
+            return node
+        found = _find_node(node.get("children", []), feature_id)
+        if found is not None:
+            return found
+    return None
+
+
 def _apply_with_text_contract(cls, motor_program, program):
     _TEXT_TEMPLATES.clear()
     _TEXT_WRAP_RADIUS.clear()
-    _TEXT_MIN_STROKE.clear()
 
-    # Preserve the canonical body-family expansion exactly as it was before
-    # this reconnection.
     result = _ORIGINAL_APPLY(cls, motor_program, program)
     profile = cls.requested_profile(program)
     wrap_radius = (
-        0.49 * min(float(program.body.width_mm), float(program.body.depth_mm))
-        if profile in {"cylindrical", "tapered_revolution"}
+        _body_cylinder_radius(motor_program)
+        if profile == "cylindrical"
         else None
     )
     text_features = tuple(
         feature for feature in program.features if feature.form_hint == "text"
     )
 
-    # The vessel parser requires wall and bottom thickness to span at least
-    # three voxels. Keep that existing contract true after text promotion,
-    # with a small numerical margin so equality at wall/3 cannot fail through
-    # floating-point rounding. This is scoped to text-bearing products only.
     if text_features:
         grid = motor_program.get("grid", {})
         vessel = motor_program.get("vessel", {})
@@ -137,9 +155,11 @@ def _apply_with_text_contract(cls, motor_program, program):
                     0.99 * min(positive_limits) / 3.0,
                 )
 
+    hierarchy = motor_program.get("hierarchy_program", {})
+    template_items = hierarchy.get("templates", []) if isinstance(hierarchy, dict) else []
     templates = {
         str(item.get("id")): item
-        for item in motor_program.get("hierarchy_program", {}).get("templates", [])
+        for item in template_items
         if isinstance(item, dict)
     }
 
@@ -147,181 +167,207 @@ def _apply_with_text_contract(cls, motor_program, program):
         template_id = f"{feature.id}_template"
         literal = _literal_from_concept(feature.concept)
         _TEXT_TEMPLATES[template_id] = literal
-        _TEXT_MIN_STROKE[template_id] = max(
-            0.32,
-            0.52 * float(program.manufacturing.minimum_feature_mm),
-        )
         if wrap_radius is not None:
             _TEXT_WRAP_RADIUS[template_id] = wrap_radius
+
         template = templates.get(template_id)
         if template is not None:
-            template["semantic_kind"] = "text_stroke"
+            template["semantic_kind"] = "text_glyph_contour"
             template["text_literal"] = literal
             template["text_wrap_radius_mm"] = wrap_radius
-            template["text_minimum_stroke_radius_mm"] = _TEXT_MIN_STROKE[
-                template_id
-            ]
+
+        if isinstance(hierarchy, dict):
+            node = _find_node(hierarchy.get("roots", []), feature.id)
+            if node is not None:
+                node["template_ids"] = [template_id]
 
     return result
 
 
-_SEG = {
-    "a": ((-0.38, 0.50), (0.38, 0.50)),
-    "b": ((0.38, 0.50), (0.38, 0.00)),
-    "c": ((0.38, 0.00), (0.38, -0.50)),
-    "d": ((-0.38, -0.50), (0.38, -0.50)),
-    "e": ((-0.38, 0.00), (-0.38, -0.50)),
-    "f": ((-0.38, 0.50), (-0.38, 0.00)),
-    "g": ((-0.38, 0.00), (0.38, 0.00)),
-    "h": ((-0.38, 0.50), (0.00, 0.00)),
-    "i": ((0.38, 0.50), (0.00, 0.00)),
-    "j": ((-0.38, -0.50), (0.00, 0.00)),
-    "k": ((0.38, -0.50), (0.00, 0.00)),
-    "l": ((0.00, 0.50), (0.00, 0.00)),
-    "m": ((0.00, 0.00), (0.00, -0.50)),
-}
-
-_GLYPH = {
-    "A": "abcefg",
-    "B": "abcdefg",
-    "C": "adef",
-    "D": "abcdef",
-    "E": "adefg",
-    "F": "aefg",
-    "G": "acdefg",
-    "H": "bcefg",
-    "I": "adlm",
-    "J": "bcde",
-    "K": "efhik",
-    "L": "def",
-    "M": "bcefhi",
-    "N": "bcefhk",
-    "O": "abcdef",
-    "P": "abefg",
-    "Q": "abcdefk",
-    "R": "abefgk",
-    "S": "acdfg",
-    "T": "alm",
-    "U": "bcdef",
-    "V": "efjk",
-    "W": "bcefjk",
-    "X": "hijk",
-    "Y": "hilm",
-    "Z": "adij",
-    "0": "abcdef",
-    "1": "bc",
-    "2": "abdeg",
-    "3": "abcdg",
-    "4": "bcfg",
-    "5": "acdfg",
-    "6": "acdefg",
-    "7": "abc",
-    "8": "abcdefg",
-    "9": "abcdfg",
-    "-": "g",
-}
-
-
-def _segment_prism(x, y, z, x1, z1, x2, z2, radius, half_depth):
-    dx = x2 - x1
-    dz = z2 - z1
-    denominator = dx * dx + dz * dz
-    t = np.clip(
-        ((x - x1) * dx + (z - z1) * dz) / max(denominator, 1e-12),
-        0.0,
-        1.0,
+def _bottom_faces(shape: cq.Shape) -> tuple[cq.Face, ...]:
+    z_min = float(shape.BoundingBox().zmin)
+    tolerance = 1e-6
+    return tuple(
+        face
+        for face in shape.Faces()
+        if abs(float(face.BoundingBox().zmax) - float(face.BoundingBox().zmin))
+        <= tolerance
+        and abs(float(face.BoundingBox().zmin) - z_min) <= tolerance
     )
-    px = x1 + t * dx
-    pz = z1 + t * dz
-    radial = np.sqrt((x - px) ** 2 + (z - pz) ** 2) - radius
-    slab = np.abs(y) - half_depth
+
+
+@lru_cache(maxsize=64)
+def _glyph_triangles(text: str):
+    last_error: Exception | None = None
+    shape = None
+    for font in ("Arial", "DejaVu Sans", "Liberation Sans"):
+        try:
+            candidate = cq.Compound.makeText(
+                text,
+                1.0,
+                1.0,
+                font=font,
+                kind="regular",
+                halign="left",
+                valign="bottom",
+            )
+            if isinstance(candidate, cq.Shape) and candidate.isValid():
+                shape = candidate
+                break
+        except Exception as error:
+            last_error = error
+
+    if shape is None:
+        raise RuntimeError("Could not generate a real text contour.") from last_error
+
+    triangle_rows: list[tuple[tuple[float, float], ...]] = []
+    points: list[tuple[float, float]] = []
+    for face in _bottom_faces(shape):
+        vertices, triangles = face.tessellate(0.035, 0.08)
+        for triangle in triangles:
+            row = tuple(
+                (float(vertices[int(index)].x), float(vertices[int(index)].y))
+                for index in triangle
+            )
+            triangle_rows.append(row)
+            points.extend(row)
+
+    if not triangle_rows or not points:
+        raise RuntimeError("Text contour tessellation produced no triangles.")
+
+    triangles_array = np.asarray(triangle_rows, dtype=np.float64)
+    points_array = np.asarray(points, dtype=np.float64)
+    minimum = points_array.min(axis=0)
+    maximum = points_array.max(axis=0)
+    size = maximum - minimum
+    if min(float(size[0]), float(size[1])) <= 0.0:
+        raise RuntimeError("Text contour bounds are invalid.")
+    center = 0.5 * (minimum + maximum)
+    triangles_array -= center[None, None, :]
+    return triangles_array, float(size[0]), float(size[1])
+
+
+def _segment_distance_2d(px, pz, ax, az, bx, bz):
+    dx = bx - ax
+    dz = bz - az
+    denominator = max(dx * dx + dz * dz, 1e-12)
+    t = np.clip(((px - ax) * dx + (pz - az) * dz) / denominator, 0.0, 1.0)
+    qx = ax + t * dx
+    qz = az + t * dz
+    return np.sqrt((px - qx) ** 2 + (pz - qz) ** 2)
+
+
+def _triangle_distance_2d(px, pz, triangle):
+    (ax, az), (bx, bz), (cx, cz) = triangle
+    d0 = _segment_distance_2d(px, pz, ax, az, bx, bz)
+    d1 = _segment_distance_2d(px, pz, bx, bz, cx, cz)
+    d2 = _segment_distance_2d(px, pz, cx, cz, ax, az)
+    distance = np.minimum(d0, np.minimum(d1, d2))
+
+    c0 = (bx - ax) * (pz - az) - (bz - az) * (px - ax)
+    c1 = (cx - bx) * (pz - bz) - (cz - bz) * (px - bx)
+    c2 = (ax - cx) * (pz - cz) - (az - cz) * (px - cx)
+    inside = ((c0 >= 0.0) & (c1 >= 0.0) & (c2 >= 0.0)) | (
+        (c0 <= 0.0) & (c1 <= 0.0) & (c2 <= 0.0)
+    )
+    return np.where(inside, -distance, distance)
+
+
+def _extruded_2d_distance(planar_distance, depth_coordinate, half_depth):
+    slab = np.abs(depth_coordinate) - half_depth
     outside = np.sqrt(
-        np.maximum(radial, 0.0) ** 2 + np.maximum(slab, 0.0) ** 2
+        np.maximum(planar_distance, 0.0) ** 2
+        + np.maximum(slab, 0.0) ** 2
     )
-    inside = np.minimum(np.maximum(radial, slab), 0.0)
+    inside = np.minimum(np.maximum(planar_distance, slab), 0.0)
     return outside + inside
 
 
-def _cylindrical_text_coordinates(local_x, local_y, wrap_radius):
-    if wrap_radius is None or wrap_radius <= 0.0:
-        return local_x, local_y
-    radius = float(wrap_radius)
-    centre_y = radius - local_y
-    angle = np.arctan2(local_x, centre_y)
-    arc_x = radius * angle
-    radial_distance = np.sqrt(local_x * local_x + centre_y * centre_y)
-    depth = radius - radial_distance
-    return arc_x, depth
-
-
-def _text_field(
-    feature,
-    text: str,
-    x,
-    y,
-    z,
-    *,
-    wrap_radius: float | None = None,
-    minimum_stroke_radius: float = 0.32,
-):
+def _font_text_field(feature, text: str, u, depth_coordinate, v):
     half_sizes = feature.half_sizes
     if half_sizes is None:
-        return _ORIGINAL_FIELD(feature, x, y, z)
-    center = feature.center or (0.0, 0.0, 0.0)
-    local_x = x - float(center[0])
-    local_y = y - float(center[1])
-    local_z = z - float(center[2])
-    local_x, local_y = _cylindrical_text_coordinates(
-        local_x,
-        local_y,
-        wrap_radius,
-    )
+        return _ORIGINAL_FIELD(feature, u, depth_coordinate, v)
+
     total_width = 2.0 * float(half_sizes[0])
     total_height = 2.0 * float(half_sizes[2])
     half_depth = float(half_sizes[1])
-    visible = text or "TEXT"
-    count = max(1, len(visible))
-    cell_width = total_width / count
-    stroke = max(
-        float(minimum_stroke_radius),
-        min(0.10 * cell_width, 0.075 * total_height),
-    )
-    result = None
-    for index, character in enumerate(visible):
-        if character == " ":
-            continue
-        center_x = -0.5 * total_width + (index + 0.5) * cell_width
-        segments = _GLYPH.get(character, "hijk")
-        for name in segments:
-            (sx1, sz1), (sx2, sz2) = _SEG[name]
-            distance = _segment_prism(
-                local_x,
-                local_y,
-                local_z,
-                center_x + sx1 * cell_width,
-                sz1 * total_height,
-                center_x + sx2 * cell_width,
-                sz2 * total_height,
-                stroke,
-                half_depth,
-            )
-            result = distance if result is None else np.minimum(result, distance)
-    return result if result is not None else _ORIGINAL_FIELD(feature, x, y, z)
+    triangles, natural_width, natural_height = _glyph_triangles(text or "TEXT")
+    scale = min(total_width / natural_width, total_height / natural_height)
+    scaled = triangles * scale
+
+    planar = None
+    for triangle in scaled:
+        distance = _triangle_distance_2d(u, v, triangle)
+        planar = distance if planar is None else np.minimum(planar, distance)
+
+    if planar is None:
+        return _ORIGINAL_FIELD(feature, u, depth_coordinate, v)
+    return _extruded_2d_distance(planar, depth_coordinate, half_depth)
 
 
 def _feature_field(feature, x, y, z):
     text = _TEXT_TEMPLATES.get(feature.id)
     if text:
-        return _text_field(
+        center = feature.center or (0.0, 0.0, 0.0)
+        return _font_text_field(
             feature,
             text,
-            x,
-            y,
-            z,
-            wrap_radius=_TEXT_WRAP_RADIUS.get(feature.id),
-            minimum_stroke_radius=_TEXT_MIN_STROKE.get(feature.id, 0.32),
+            x - float(center[0]),
+            y - float(center[1]),
+            z - float(center[2]),
         )
     return _ORIGINAL_FIELD(feature, x, y, z)
+
+
+def _placed_field_with_resolved_surface(cls, placement, x, y, z):
+    text = _TEXT_TEMPLATES.get(placement.feature.id)
+    radius = _TEXT_WRAP_RADIUS.get(placement.feature.id)
+    if not text or radius is None or radius <= 0.0:
+        return _ORIGINAL_PLACED_FIELD(cls, placement, x, y, z)
+
+    matrix = np.asarray(placement.matrix, dtype=np.float64)
+    origin = matrix[:3, 3]
+    tangent_column = matrix[:3, 0]
+    inward_column = matrix[:3, 1]
+    vertical_column = matrix[:3, 2]
+
+    scale_u = max(float(np.linalg.norm(tangent_column)), 1e-12)
+    scale_n = max(float(np.linalg.norm(inward_column)), 1e-12)
+    scale_v = max(float(np.linalg.norm(vertical_column)), 1e-12)
+    tangent = tangent_column / scale_u
+    outward = -inward_column / scale_n
+    vertical = vertical_column / scale_v
+
+    center_x = float(origin[0] - outward[0] * radius)
+    center_y = float(origin[1] - outward[1] * radius)
+    dx = x - center_x
+    dy = y - center_y
+    radial_distance = np.sqrt(dx * dx + dy * dy)
+    normal_projection = dx * outward[0] + dy * outward[1]
+    tangent_projection = dx * tangent[0] + dy * tangent[1]
+    angle = np.arctan2(tangent_projection, normal_projection)
+    u = radius * angle / scale_u
+    depth_coordinate = (radial_distance - radius) / scale_n
+
+    world_dx = x - float(origin[0])
+    world_dy = y - float(origin[1])
+    world_dz = z - float(origin[2])
+    v = (
+        world_dx * vertical[0]
+        + world_dy * vertical[1]
+        + world_dz * vertical[2]
+    ) / scale_v
+
+    return (
+        _font_text_field(
+            placement.feature,
+            text,
+            u,
+            depth_coordinate,
+            v,
+        )
+        * placement.distance_scale
+    )
 
 
 def _generate_with_text_budget(cls, motor_program, *, parser, engine):
@@ -342,18 +388,16 @@ def _generate_with_text_budget(cls, motor_program, *, parser, engine):
 
 
 def install_core_capability_reconnection() -> str:
-    """Install the text reconnection once for the canonical engine process."""
     global _INSTALLED
     if _INSTALLED:
         return CORE_CAPABILITY_RECONNECTION_VERSION
 
     GeneralBodyFamilyExpander.apply = classmethod(_apply_with_text_contract)
-    SemanticToMotorCompiler._compile_feature = classmethod(
-        _compile_feature_with_text
-    )
+    SemanticToMotorCompiler._compile_feature = classmethod(_compile_feature_with_text)
     FeatureProgramVesselEngine._feature_field = staticmethod(_feature_field)
-    DoboDesignPipeline._generate_with_retry = classmethod(
-        _generate_with_text_budget
+    HierarchicalFeatureVesselEngine._placed_field = classmethod(
+        _placed_field_with_resolved_surface
     )
+    DoboDesignPipeline._generate_with_retry = classmethod(_generate_with_text_budget)
     _INSTALLED = True
     return CORE_CAPABILITY_RECONNECTION_VERSION
