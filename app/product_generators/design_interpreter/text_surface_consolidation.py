@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """Canonical text/surface consolidation for the promoted DOBO core.
 
-Keep real glyph SDF text and explicit multiline layout, but never improve text
-by globally shrinking the vessel voxel grid. Detail refinement is localized to
-feature surfaces. Opening, cavity and drain remain owned by the vessel contract,
-so semantic helper solids for those concepts are removed from the hierarchy.
+Keep real glyph SDF text and explicit multiline layout. Text-bearing parts use
+an intermediate extraction lattice fine enough to preserve the glyph silhouette,
+then the existing adaptive-refinement path concentrates extra density around the
+feature surfaces. Opening, cavity and drain remain owned by the vessel contract.
 """
 
 import re
@@ -18,7 +18,8 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
 
 
-TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.4-local-text-refinement-vessel-topology"
+TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.5-balanced-text-extraction-refinement"
+_TEXT_BASE_VOXEL_MM = 0.70
 _INSTALLED = False
 _PREVIOUS_PLACED_FIELD = HierarchicalFeatureVesselEngine._placed_field.__func__
 
@@ -87,9 +88,6 @@ def _remove_plumbing_helpers(motor_program, program) -> None:
     }
     remove_templates = {f"{feature_id}_template" for feature_id in remove_ids}
 
-    # Also inspect the compiled template semantics. This catches model-generated
-    # helper IDs whose names are generic even though their semantic role is
-    # opening/cavity/drain.
     for template in hierarchy.get("templates", []):
         if not isinstance(template, dict):
             continue
@@ -210,19 +208,16 @@ def _configure_local_text_refinement(hierarchy: dict) -> None:
     if not isinstance(refinement, dict):
         return
 
-    # Keep the base vessel lattice unchanged. The hierarchy engine already has
-    # a feature-weighted subdivision path; use its maximum legal two passes and
-    # tighten the influence band around feature surfaces only.
     refinement["detail_subdivision_passes"] = 2
-    surface_band = max(0.35, float(refinement.get("surface_band_mm", 0.5)))
+    surface_band = max(0.45, float(refinement.get("surface_band_mm", 0.5)))
     refinement["surface_band_mm"] = surface_band
     refinement["maximum_band_mm"] = max(
         surface_band,
-        min(float(refinement.get("maximum_band_mm", 4.0)), 3.0),
+        min(float(refinement.get("maximum_band_mm", 4.0)), 2.4),
     )
     refinement["size_band_ratio"] = min(
         max(float(refinement.get("size_band_ratio", 0.12)), 0.08),
-        0.18,
+        0.16,
     )
 
 
@@ -255,6 +250,17 @@ def _apply_consolidated(cls, motor_program, program):
                     template["text_lines"] = list(lines)
                     template["semantic_kind"] = "text_glyph_contour_multiline"
 
+    # Marching cubes must see enough samples to preserve the glyph silhouette.
+    # 0.45 mm made the whole vessel unnecessarily expensive; no text-specific
+    # limit made the contour irrecoverably coarse. 0.70 mm is the balanced base,
+    # after which the two legal adaptive passes concentrate density on features.
+    grid = motor_program.get("grid")
+    if isinstance(grid, dict):
+        grid["voxel_mm"] = min(
+            float(grid.get("voxel_mm", _TEXT_BASE_VOXEL_MM)),
+            _TEXT_BASE_VOXEL_MM,
+        )
+
     if isinstance(hierarchy, dict):
         _configure_local_text_refinement(hierarchy)
         safe_text_blend = _minimum_safe_text_blend(hierarchy)
@@ -265,9 +271,6 @@ def _apply_consolidated(cls, motor_program, program):
             if template_id in _core._TEXT_TEMPLATES:
                 template["blend_mm"] = safe_text_blend
 
-    # Important: do not set grid.voxel_mm here. Global voxel reduction was the
-    # source of the ~765k-vertex / ~38s regression while glyph edges still looked
-    # faceted. Text detail is now handled by localized adaptive subdivision.
     _remove_plumbing_helpers(motor_program, program)
     return result
 
