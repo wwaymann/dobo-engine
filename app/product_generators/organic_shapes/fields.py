@@ -97,6 +97,15 @@ def implicit_field_distance(x: FloatArray, y: FloatArray, z: FloatArray, specifi
     if isinstance(specification, EllipsoidFieldSpec): return ellipsoid_distance(x, y, z, specification)
     if specification.kind == "superellipsoid": return superellipsoid_distance(x, y, z, specification)
     if specification.kind == "faceted_ellipsoid": return faceted_ellipsoid_distance(x, y, z, specification)
+    if specification.kind == "capped_cylinder":
+        return capped_cylinder_distance(
+            x,
+            y,
+            z,
+            center=specification.center,
+            radius=min(specification.radii[0], specification.radii[1]),
+            half_height=specification.radii[2],
+        )
     if specification.kind == "lobed_ellipsoid": return lobed_ellipsoid_distance(x, y, z, specification)
     if specification.kind == "twisted_faceted": return twisted_faceted_distance(x, y, z, specification)
     if specification.kind == "leaf": return leaf_volume_distance(x, y, z, specification)
