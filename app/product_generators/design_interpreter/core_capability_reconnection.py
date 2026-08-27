@@ -23,7 +23,7 @@ from product_generators.organic_shapes.feature_program_engine import (
 )
 
 
-CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.2-text-only"
+CORE_CAPABILITY_RECONNECTION_VERSION = "C0R.3-text-invariants"
 _TEXT_GENERATION_BUDGET_SECONDS = 120.0
 _TEXT_TEMPLATES: dict[str, str] = {}
 _TEXT_WRAP_RADIUS: dict[str, float] = {}
@@ -69,9 +69,11 @@ def _compile_feature_with_text(cls, feature, **kwargs):
     template["semantic_kind"] = "text_stroke"
     template["text_literal"] = literal
 
-    # The generic compiler still provides the placement envelope.  Geometry is
+    # The generic compiler still provides the placement envelope. Geometry is
     # replaced below by physical strokes, so the rounded box never reaches the
-    # final mesh as a plaque.
+    # final mesh as a plaque. Any envelope adjustment must nevertheless remain
+    # a valid rounded_box because proposal repair parses it before glyph
+    # replacement is evaluated.
     if template.get("kind") == "rounded_box" and template.get("half_sizes"):
         half_sizes = [float(value) for value in template["half_sizes"]]
         minimum_feature = float(kwargs.get("minimum_feature_mm", 0.0))
@@ -86,6 +88,11 @@ def _compile_feature_with_text(cls, feature, **kwargs):
         )
         half_sizes[1] = min(safe_half_depth, maximum_relief)
         template["half_sizes"] = half_sizes
+        if template.get("round_mm") is not None:
+            template["round_mm"] = min(
+                float(template["round_mm"]),
+                0.90 * min(half_sizes),
+            )
 
     return template, transform
 
@@ -104,15 +111,39 @@ def _apply_with_text_contract(cls, motor_program, program):
         if profile in {"cylindrical", "tapered_revolution"}
         else None
     )
+    text_features = tuple(
+        feature for feature in program.features if feature.form_hint == "text"
+    )
+
+    # The vessel parser requires wall and bottom thickness to span at least
+    # three voxels. Keep that existing contract true after text promotion,
+    # with a small numerical margin so equality at wall/3 cannot fail through
+    # floating-point rounding. This is scoped to text-bearing products only.
+    if text_features:
+        grid = motor_program.get("grid", {})
+        vessel = motor_program.get("vessel", {})
+        if isinstance(grid, dict) and isinstance(vessel, dict):
+            current_voxel = float(grid.get("voxel_mm", 1.0))
+            wall_mm = float(vessel.get("wall_mm", 0.0))
+            bottom_mm = float(vessel.get("cavity_floor_z_mm", 0.0)) - float(
+                vessel.get("base_z_mm", 0.0)
+            )
+            positive_limits = [
+                value for value in (wall_mm, bottom_mm) if value > 0.0
+            ]
+            if positive_limits:
+                grid["voxel_mm"] = min(
+                    current_voxel,
+                    0.99 * min(positive_limits) / 3.0,
+                )
+
     templates = {
         str(item.get("id")): item
         for item in motor_program.get("hierarchy_program", {}).get("templates", [])
         if isinstance(item, dict)
     }
 
-    for feature in program.features:
-        if feature.form_hint != "text":
-            continue
+    for feature in text_features:
         template_id = f"{feature.id}_template"
         literal = _literal_from_concept(feature.concept)
         _TEXT_TEMPLATES[template_id] = literal
