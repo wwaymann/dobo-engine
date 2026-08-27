@@ -19,7 +19,7 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
 
 
-TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.2-multiline-surface-quality"
+TEXT_SURFACE_CONSOLIDATION_VERSION = "C0R.6.3-multiline-fidelity-vessel-safe"
 _INSTALLED = False
 
 # Do not capture GeneralBodyFamilyExpander.apply here. This module is imported
@@ -35,47 +35,110 @@ def _plain(value: str) -> str:
 
 
 def _prompt_lines(prompt: str | None) -> tuple[str, ...]:
-    """Extract explicit line assignments without guessing paragraph structure."""
+    """Extract explicit N-line text without depending on model feature splitting."""
     if not prompt:
         return ()
-    normalized = str(prompt).replace("\r", " ").replace("\n", " ")
-    matches = re.findall(
-        r"(?:linea|línea)\s*(\d+)\s*(?:=|:)[\s\"'“”]*([^;\"'“”]+?)(?=(?:\s*;\s*|\s+)(?:linea|línea)\s*\d+\s*(?:=|:)|[\"'“”]*\s*[.;]?$)",
-        normalized,
-        flags=re.IGNORECASE,
+    raw = str(prompt)
+
+    # Accept a quoted text block containing either real newlines or the literal
+    # two-character sequence ``\\n`` used by the Capability Lab prompt box.
+    for match in re.finditer(r'[\"“”]([^\"“”]+)[\"“”]', raw, flags=re.DOTALL):
+        payload = match.group(1)
+        if "\\n" in payload or "\n" in payload:
+            normalized = payload.replace("\\r\\n", "\n").replace("\\n", "\n")
+            lines = tuple(part.strip() for part in normalized.splitlines() if part.strip())
+            if len(lines) >= 2:
+                return tuple(line.upper() for line in lines)
+
+    # Explicit assignments are the strongest contract:
+    # línea 1 = "PLANTA"; línea 2 = "UNA"; línea 3 = "IDEA".
+    assignment = re.compile(
+        r"(?:linea|línea)\s*(\d+)\s*(?:=|:)\s*[\"'“”]?\s*(.*?)\s*[\"'“”]?\s*"
+        r"(?=(?:;|,)?\s*(?:linea|línea)\s*\d+\s*(?:=|:)|(?:[.;]\s*)?$)",
+        flags=re.IGNORECASE | re.DOTALL,
     )
-    if not matches:
-        return ()
-    ordered = sorted((int(index), text.strip(" .;,:\"'“”")) for index, text in matches)
-    return tuple(text.upper() for _, text in ordered if text.strip())
+    matches = assignment.findall(raw)
+    if matches:
+        ordered = sorted(
+            (int(index), text.strip(" .;,:\"'“”"))
+            for index, text in matches
+            if text.strip(" .;,:\"'“”")
+        )
+        if len(ordered) >= 2:
+            return tuple(text.upper() for _, text in ordered)
+    return ()
 
 
-def _plumbing_feature(feature) -> bool:
-    if getattr(feature, "form_hint", None) == "text":
-        return False
-    tokens = set(_plain(getattr(feature, "concept", "")).replace("-", "_").split("_"))
-    tokens.update(_plain(getattr(feature, "id", "")).replace("-", "_").split("_"))
+def _plumbing_name(value: object) -> bool:
+    normalized = _plain(str(value)).replace("-", "_").replace(" ", "_")
+    tokens = set(filter(None, normalized.split("_")))
     return bool(tokens & {
         "drain", "drainage", "drenaje", "drenajeinferior",
         "opening", "abertura", "boca", "cavity", "cavidad", "hueco", "hollow",
     })
 
 
+def _plumbing_feature(feature) -> bool:
+    if getattr(feature, "form_hint", None) == "text":
+        return False
+    return _plumbing_name(getattr(feature, "concept", "")) or _plumbing_name(
+        getattr(feature, "id", "")
+    )
+
+
 def _remove_plumbing_helpers(motor_program, program) -> None:
+    """Remove helper geometry for vessel-owned opening/cavity/drain semantics."""
     hierarchy = motor_program.get("hierarchy_program")
     if not isinstance(hierarchy, dict):
         return
-    remove_ids = {feature.id for feature in program.features if _plumbing_feature(feature)}
-    if not remove_ids:
-        return
+
+    remove_ids = {str(feature.id) for feature in program.features if _plumbing_feature(feature)}
     remove_templates = {f"{feature_id}_template" for feature_id in remove_ids}
-    hierarchy["roots"] = [
-        node for node in hierarchy.get("roots", [])
-        if not isinstance(node, dict) or str(node.get("id")) not in remove_ids
-    ]
+
+    def helper_node(node: dict) -> bool:
+        node_id = str(node.get("id", ""))
+        template_ids = {str(value) for value in node.get("template_ids", [])}
+        return (
+            node_id in remove_ids
+            or _plumbing_name(node_id)
+            or bool(template_ids & remove_templates)
+            or any(_plumbing_name(value) for value in template_ids)
+        )
+
+    def prune(node: dict):
+        if helper_node(node):
+            return None
+        cleaned = dict(node)
+        children = []
+        for child in node.get("children", []):
+            if not isinstance(child, dict):
+                children.append(child)
+                continue
+            kept = prune(child)
+            if kept is not None:
+                children.append(kept)
+        cleaned["children"] = children
+        return cleaned
+
+    cleaned_roots = []
+    for root in hierarchy.get("roots", []):
+        if not isinstance(root, dict):
+            cleaned_roots.append(root)
+            continue
+        kept = prune(root)
+        if kept is not None:
+            cleaned_roots.append(kept)
+    hierarchy["roots"] = cleaned_roots
+
     hierarchy["templates"] = [
-        template for template in hierarchy.get("templates", [])
-        if not isinstance(template, dict) or str(template.get("id")) not in remove_templates
+        template
+        for template in hierarchy.get("templates", [])
+        if not isinstance(template, dict)
+        or (
+            str(template.get("id", "")) not in remove_templates
+            and not _plumbing_name(template.get("id", ""))
+            and not _plumbing_name(template.get("semantic_kind", ""))
+        )
     ]
 
 
@@ -95,9 +158,45 @@ def _minimum_safe_text_blend(hierarchy: dict) -> float:
             float(proportional.get("minimum_scale", minimum_scale)),
         )
     # Manufacturability validates blend after the placement scale is applied.
-    # Keep the smallest legal pre-scale blend to preserve glyph corners while
-    # guaranteeing minimum_blend after the worst allowed proportional scaling.
     return 1.01 * minimum_blend / minimum_scale
+
+
+def _remove_extra_text_features(hierarchy: dict, keep_feature_id: str, extra_ids: set[str]) -> None:
+    if not extra_ids:
+        return
+    extra_templates = {f"{feature_id}_template" for feature_id in extra_ids}
+
+    def prune(node: dict):
+        node_id = str(node.get("id", ""))
+        template_ids = {str(value) for value in node.get("template_ids", [])}
+        if node_id in extra_ids or bool(template_ids & extra_templates):
+            return None
+        cleaned = dict(node)
+        cleaned["children"] = [
+            kept
+            for child in node.get("children", [])
+            if isinstance(child, dict)
+            for kept in (prune(child),)
+            if kept is not None
+        ]
+        return cleaned
+
+    hierarchy["roots"] = [
+        kept
+        for root in hierarchy.get("roots", [])
+        if isinstance(root, dict)
+        for kept in (prune(root),)
+        if kept is not None
+    ]
+    hierarchy["templates"] = [
+        template
+        for template in hierarchy.get("templates", [])
+        if not isinstance(template, dict)
+        or str(template.get("id", "")) not in extra_templates
+    ]
+    for template_id in extra_templates:
+        _core._TEXT_TEMPLATES.pop(template_id, None)
+        _core._TEXT_WRAP_RADIUS.pop(template_id, None)
 
 
 def _apply_consolidated(cls, motor_program, program):
@@ -108,40 +207,44 @@ def _apply_consolidated(cls, motor_program, program):
     if not text_features:
         return result
 
-    # Explicit line syntax is a structural text contract. Preserve it as N lines
-    # rather than relying on the semantic model to invent N unrelated features.
     source = getattr(program, "source", None)
     lines = _prompt_lines(getattr(source, "prompt", None))
+    hierarchy = motor_program.get("hierarchy_program", {})
+
     if lines:
+        # Explicit multiline syntax is one text block, even when the semantic
+        # model independently emitted several text features. Keep the first
+        # anchor and suppress the redundant model-generated text nodes.
         text_feature = text_features[0]
+        extra_ids = {str(feature.id) for feature in text_features[1:]}
+        if isinstance(hierarchy, dict):
+            _remove_extra_text_features(hierarchy, str(text_feature.id), extra_ids)
+
         template_id = f"{text_feature.id}_template"
         literal = "\n".join(lines)
         _core._TEXT_TEMPLATES[template_id] = literal
-        hierarchy = motor_program.get("hierarchy_program", {})
-        for template in hierarchy.get("templates", []):
-            if isinstance(template, dict) and str(template.get("id")) == template_id:
-                template["text_literal"] = literal
-                template["text_lines"] = list(lines)
-                template["semantic_kind"] = "text_glyph_contour_multiline"
+        _core._TEXT_TEMPLATES[str(text_feature.id)] = literal
+        if isinstance(hierarchy, dict):
+            for template in hierarchy.get("templates", []):
+                if isinstance(template, dict) and str(template.get("id")) == template_id:
+                    template["text_literal"] = literal
+                    template["text_lines"] = list(lines)
+                    template["semantic_kind"] = "text_glyph_contour_multiline"
 
-    # The 256px glyph cache already contains ample contour detail. The visible
-    # faceting came from the final 3D voxel lattice, so refine that lattice rather
-    # than making the SDF slower. 0.55 mm is the compiler's established lower
-    # quality bound and keeps the fast cached-field route practical.
+    # The glyph SDF remains cached and fast. Visible faceting is dominated by
+    # the final 3D lattice, so improve that lattice rather than reintroducing the
+    # six-minute per-triangle glyph path. 0.45 mm is intentionally conservative:
+    # noticeably finer than C0R.6.2 while still using the cached field route.
     grid = motor_program.get("grid")
     if isinstance(grid, dict):
-        grid["voxel_mm"] = min(float(grid.get("voxel_mm", 1.0)), 0.55)
-    hierarchy = motor_program.get("hierarchy_program")
+        grid["voxel_mm"] = min(float(grid.get("voxel_mm", 1.0)), 0.45)
     if isinstance(hierarchy, dict):
         refinement = hierarchy.get("adaptive_refinement")
         if isinstance(refinement, dict):
             refinement["detail_subdivision_passes"] = max(
-                2, int(refinement.get("detail_subdivision_passes", 0))
+                3, int(refinement.get("detail_subdivision_passes", 0))
             )
         safe_text_blend = _minimum_safe_text_blend(hierarchy)
-        # Large smooth-union radii soften and destroy glyph corners. Use exactly
-        # the smallest blend that still satisfies the existing manufacturability
-        # contract after the worst proportional placement scale.
         for template in hierarchy.get("templates", []):
             if isinstance(template, dict) and str(template.get("id")) in _core._TEXT_TEMPLATES:
                 template["blend_mm"] = safe_text_blend
@@ -202,9 +305,9 @@ def _placed_field_consolidated(cls, placement, x, y, z):
     outward = -inward_column / scale_n
     vertical = vertical_column / scale_v
 
-    # Develop the *actual cylindrical receiving surface* into arc-length u.
-    # Depth is radial distance from that same surface, so every glyph sample has
-    # the same contact rule; edge letters no longer use a guessed planar normal.
+    # Develop the actual cylindrical receiving surface into arc length. Depth is
+    # radial distance from that same surface, so every glyph sample follows the
+    # local cylindrical normal instead of a guessed planar normal.
     center_x = float(origin[0] - outward[0] * radius)
     center_y = float(origin[1] - outward[1] * radius)
     dx = x - center_x
