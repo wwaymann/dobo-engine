@@ -51,15 +51,14 @@ from .design_pipeline import (
 )
 
 # Keep lightweight semantic imports lightweight. The promoted reconnection uses
-# the full geometry stack and is activated automatically only when those
-# dependencies are present. This preserves the dependency contracts of the
-# semantic/body-family boundary tests while keeping one canonical runtime path.
+# the geometry stack it actually imports. Shapely is intentionally not a gate:
+# the canonical text/retry reconnection does not depend on it, and requiring it
+# made local DOBO Lab runs silently fall back to the old rounded-box plaque.
 _CORE_GEOMETRY_DEPENDENCIES = (
     "numpy",
     "scipy",
     "trimesh",
     "skimage",
-    "shapely",
     "cadquery",
 )
 _CORE_GEOMETRY_READY = all(
