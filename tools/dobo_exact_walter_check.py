@@ -67,11 +67,57 @@ SEMANTIC = {
 }
 
 
+def _text_contract(motor: dict) -> tuple[str, str, float]:
+    """Read WALTER from either promoted native CAD or legacy hierarchy form."""
+    analytic = motor.get("_analytic_cylindrical")
+    if isinstance(analytic, dict):
+        entries = analytic.get("text_entries", [])
+        entry = next(
+            (
+                item
+                for item in entries
+                if isinstance(item, dict) and item.get("literal") == "WALTER"
+            ),
+            None,
+        )
+        if entry is None:
+            raise RuntimeError("Native cylindrical contract did not preserve WALTER.")
+        if str(entry.get("mode")) != "emboss":
+            raise RuntimeError("Native cylindrical WALTER is not routed as emboss.")
+        diameter = float(analytic.get("diameter_mm", 0.0))
+        if diameter <= 0.0:
+            raise RuntimeError("Native cylindrical contract has invalid diameter.")
+        return "WALTER", "native_cad_text", 0.5 * diameter
+
+    hierarchy = motor.get("hierarchy_program", {})
+    templates = hierarchy.get("templates", []) if isinstance(hierarchy, dict) else []
+    text_template = next(
+        (
+            item
+            for item in templates
+            if isinstance(item, dict)
+            and item.get("id") == "feat_text_walter_template"
+        ),
+        None,
+    )
+    if text_template is None:
+        raise RuntimeError("Motor JSON contains neither native nor legacy WALTER contract.")
+    semantic_kind = str(text_template.get("semantic_kind", ""))
+    if semantic_kind not in {"text_stroke", "text_glyph_contour"}:
+        raise RuntimeError("Motor JSON did not preserve semantic text kind.")
+    if text_template.get("text_literal") != "WALTER":
+        raise RuntimeError("Motor JSON did not preserve WALTER literal.")
+    wrap_radius = text_template.get("text_wrap_radius_mm")
+    if wrap_radius is None or float(wrap_radius) <= 0.0:
+        raise RuntimeError("Cylindrical text was not assigned a wrap radius.")
+    return "WALTER", semantic_kind, float(wrap_radius)
+
+
 def main() -> None:
     program = SemanticProgramParser().parse_dict(SEMANTIC)
     out = ROOT / "outputs-ci" / "exact-walter"
 
-    # This deliberately uses the canonical pipeline directly.  No laboratory
+    # This deliberately uses the canonical pipeline directly. No laboratory
     # install()/retry patch is allowed here: if the core loses the capability,
     # this gate must fail.
     result = DoboStructuralPipeline().generate_from_semantic(
@@ -82,19 +128,7 @@ def main() -> None:
     result.validate()
 
     motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
-    templates = motor["hierarchy_program"]["templates"]
-    text_template = next(
-        item
-        for item in templates
-        if item["id"] == "feat_text_walter_template"
-    )
-    if text_template.get("semantic_kind") != "text_stroke":
-        raise RuntimeError("Motor JSON did not preserve semantic text kind.")
-    if text_template.get("text_literal") != "WALTER":
-        raise RuntimeError("Motor JSON did not preserve WALTER literal.")
-    wrap_radius = text_template.get("text_wrap_radius_mm")
-    if wrap_radius is None or float(wrap_radius) <= 0.0:
-        raise RuntimeError("Cylindrical text was not assigned a wrap radius.")
+    text_literal, semantic_kind, wrap_radius = _text_contract(motor)
 
     mesh = result.mesh_result
     if not mesh.watertight or not mesh.winding_consistent or mesh.component_count != 1:
@@ -122,9 +156,9 @@ def main() -> None:
 
     report = {
         "semantic_id": program.id,
-        "text_literal": text_template["text_literal"],
-        "semantic_kind": text_template["semantic_kind"],
-        "text_wrap_radius_mm": float(wrap_radius),
+        "text_literal": text_literal,
+        "semantic_kind": semantic_kind,
+        "text_wrap_radius_mm": wrap_radius,
         "body_profile": result.trace.body_profile,
         "mesh_quality_profile": result.trace.mesh_quality_profile,
         "generation_attempts": result.trace.generation_attempts,
