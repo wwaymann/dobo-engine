@@ -116,28 +116,23 @@ class NativeSurfaceTextBuilder:
 
     @staticmethod
     def _frontal_arc(radius: float, z: float, text_value: str, size: float) -> cq.Edge:
-        """Return a bounded arc centred on the cylinder front (+Y).
-
-        cadquery.func.text uses the complete supplied spine as its layout path.
-        A full circular edge therefore distributes glyphs around the vessel.
-        Limit the spine to the actual text block instead.
-        """
+        """Return a bounded, correctly oriented arc centred on the front (+Y)."""
         glyph_count = max(1, len(text_value.strip()))
         estimated_width = max(size, glyph_count * size * 0.72)
-        # Leave modest side room for font metrics while never allowing the
-        # text path to wrap onto the rear half of the planter.
         arc_length = min(estimated_width * 1.18, math.pi * radius * 0.82)
         half_angle = max(math.radians(3.0), min(0.5 * arc_length / radius, math.radians(73.0)))
 
         def point(angle: float) -> cq.Vector:
-            # Front of the DOBO cylinder is +Y. Traverse left-to-right through
-            # the front sector while remaining on the analytic cylinder.
             return cq.Vector(radius * math.sin(angle), radius * math.cos(angle), z)
 
-        start = point(-half_angle)
+        left = point(-half_angle)
         middle = point(0.0)
-        end = point(half_angle)
-        arc = cq.Edge.makeThreePointArc(start, middle, end)
+        right = point(half_angle)
+        # CadQuery orients glyphs from the direction of the spine. The earlier
+        # left->right arc placed the projected glyph frame upside down on this
+        # cylinder face, so traverse the same frontal arc in the opposite
+        # direction while keeping exactly the same bounded surface region.
+        arc = cq.Edge.makeThreePointArc(right, middle, left)
         if not arc.isValid():
             raise RuntimeError("Native frontal text arc is invalid.")
         return arc
@@ -150,10 +145,6 @@ class NativeSurfaceTextBuilder:
         if not cylindrical_faces:
             raise RuntimeError("Base shape contains no cylindrical face.")
         lateral_face = max(cylindrical_faces, key=lambda face: float(face.Area()))
-
-        # Use a bounded frontal arc rather than one of the body's complete
-        # circular edges. The former keeps a word together on the requested
-        # face; the latter makes CadQuery distribute glyphs around 360 degrees.
         spine = self._frontal_arc(float(surface.radius), float(v_offset), text_value, size)
 
         projected = text(
@@ -165,12 +156,20 @@ class NativeSurfaceTextBuilder:
 
         try:
             if mode == "emboss":
-                anchor_depth = min(0.50, max(0.12, 0.25 * depth))
-                outward_tool = offset(projected, depth, cap=True)
-                inward_anchor = offset(projected, -anchor_depth, cap=True)
+                # On the selected outer cylindrical face CadQuery's positive
+                # offset points inward. Use the observed face orientation:
+                # negative = outward relief, positive = inward joining anchor.
+                # Keep only a shallow anchor inside the wall while guaranteeing
+                # a visibly useful external relief for native surface text.
+                outward_depth = max(depth, 1.20)
+                anchor_depth = min(0.30, max(0.10, 0.15 * outward_depth))
+                outward_tool = offset(projected, -outward_depth, cap=True)
+                inward_anchor = offset(projected, anchor_depth, cap=True)
                 tool = outward_tool.fuse(inward_anchor, tol=0.01).clean()
             else:
-                tool = offset(projected, -depth, cap=True)
+                # Deboss follows the same face orientation: positive goes into
+                # the vessel wall.
+                tool = offset(projected, depth, cap=True)
         except Exception as error:
             raise RuntimeError(f"Native text {mode} offset failed.") from error
         if not tool.isValid():
