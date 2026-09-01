@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
+import unicodedata
 from typing import Any
 
 from .semantic_compiler import (
@@ -15,7 +16,7 @@ from .semantic_parser import SemanticProgramParser
 from .text_surface_consolidation import _prompt_lines
 
 
-REPAIR_VERSION = "3E.4-prevalidation-multiline-block"
+REPAIR_VERSION = "3E.5-multiline-semantic-role-block"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,29 +187,96 @@ class SemanticProposalRepairer:
             report=report,
         )
 
+    @staticmethod
+    def _plain_text(value: object) -> str:
+        decomposed = unicodedata.normalize("NFKD", str(value).lower())
+        return "".join(
+            character
+            for character in decomposed
+            if not unicodedata.combining(character)
+        ).replace("-", "_").replace(" ", "_")
+
+    @classmethod
+    def _explicit_multiline_features(
+        cls, program: DesignSemanticProgram
+    ) -> tuple[FeatureIntent, ...]:
+        """Resolve semantic features that belong to an explicit multiline block.
+
+        OpenAI may label requested text inconsistently: some proposals use
+        ``form_hint='text'`` while others emit generic feature forms but preserve a
+        text semantic id such as ``feature_text_002``. Multiline ownership must not
+        depend on one optional representation detail. We therefore use the canonical
+        prompt-line parser plus stable semantic evidence from form hint, id, or a
+        concept matching one of the requested literal lines.
+        """
+        lines = _prompt_lines(getattr(program.source, "prompt", None))
+        if len(lines) < 2:
+            return ()
+
+        line_tokens = {
+            cls._plain_text(line).strip("_")
+            for line in lines
+            if cls._plain_text(line).strip("_")
+        }
+        generic_text_tokens = {"text", "texto", "word", "palabra", "label"}
+        candidates: list[FeatureIntent] = []
+        for feature in program.features:
+            id_plain = cls._plain_text(feature.id)
+            concept_plain = cls._plain_text(feature.concept)
+            id_tokens = set(filter(None, id_plain.split("_")))
+            concept_tokens = set(filter(None, concept_plain.split("_")))
+            matches_requested_line = any(
+                line == concept_plain
+                or concept_plain.endswith("_" + line)
+                or line in concept_tokens
+                for line in line_tokens
+            )
+            text_semantic_id = bool(id_tokens & generic_text_tokens)
+            text_semantic_concept = bool(concept_tokens & generic_text_tokens)
+            if (
+                feature.form_hint == "text"
+                or text_semantic_id
+                or text_semantic_concept
+                or matches_requested_line
+            ):
+                candidates.append(feature)
+        return tuple(candidates) if len(candidates) >= 2 else ()
+
     @classmethod
     def _consolidate_explicit_multiline_block(
         cls, program: DesignSemanticProgram
     ) -> tuple[DesignSemanticProgram, tuple[SemanticRepairAction, ...]]:
-        """Collapse explicit prompt lines to one semantic text feature before layout validation.
+        """Collapse an explicit multiline request to one semantic text feature.
 
-        Native cylindrical text owns the internal line layout. Keeping one semantic
-        feature per line causes the generic layout engine to demand clearance between
-        lines that are intentionally part of the same typographic block. Consolidate
-        them before semantic compilation and let the downstream native text adapter
-        recover the literal lines from the original prompt via ``_prompt_lines``.
+        Native cylindrical text owns internal line spacing. Generic feature layout
+        must validate the complete text block, not each line as an independent
+        decoration. Literal lines remain in ``source.prompt`` and are recovered by
+        the native text adapter through the existing ``_prompt_lines`` capability.
         """
-        lines = _prompt_lines(getattr(program.source, "prompt", None))
-        text_features = tuple(
-            feature for feature in program.features if feature.form_hint == "text"
-        )
-        if len(lines) < 2 or len(text_features) < 2:
+        text_features = cls._explicit_multiline_features(program)
+        if len(text_features) < 2:
             return program, ()
 
-        representative = text_features[0]
-        removed_ids = {feature.id for feature in text_features[1:]}
+        representative_source = next(
+            (feature for feature in text_features if feature.form_hint == "text"),
+            text_features[0],
+        )
+        representative = (
+            representative_source
+            if representative_source.form_hint == "text"
+            else replace(representative_source, form_hint="text")
+        )
+        removed_ids = {
+            feature.id
+            for feature in text_features
+            if feature.id != representative_source.id
+        }
         kept_features = tuple(
-            feature for feature in program.features if feature.id not in removed_ids
+            representative
+            if feature.id == representative_source.id
+            else feature
+            for feature in program.features
+            if feature.id not in removed_ids
         )
 
         remapped_relations = []
@@ -238,14 +306,29 @@ class SemanticProposalRepairer:
                 )
             )
 
-        action = SemanticRepairAction(
-            field_path="features[text_multiline_block]",
-            before=", ".join(feature.id for feature in text_features),
-            after=representative.id,
-            reason=(
-                "consolidate explicit multiline text before generic layout validation; "
-                "native text layout owns internal line spacing"
-            ),
+        actions: list[SemanticRepairAction] = []
+        if representative_source.form_hint != "text":
+            actions.append(
+                SemanticRepairAction(
+                    field_path=f"features[{representative.id}].form_hint",
+                    before=representative_source.form_hint,
+                    after="text",
+                    reason=(
+                        "normalize explicit multiline block representative to the "
+                        "existing text semantic capability"
+                    ),
+                )
+            )
+        actions.append(
+            SemanticRepairAction(
+                field_path="features[text_multiline_block]",
+                before=", ".join(feature.id for feature in text_features),
+                after=representative.id,
+                reason=(
+                    "consolidate explicit multiline text before generic layout "
+                    "validation; native text layout owns internal line spacing"
+                ),
+            )
         )
         return (
             replace(
@@ -253,20 +336,12 @@ class SemanticProposalRepairer:
                 features=kept_features,
                 relations=tuple(remapped_relations),
             ),
-            (action,),
+            tuple(actions),
         )
 
-    @staticmethod
-    def _explicit_multiline_text_ids(program: DesignSemanticProgram) -> set[str]:
-        lines = _prompt_lines(getattr(program.source, "prompt", None))
-        if len(lines) < 2:
-            return set()
-        text_ids = tuple(
-            str(feature.id)
-            for feature in program.features
-            if feature.form_hint == "text"
-        )
-        return set(text_ids) if len(text_ids) >= 2 else set()
+    @classmethod
+    def _explicit_multiline_text_ids(cls, program: DesignSemanticProgram) -> set[str]:
+        return {feature.id for feature in cls._explicit_multiline_features(program)}
 
     @classmethod
     def _evaluate(
