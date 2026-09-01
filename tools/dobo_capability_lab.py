@@ -82,6 +82,31 @@ def _rel(path: str | Path) -> str:
         return str(p)
 
 
+def _physical_vessel_checks(result, vessel: dict) -> tuple[bool, bool, dict]:
+    """Report generated geometry, not legacy/missing motor aliases."""
+    checks = dict(getattr(result.mesh_result, "semantic_checks", {}) or {})
+
+    if "cavity_is_empty" in checks or "opening_is_clear" in checks:
+        cavity_ok = bool(checks.get("cavity_is_empty", False)) and bool(
+            checks.get("opening_is_clear", False)
+        )
+    else:
+        cavity_ok = bool(vessel.get("opening")) or (
+            vessel.get("opening_center") is not None
+            and vessel.get("opening_radii") is not None
+        )
+
+    if "drain_is_clear" in checks:
+        drain_ok = bool(checks["drain_is_clear"])
+    else:
+        drain_ok = bool(vessel.get("drain")) or (
+            vessel.get("drain_center") is not None
+            and vessel.get("drain_radius_mm") is not None
+        )
+
+    return cavity_ok, drain_ok, checks
+
+
 def generate(prompt: str, mode: str = "auto") -> dict:
     prompt = prompt.strip()
     if not prompt:
@@ -109,6 +134,7 @@ def generate(prompt: str, mode: str = "auto") -> dict:
     manifest_data = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
     validation = manifest_data.get("validation", {})
     vessel = motor_data.get("vessel", {})
+    cavity_ok, drain_ok, semantic_checks = _physical_vessel_checks(result, vessel)
 
     return {
         "ok": True,
@@ -122,8 +148,9 @@ def generate(prompt: str, mode: str = "auto") -> dict:
         "vessel": {
             "wall_mm": vessel.get("wall_mm"),
             "bottom_mm": vessel.get("bottom_mm"),
-            "opening": vessel.get("opening"),
-            "drain": vessel.get("drain"),
+            "opening": cavity_ok,
+            "drain": drain_ok,
+            "semantic_checks": semantic_checks,
         },
         "artifacts": {
             "stl": "/artifact?path=" + urllib.parse.quote(_rel(result.stl_path)),
@@ -150,17 +177,15 @@ HTML = r'''<!doctype html>
 <style>
 :root{--bg:#111310;--panel:#1a1e19;--panel2:#20251f;--line:#343b32;--text:#f3f0e8;--muted:#a6afa0;--accent:#d6ff54;--bad:#ff7c68;--good:#82e67c}
 *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;height:100vh;overflow:hidden}
-header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 20px;gap:14px;background:#141713} .brand{font-weight:800;letter-spacing:.08em}.brand b{color:var(--accent)} .sub{font-size:12px;color:var(--muted)} .status{margin-left:auto;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:6px 10px}
+header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 20px;gap:14px;background:#141713}.brand{font-weight:800;letter-spacing:.08em}.brand b{color:var(--accent)}.sub{font-size:12px;color:var(--muted)}.status{margin-left:auto;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:6px 10px}
 main{display:grid;grid-template-columns:320px 1fr 360px;height:calc(100vh - 58px)} aside,.right{background:var(--panel);padding:18px;overflow:auto}.left{border-right:1px solid var(--line)}.right{border-left:1px solid var(--line)}
-label,h3{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)} textarea{width:100%;height:150px;background:#111410;border:1px solid var(--line);border-radius:14px;color:var(--text);padding:14px;resize:vertical;font:inherit;line-height:1.4;outline:none}textarea:focus{border-color:#6d7d51}
-button{border:0;border-radius:11px;padding:11px 13px;font-weight:750;cursor:pointer}.run{width:100%;background:var(--accent);color:#10130b;margin-top:10px}.run:disabled{opacity:.45;cursor:wait}.secondary{background:#272d25;color:var(--text);border:1px solid var(--line)}
+label,h3{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}textarea{width:100%;height:150px;background:#111410;border:1px solid var(--line);border-radius:14px;color:var(--text);padding:14px;resize:vertical;font:inherit;line-height:1.4;outline:none}textarea:focus{border-color:#6d7d51}
+button{border:0;border-radius:11px;padding:11px 13px;font-weight:750;cursor:pointer}.run{width:100%;background:var(--accent);color:#10130b;margin-top:10px}.run:disabled{opacity:.45;cursor:wait}
 .examples{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 18px}.chip{font-size:11px;padding:7px 9px;border-radius:999px;background:#262c24;border:1px solid var(--line);cursor:pointer;color:#dbe1d6}
-.section{margin-top:20px}.cap{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 0;border-bottom:1px solid #292e27;font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:#6b7168;display:inline-block;margin-right:7px}.dot.live{background:var(--good)}
+.section{margin-top:20px}.cap{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 0;border-bottom:1px solid #292e27;font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:#6b7168;display:inline-block;margin-right:7px}
 .stage{position:relative;min-width:0;background:radial-gradient(circle at 50% 45%,#2b3029,#121411 62%);overflow:hidden}.toolbar{position:absolute;z-index:4;left:16px;top:16px;display:flex;gap:7px}.toolbar button{padding:8px 10px;font-size:11px;background:rgba(24,28,23,.9);border:1px solid var(--line);color:var(--text)}#viewer{width:100%;height:calc(100% - 160px);display:block}.renders{height:160px;border-top:1px solid var(--line);padding:12px 16px;background:#151815}.renderrow{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;height:110px}.shot{background:#20241f;border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative}.shot img{width:100%;height:100%;object-fit:cover}.shot span{position:absolute;left:7px;bottom:5px;font-size:10px;background:#111b;padding:3px 5px;border-radius:5px}
-.placeholder{position:absolute;inset:0 0 160px 0;display:grid;place-items:center;text-align:center;color:var(--muted);pointer-events:none}.placeholder strong{display:block;color:#dfe5da;font-size:18px;margin-bottom:6px}
-.card{background:var(--panel2);border:1px solid var(--line);border-radius:13px;padding:13px;margin-bottom:12px}.big{font-size:26px;font-weight:800}.muted{color:var(--muted);font-size:12px}.checks{display:grid;grid-template-columns:1fr auto;gap:7px;font-size:12px;margin-top:8px}.pass{color:var(--good)}.fail{color:var(--bad)} pre{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;background:#111410;padding:10px;border-radius:9px;max-height:260px;overflow:auto;color:#cbd3c6}.tabs{display:flex;gap:5px;margin-bottom:8px}.tabs button{font-size:10px;padding:6px 8px;background:#282e26;color:var(--muted)}.tabs button.active{color:#10130b;background:var(--accent)}.links{display:grid;grid-template-columns:1fr 1fr;gap:7px}.links a{text-decoration:none;text-align:center;padding:8px;border-radius:8px;border:1px solid var(--line);color:#e8eee3;font-size:11px;background:#242923}
-.error{border-color:#713d38;color:#ffd1c9;background:#2a1816}.spinner{display:inline-block;width:11px;height:11px;border:2px solid #0004;border-top-color:#111;border-radius:50%;animation:spin .7s linear infinite;margin-right:7px}@keyframes spin{to{transform:rotate(360deg)}}
-@media(max-width:1000px){main{grid-template-columns:270px 1fr}.right{position:absolute;right:0;top:58px;width:340px;height:calc(100vh - 58px);transform:translateX(100%)} }
+.placeholder{position:absolute;inset:0 0 160px 0;display:grid;place-items:center;text-align:center;color:var(--muted);pointer-events:none}.placeholder strong{display:block;color:#dfe5da;font-size:18px;margin-bottom:6px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:13px;padding:13px;margin-bottom:12px}.big{font-size:26px;font-weight:800}.muted{color:var(--muted);font-size:12px}.checks{display:grid;grid-template-columns:1fr auto;gap:7px;font-size:12px;margin-top:8px}.pass{color:var(--good)}.fail{color:var(--bad)}pre{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;background:#111410;padding:10px;border-radius:9px;max-height:260px;overflow:auto;color:#cbd3c6}.tabs{display:flex;gap:5px;margin-bottom:8px}.tabs button{font-size:10px;padding:6px 8px;background:#282e26;color:var(--muted)}.tabs button.active{color:#10130b;background:var(--accent)}.links{display:grid;grid-template-columns:1fr 1fr;gap:7px}.links a{text-decoration:none;text-align:center;padding:8px;border-radius:8px;border:1px solid var(--line);color:#e8eee3;font-size:11px;background:#242923}.error{border-color:#713d38;color:#ffd1c9;background:#2a1816}.spinner{display:inline-block;width:11px;height:11px;border:2px solid #0004;border-top-color:#111;border-radius:50%;animation:spin .7s linear infinite;margin-right:7px}@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:1000px){main{grid-template-columns:270px 1fr}.right{position:absolute;right:0;top:58px;width:340px;height:calc(100vh - 58px);transform:translateX(100%)}}
 </style>
 </head>
 <body>
@@ -174,19 +199,19 @@ button{border:0;border-radius:11px;padding:11px 13px;font-weight:750;cursor:poin
 </main>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.164.1/build/three.module.js","three/addons/":"https://unpkg.com/three@0.164.1/examples/jsm/"}}</script>
 <script type="module">
-import * as THREE from 'three'; import {OrbitControls} from 'three/addons/controls/OrbitControls.js'; import {STLLoader} from 'three/addons/loaders/STLLoader.js';
-const canvas=document.querySelector('#viewer'), stage=canvas.parentElement; const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true,alpha:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.shadowMap.enabled=true;
-const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(38,1,.1,5000); camera.position.set(180,-210,150); const controls=new OrbitControls(camera,canvas); controls.enableDamping=true; controls.target.set(0,0,40); scene.add(new THREE.HemisphereLight(0xffffff,0x293023,2.2)); const key=new THREE.DirectionalLight(0xffffff,3.1);key.position.set(-140,-180,240);key.castShadow=true;scene.add(key); const fill=new THREE.DirectionalLight(0xbfd7ff,1.2);fill.position.set(180,80,120);scene.add(fill); const floor=new THREE.Mesh(new THREE.PlaneGeometry(800,800),new THREE.MeshStandardMaterial({color:0x171a16,roughness:1}));floor.rotation.x=-Math.PI/2;floor.position.z=-3;floor.receiveShadow=true;scene.add(floor);
-let mesh=null, auto=false, wire=false, data=null;
-function size(){const h=stage.clientHeight-160;renderer.setSize(stage.clientWidth,h,false);camera.aspect=stage.clientWidth/h;camera.updateProjectionMatrix()} addEventListener('resize',size);size();
-function fit(){if(!mesh)return; const box=new THREE.Box3().setFromObject(mesh),s=box.getSize(new THREE.Vector3()),c=box.getCenter(new THREE.Vector3()),max=Math.max(s.x,s.y,s.z);controls.target.copy(c);camera.position.set(c.x+max*1.55,c.y-max*1.8,c.z+max*1.25);camera.near=max/100;camera.far=max*30;camera.updateProjectionMatrix();controls.update()}
+import * as THREE from 'three';import {OrbitControls} from 'three/addons/controls/OrbitControls.js';import {STLLoader} from 'three/addons/loaders/STLLoader.js';
+const canvas=document.querySelector('#viewer'),stage=canvas.parentElement;const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true,alpha:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.shadowMap.enabled=true;
+const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(38,1,.1,5000);camera.position.set(180,-210,150);const controls=new OrbitControls(camera,canvas);controls.enableDamping=true;controls.target.set(0,0,40);scene.add(new THREE.HemisphereLight(0xffffff,0x293023,2.2));const key=new THREE.DirectionalLight(0xffffff,3.1);key.position.set(-140,-180,240);key.castShadow=true;scene.add(key);const fill=new THREE.DirectionalLight(0xbfd7ff,1.2);fill.position.set(180,80,120);scene.add(fill);const floor=new THREE.Mesh(new THREE.PlaneGeometry(800,800),new THREE.MeshStandardMaterial({color:0x171a16,roughness:1}));floor.rotation.x=-Math.PI/2;floor.position.z=-3;floor.receiveShadow=true;scene.add(floor);
+let mesh=null,auto=false,wire=false,data=null;
+function size(){const h=stage.clientHeight-160;renderer.setSize(stage.clientWidth,h,false);camera.aspect=stage.clientWidth/h;camera.updateProjectionMatrix()}addEventListener('resize',size);size();
+function fit(){if(!mesh)return;const box=new THREE.Box3().setFromObject(mesh),s=box.getSize(new THREE.Vector3()),c=box.getCenter(new THREE.Vector3()),max=Math.max(s.x,s.y,s.z);controls.target.copy(c);camera.position.set(c.x+max*1.55,c.y-max*1.8,c.z+max*1.25);camera.near=max/100;camera.far=max*30;camera.updateProjectionMatrix();controls.update()}
 function loop(){requestAnimationFrame(loop);if(auto&&mesh)mesh.rotation.z+=.005;controls.update();renderer.render(scene,camera)}loop();
 async function loadSTL(url){return new Promise((ok,bad)=>new STLLoader().load(url,g=>{if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose()}g.computeVertexNormals();mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xb7c48b,roughness:.58,metalness:.02,side:THREE.DoubleSide}));mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);document.querySelector('#placeholder').style.display='none';fit();setTimeout(shots,250);ok()},undefined,bad))}
 function shot(pos,target=[0,0,35]){const oldP=camera.position.clone(),oldT=controls.target.clone();camera.position.set(...pos);controls.target.set(...target);controls.update();renderer.render(scene,camera);const img=renderer.domElement.toDataURL('image/png');camera.position.copy(oldP);controls.target.copy(oldT);controls.update();return img}
-function shots(){if(!mesh)return; const box=new THREE.Box3().setFromObject(mesh),s=box.getSize(new THREE.Vector3()),c=box.getCenter(new THREE.Vector3()),m=Math.max(s.x,s.y,s.z);document.querySelector('#shot1').src=shot([c.x,c.y-m*2.4,c.z+.2*m],[c.x,c.y,c.z]);document.querySelector('#shot2').src=shot([c.x+1.6*m,c.y-1.8*m,c.z+1.25*m],[c.x,c.y,c.z]);document.querySelector('#shot3').src=shot([c.x+.05,c.y-.05,c.z+2.8*m],[c.x,c.y,c.z])}
-const q=s=>document.querySelector(s), run=q('#run'), prompt=q('#prompt'); document.querySelectorAll('.chip').forEach(x=>x.onclick=()=>{prompt.value='Crea una maceta '+x.textContent.toLowerCase()}); q('#home').onclick=fit;q('#wire').onclick=()=>{wire=!wire;if(mesh)mesh.material.wireframe=wire};q('#rotate').onclick=()=>auto=!auto;
+function shots(){if(!mesh)return;const box=new THREE.Box3().setFromObject(mesh),s=box.getSize(new THREE.Vector3()),c=box.getCenter(new THREE.Vector3()),m=Math.max(s.x,s.y,s.z);document.querySelector('#shot1').src=shot([c.x,c.y-m*2.4,c.z+.2*m],[c.x,c.y,c.z]);document.querySelector('#shot2').src=shot([c.x+1.6*m,c.y-1.8*m,c.z+1.25*m],[c.x,c.y,c.z]);document.querySelector('#shot3').src=shot([c.x+.05,c.y-.05,c.z+2.8*m],[c.x,c.y,c.z])}
+const q=s=>document.querySelector(s),run=q('#run'),prompt=q('#prompt');document.querySelectorAll('.chip').forEach(x=>x.onclick=()=>{prompt.value='Crea una maceta '+x.textContent.toLowerCase()});q('#home').onclick=fit;q('#wire').onclick=()=>{wire=!wire;if(mesh)mesh.material.wireframe=wire};q('#rotate').onclick=()=>auto=!auto;
 function mark(id,val){const e=q(id);e.textContent=val?'PASS':'FAIL';e.className=val?'pass':'fail'}
-function update(d){data=d;q('#summary').innerHTML=`<div class="muted">Resultado real</div><div class="big">${d.morphology||d.profile||'Generado'}</div><div class="muted">${d.source} · ${d.trace.generation_seconds.toFixed(2)} s · ${d.trace.vertices.toLocaleString()} vértices</div>`;const v=d.validation||{};q('#checks').innerHTML=`<span>Watertight</span><b class="${v.watertight?'pass':'fail'}">${String(v.watertight)}</b><span>Winding consistente</span><b class="${v.winding_consistent?'pass':'fail'}">${String(v.winding_consistent)}</b><span>Componentes</span><b>${v.component_count??'—'}</b><span>Intentos</span><b>${d.trace.generation_attempts}</b>`;mark('#cSemantic',true);mark('#cGeometry',!!v.watertight);const open=!!d.vessel?.opening;mark('#cCavity',open);const drain=!!d.vessel?.drain;mark('#cDrain',drain);mark('#cMfg',!!v.watertight&&!!v.winding_consistent);q('#json').textContent=JSON.stringify(d.semantic,null,2);q('#links').innerHTML=`<a href="${d.artifacts.stl}" download>STL</a><a href="${d.artifacts.three_mf}" download>3MF</a><a href="${d.artifacts.motor}" target="_blank">Motor JSON</a><a href="${d.artifacts.manifest}" target="_blank">Manifest</a>`;loadSTL(d.artifacts.stl)}
+function update(d){data=d;q('#summary').innerHTML=`<div class="muted">Resultado real</div><div class="big">${d.morphology||d.profile||'Generado'}</div><div class="muted">${d.source} · ${d.trace.generation_seconds.toFixed(2)} s · ${d.trace.vertices.toLocaleString()} vértices</div>`;const v=d.validation||{};q('#checks').innerHTML=`<span>Watertight</span><b class="${v.watertight?'pass':'fail'}">${String(v.watertight)}</b><span>Winding consistente</span><b class="${v.winding_consistent?'pass':'fail'}">${String(v.winding_consistent)}</b><span>Componentes</span><b>${v.component_count??'—'}</b><span>Intentos</span><b>${d.trace.generation_attempts}</b>`;mark('#cSemantic',true);mark('#cGeometry',!!v.watertight);mark('#cCavity',!!d.vessel?.opening);mark('#cDrain',!!d.vessel?.drain);mark('#cMfg',!!v.watertight&&!!v.winding_consistent);q('#json').textContent=JSON.stringify(d.semantic,null,2);q('#links').innerHTML=`<a href="${d.artifacts.stl}" download>STL</a><a href="${d.artifacts.three_mf}" download>3MF</a><a href="${d.artifacts.motor}" target="_blank">Motor JSON</a><a href="${d.artifacts.manifest}" target="_blank">Manifest</a>`;loadSTL(d.artifacts.stl)}
 run.onclick=async()=>{run.disabled=true;run.innerHTML='<span class="spinner"></span>Generando...';q('#error').style.display='none';q('#engineStatus').textContent='Motor ejecutando';try{const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt.value,mode:'auto'})});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Fallo de generación');update(d);q('#engineStatus').textContent='Generación válida'}catch(e){q('#error').style.display='block';q('#error').textContent=e.message;q('#engineStatus').textContent='Generación fallida'}finally{run.disabled=false;run.textContent='Generar con Motor DOBO'}};
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');q('#json').textContent=data?JSON.stringify(data[b.dataset.tab],null,2):'Todavía no hay datos.'});
 </script></body></html>'''
