@@ -116,7 +116,7 @@ class NativeSurfaceTextBuilder:
 
     @staticmethod
     def _frontal_arc(radius: float, z: float, text_value: str, size: float) -> cq.Edge:
-        """Return the known-good bounded arc centred on the front (+Y)."""
+        """Return the known-good bounded projection arc on the +Y reference meridian."""
         glyph_count = max(1, len(text_value.strip()))
         estimated_width = max(size, glyph_count * size * 0.72)
         arc_length = min(estimated_width * 1.18, math.pi * radius * 0.82)
@@ -173,9 +173,6 @@ class NativeSurfaceTextBuilder:
         except ValueError as error:
             if "Null TopoDS_Shape" not in str(error):
                 raise
-            # OCC projection can still reject a borderline font outline. Retry only
-            # that line with a small deterministic safety reduction; do not change
-            # block spacing, relief, vessel geometry, or any other line.
             projection_size *= 0.94
             spine = self._frontal_arc(
                 float(surface.radius), float(v_offset), text_value, projection_size
@@ -207,10 +204,21 @@ class NativeSurfaceTextBuilder:
         if not tool.isValid():
             raise RuntimeError(f"Native text {mode} offset tool is invalid.")
 
-        if abs(u_offset) > 1e-12:
-            angle_deg = float(u_offset) / float(surface.radius) * 180.0 / math.pi
-            projected = projected.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg)
-            tool = tool.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg)
+        # CadQuery projects reliably on the +Y reference arc, while DOBO's canonical
+        # front (and the Lab frontal camera) is -Y. Preserve the known-good projection
+        # and typography, then move the completed projected/tool geometry rigidly by
+        # 180 degrees. Semantic circumferential u_offset remains an additional rotation.
+        angle_deg = 180.0 + (
+            float(u_offset) / float(surface.radius) * 180.0 / math.pi
+            if abs(u_offset) > 1e-12
+            else 0.0
+        )
+        projected = projected.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
+        tool = tool.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
         return projected, tool
 
     @staticmethod
