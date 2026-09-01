@@ -14,7 +14,7 @@ from .semantic_contract import DesignSemanticProgram, FeatureIntent
 from .semantic_parser import SemanticProgramParser
 
 
-REPAIR_VERSION = "3E.1"
+REPAIR_VERSION = "3E.2-multiline-layout-block"
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +185,36 @@ class SemanticProposalRepairer:
         )
 
     @staticmethod
+    def _explicit_multiline_text_ids(program: DesignSemanticProgram) -> set[str]:
+        """Return text feature ids that intentionally form one multiline block.
+
+        Prompt interpreters may emit one text feature per requested line. Those
+        lines are not independent decorations: the native text layout owns their
+        internal spacing. Generic feature-to-feature clearance must therefore not
+        reject adjacent lines before that block reaches the text capability.
+        """
+        prompt = str(getattr(program.source, "prompt", None) or "")
+        if not prompt:
+            return set()
+        normalized = prompt.lower()
+        explicit_multiline = (
+            "\\n" in prompt
+            or "\n" in prompt
+            or "linea 1" in normalized
+            or "línea 1" in normalized
+        )
+        if not explicit_multiline:
+            return set()
+        text_ids = {
+            str(feature.id)
+            for feature in program.features
+            if feature.form_hint == "text"
+        }
+        return text_ids if len(text_ids) >= 2 else set()
+
+    @classmethod
     def _evaluate(
+        cls,
         program: DesignSemanticProgram,
     ) -> tuple[ProposalValidationSnapshot, SemanticCompilationResult]:
         from product_generators.organic_shapes.hierarchy_engine import (
@@ -208,13 +237,26 @@ class SemanticProposalRepairer:
                 specification
             )
         )
+        multiline_ids = cls._explicit_multiline_text_ids(program)
+
+        def intentional_multiline_clearance(name: str) -> bool:
+            if not multiline_ids or not name.startswith("pair/"):
+                return False
+            pair = name.removeprefix("pair/").split("/", 1)[0]
+            if "--" not in pair:
+                return False
+            first, second = pair.split("--", 1)
+            return first in multiline_ids and second in multiline_ids
+
         return (
             ProposalValidationSnapshot(
                 surface_anchor_failures=tuple(
                     name for name, passed in anchors.items() if not passed
                 ),
                 layout_failures=tuple(
-                    name for name, passed in layout.checks.items() if not passed
+                    name
+                    for name, passed in layout.checks.items()
+                    if not passed and not intentional_multiline_clearance(name)
                 ),
                 manufacturability_failures=tuple(
                     name
