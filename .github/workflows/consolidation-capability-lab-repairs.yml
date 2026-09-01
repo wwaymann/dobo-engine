@@ -7,6 +7,8 @@ on:
       - 'app/product_generators/design_interpreter/__init__.py'
       - 'app/product_generators/design_interpreter/core_capability_reconnection.py'
       - 'app/product_generators/design_interpreter/core_retry_reconnection.py'
+      - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_retry_repairs.py'
@@ -20,6 +22,8 @@ on:
       - 'app/product_generators/design_interpreter/__init__.py'
       - 'app/product_generators/design_interpreter/core_capability_reconnection.py'
       - 'app/product_generators/design_interpreter/core_retry_reconnection.py'
+      - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - 'app/product_generators/organic_shapes/engine.py'
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_retry_repairs.py'
@@ -50,7 +54,7 @@ jobs:
           import runpy
           runpy.run_path('tools/dobo_capability_repairs_check.py', run_name='__main__')
           PY
-      - name: Validate cube and rectangular prism through live DOBO Lab
+      - name: Validate cube, rectangular prism and cone through live DOBO Lab
         env:
           PYTHONPATH: app:tools
         run: |
@@ -60,17 +64,28 @@ jobs:
           import dobo_capability_lab_live as live
 
           cases = {
-              'cube': 'Crea una maceta cúbica',
-              'rectangular': 'Crea una maceta prisma rectangular',
+              'cube': {
+                  'prompt': 'Crea una maceta cúbica',
+                  'route': 'analytic_cad_angular_primitive',
+              },
+              'rectangular': {
+                  'prompt': 'Crea una maceta prisma rectangular',
+                  'route': 'analytic_cad_angular_primitive',
+              },
+              'cone': {
+                  'prompt': 'Crea una maceta cono',
+                  'route': 'analytic_cad_tapered_primitive',
+              },
           }
           report = {}
-          for key, prompt in cases.items():
+          for key, case in cases.items():
+              prompt = case['prompt']
               result = live.generate(prompt, mode='offline')
               motor = result['motor']
               route = motor.get('_capability_route')
-              if route != 'analytic_cad_angular_primitive':
+              if route != case['route']:
                   raise RuntimeError(
-                      f'{key} did not use promoted angular CAD route: {route!r}'
+                      f"{key} did not use promoted CAD route: {route!r}; expected {case['route']!r}"
                   )
               vessel = result['vessel']
               if not vessel.get('opening') or not vessel.get('drain'):
@@ -80,10 +95,39 @@ jobs:
               validation = result['validation']
               if not validation.get('watertight'):
                   raise RuntimeError(f'{key} live-lab mesh is not watertight')
+              if not validation.get('winding_consistent'):
+                  raise RuntimeError(f'{key} live-lab mesh has inconsistent winding')
               if int(validation.get('component_count', 0)) != 1:
                   raise RuntimeError(
                       f"{key} live-lab component count is {validation.get('component_count')}"
                   )
+
+              geometry_checks = dict(vessel.get('semantic_checks', {}) or {})
+              if key == 'cone':
+                  required = (
+                      'cavity_is_empty',
+                      'opening_is_clear',
+                      'drain_is_clear',
+                      'wall_is_solid',
+                      'base_is_solid',
+                      'profile_is_tapered',
+                      'taper_is_monotonic',
+                  )
+                  failed = [name for name in required if not geometry_checks.get(name)]
+                  if failed:
+                      raise RuntimeError(
+                          f'cone analytic physical checks failed: {failed}; checks={geometry_checks!r}'
+                      )
+                  tapered = motor.get('_analytic_tapered', {})
+                  if not (
+                      float(tapered.get('top_diameter_mm', 0.0))
+                      > float(tapered.get('bottom_diameter_mm', 0.0))
+                      > 0.0
+                  ):
+                      raise RuntimeError(
+                          f'cone diameter contract is invalid: {tapered!r}'
+                      )
+
               report[key] = {
                   'prompt': prompt,
                   'source': result['source'],
@@ -94,13 +138,15 @@ jobs:
                   'component_count': validation.get('component_count'),
                   'opening': bool(vessel.get('opening')),
                   'drain': bool(vessel.get('drain')),
+                  'semantic_checks': geometry_checks,
+                  'analytic_tapered': motor.get('_analytic_tapered'),
                   'stl': result['artifacts']['stl'],
                   'three_mf': result['artifacts']['three_mf'],
               }
 
-          out = Path('outputs-ci/capability-lab-live-angular')
+          out = Path('outputs-ci/capability-lab-live-primitives')
           out.mkdir(parents=True, exist_ok=True)
-          (out / 'LIVE_ANGULAR_VALIDATION.json').write_text(
+          (out / 'LIVE_PRIMITIVE_VALIDATION.json').write_text(
               json.dumps(report, indent=2, ensure_ascii=False) + '\n',
               encoding='utf-8',
           )
@@ -117,7 +163,7 @@ jobs:
           name: dobo-capability-lab-repair-evidence
           path: |
             outputs-ci/capability-repairs/**
-            outputs-ci/capability-lab-live-angular/**
+            outputs-ci/capability-lab-live-primitives/**
             outputs-ci/exact-walter/**
           if-no-files-found: warn
           retention-days: 30
