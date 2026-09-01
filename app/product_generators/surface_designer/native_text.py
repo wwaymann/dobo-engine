@@ -153,8 +153,8 @@ class NativeSurfaceTextBuilder:
         try:
             if mode == "emboss":
                 # Native cylindrical lettering uses the semantic relief when it
-                # is already shallow, with a 1.00 mm presentation maximum.
-                outward_depth = min(depth, 1.00)
+                # is already shallow, with a 1.50 mm presentation maximum.
+                outward_depth = min(depth, 1.50)
                 anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
                 outward_tool = offset(projected, -outward_depth, cap=True)
                 inward_anchor = offset(projected, anchor_depth, cap=True)
