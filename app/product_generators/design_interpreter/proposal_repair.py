@@ -12,9 +12,10 @@ from .semantic_compiler import (
 )
 from .semantic_contract import DesignSemanticProgram, FeatureIntent
 from .semantic_parser import SemanticProgramParser
+from .text_surface_consolidation import _prompt_lines
 
 
-REPAIR_VERSION = "3E.2-multiline-layout-block"
+REPAIR_VERSION = "3E.3-multiline-semantic-layout-block"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,31 +187,25 @@ class SemanticProposalRepairer:
 
     @staticmethod
     def _explicit_multiline_text_ids(program: DesignSemanticProgram) -> set[str]:
-        """Return text feature ids that intentionally form one multiline block.
+        """Return the text features that intentionally belong to one text block.
 
-        Prompt interpreters may emit one text feature per requested line. Those
-        lines are not independent decorations: the native text layout owns their
-        internal spacing. Generic feature-to-feature clearance must therefore not
-        reject adjacent lines before that block reaches the text capability.
+        Use the canonical prompt-line parser rather than feature-id naming. The
+        interpreter is free to emit ids such as text_1, text_plantas_1, or any
+        other semantic name; multiline ownership comes from the requested text
+        block, not from those generated ids.
         """
-        prompt = str(getattr(program.source, "prompt", None) or "")
-        if not prompt:
+        lines = _prompt_lines(getattr(program.source, "prompt", None))
+        if len(lines) < 2:
             return set()
-        normalized = prompt.lower()
-        explicit_multiline = (
-            "\\n" in prompt
-            or "\n" in prompt
-            or "linea 1" in normalized
-            or "línea 1" in normalized
-        )
-        if not explicit_multiline:
-            return set()
-        text_ids = {
+        text_ids = tuple(
             str(feature.id)
             for feature in program.features
             if feature.form_hint == "text"
-        }
-        return text_ids if len(text_ids) >= 2 else set()
+        )
+        # A prompt with N explicit lines can be represented either as one text
+        # feature carrying the block or as N text features. Clearance filtering
+        # is only needed in the latter case, and only among those text features.
+        return set(text_ids) if len(text_ids) >= 2 else set()
 
     @classmethod
     def _evaluate(
