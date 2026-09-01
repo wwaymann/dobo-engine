@@ -13,7 +13,7 @@ from .semantic_compiler import (
 )
 from .semantic_contract import DesignSemanticProgram, FeatureIntent
 from .semantic_parser import SemanticProgramParser
-from .text_surface_consolidation import _prompt_lines
+from .text_prompt_lines import _prompt_lines
 
 
 REPAIR_VERSION = "3E.5-multiline-semantic-role-block"
@@ -200,19 +200,9 @@ class SemanticProposalRepairer:
     def _explicit_multiline_features(
         cls, program: DesignSemanticProgram
     ) -> tuple[FeatureIntent, ...]:
-        """Resolve semantic features that belong to an explicit multiline block.
-
-        OpenAI may label requested text inconsistently: some proposals use
-        ``form_hint='text'`` while others emit generic feature forms but preserve a
-        text semantic id such as ``feature_text_002``. Multiline ownership must not
-        depend on one optional representation detail. We therefore use the canonical
-        prompt-line parser plus stable semantic evidence from form hint, id, or a
-        concept matching one of the requested literal lines.
-        """
         lines = _prompt_lines(getattr(program.source, "prompt", None))
         if len(lines) < 2:
             return ()
-
         line_tokens = {
             cls._plain_text(line).strip("_")
             for line in lines
@@ -246,17 +236,9 @@ class SemanticProposalRepairer:
     def _consolidate_explicit_multiline_block(
         cls, program: DesignSemanticProgram
     ) -> tuple[DesignSemanticProgram, tuple[SemanticRepairAction, ...]]:
-        """Collapse an explicit multiline request to one semantic text feature.
-
-        Native cylindrical text owns internal line spacing. Generic feature layout
-        must validate the complete text block, not each line as an independent
-        decoration. Literal lines remain in ``source.prompt`` and are recovered by
-        the native text adapter through the existing ``_prompt_lines`` capability.
-        """
         text_features = cls._explicit_multiline_features(program)
         if len(text_features) < 2:
             return program, ()
-
         representative_source = next(
             (feature for feature in text_features if feature.form_hint == "text"),
             text_features[0],
@@ -272,104 +254,52 @@ class SemanticProposalRepairer:
             if feature.id != representative_source.id
         }
         kept_features = tuple(
-            representative
-            if feature.id == representative_source.id
-            else feature
+            representative if feature.id == representative_source.id else feature
             for feature in program.features
             if feature.id not in removed_ids
         )
-
         remapped_relations = []
         relation_keys: set[tuple[str, str, str]] = set()
         for relation in program.relations:
-            subject_id = (
-                representative.id
-                if relation.subject_id in removed_ids
-                else relation.subject_id
-            )
-            object_id = (
-                representative.id
-                if relation.object_id in removed_ids
-                else relation.object_id
-            )
+            subject_id = representative.id if relation.subject_id in removed_ids else relation.subject_id
+            object_id = representative.id if relation.object_id in removed_ids else relation.object_id
             if subject_id == object_id:
                 continue
             key = (relation.kind, subject_id, object_id)
             if key in relation_keys:
                 continue
             relation_keys.add(key)
-            remapped_relations.append(
-                replace(
-                    relation,
-                    subject_id=subject_id,
-                    object_id=object_id,
-                )
-            )
-
+            remapped_relations.append(replace(relation, subject_id=subject_id, object_id=object_id))
         actions: list[SemanticRepairAction] = []
         if representative_source.form_hint != "text":
-            actions.append(
-                SemanticRepairAction(
-                    field_path=f"features[{representative.id}].form_hint",
-                    before=representative_source.form_hint,
-                    after="text",
-                    reason=(
-                        "normalize explicit multiline block representative to the "
-                        "existing text semantic capability"
-                    ),
-                )
-            )
-        actions.append(
-            SemanticRepairAction(
-                field_path="features[text_multiline_block]",
-                before=", ".join(feature.id for feature in text_features),
-                after=representative.id,
-                reason=(
-                    "consolidate explicit multiline text before generic layout "
-                    "validation; native text layout owns internal line spacing"
-                ),
-            )
-        )
-        return (
-            replace(
-                program,
-                features=kept_features,
-                relations=tuple(remapped_relations),
-            ),
-            tuple(actions),
-        )
+            actions.append(SemanticRepairAction(
+                field_path=f"features[{representative.id}].form_hint",
+                before=representative_source.form_hint,
+                after="text",
+                reason="normalize explicit multiline block representative to the existing text semantic capability",
+            ))
+        actions.append(SemanticRepairAction(
+            field_path="features[text_multiline_block]",
+            before=", ".join(feature.id for feature in text_features),
+            after=representative.id,
+            reason="consolidate explicit multiline text before generic layout validation; native text layout owns internal line spacing",
+        ))
+        return replace(program, features=kept_features, relations=tuple(remapped_relations)), tuple(actions)
 
     @classmethod
     def _explicit_multiline_text_ids(cls, program: DesignSemanticProgram) -> set[str]:
         return {feature.id for feature in cls._explicit_multiline_features(program)}
 
     @classmethod
-    def _evaluate(
-        cls,
-        program: DesignSemanticProgram,
-    ) -> tuple[ProposalValidationSnapshot, SemanticCompilationResult]:
-        from product_generators.organic_shapes.hierarchy_engine import (
-            HierarchicalFeatureVesselEngine,
-        )
-        from product_generators.organic_shapes.hierarchy_specification import (
-            HierarchicalFeatureParser,
-        )
-
+    def _evaluate(cls, program: DesignSemanticProgram) -> tuple[ProposalValidationSnapshot, SemanticCompilationResult]:
+        from product_generators.organic_shapes.hierarchy_engine import HierarchicalFeatureVesselEngine
+        from product_generators.organic_shapes.hierarchy_specification import HierarchicalFeatureParser
         compilation = SemanticToMotorCompiler.compile(program)
-        specification = HierarchicalFeatureParser().parse_dict(
-            compilation.motor_program
-        )
-        anchors = HierarchicalFeatureVesselEngine.surface_anchor_checks(
-            specification
-        )
+        specification = HierarchicalFeatureParser().parse_dict(compilation.motor_program)
+        anchors = HierarchicalFeatureVesselEngine.surface_anchor_checks(specification)
         layout = HierarchicalFeatureVesselEngine.layout_report(specification)
-        manufacturing = (
-            HierarchicalFeatureVesselEngine.feature_manufacturability_report(
-                specification
-            )
-        )
+        manufacturing = HierarchicalFeatureVesselEngine.feature_manufacturability_report(specification)
         multiline_ids = cls._explicit_multiline_text_ids(program)
-
         def intentional_multiline_clearance(name: str) -> bool:
             if not multiline_ids or not name.startswith("pair/"):
                 return False
@@ -378,64 +308,32 @@ class SemanticProposalRepairer:
                 return False
             first, second = pair.split("--", 1)
             return first in multiline_ids and second in multiline_ids
+        return ProposalValidationSnapshot(
+            surface_anchor_failures=tuple(name for name, passed in anchors.items() if not passed),
+            layout_failures=tuple(name for name, passed in layout.checks.items() if not passed and not intentional_multiline_clearance(name)),
+            manufacturability_failures=tuple(name for name, passed in manufacturing.checks.items() if not passed),
+        ), compilation
 
-        return (
-            ProposalValidationSnapshot(
-                surface_anchor_failures=tuple(
-                    name for name, passed in anchors.items() if not passed
-                ),
-                layout_failures=tuple(
-                    name
-                    for name, passed in layout.checks.items()
-                    if not passed and not intentional_multiline_clearance(name)
-                ),
-                manufacturability_failures=tuple(
-                    name
-                    for name, passed in manufacturing.checks.items()
-                    if not passed
-                ),
-            ),
-            compilation,
-        )
-
-    def _repair_once(
-        self,
-        program: DesignSemanticProgram,
-        snapshot: ProposalValidationSnapshot,
-    ) -> tuple[DesignSemanticProgram, tuple[SemanticRepairAction, ...]]:
+    def _repair_once(self, program: DesignSemanticProgram, snapshot: ProposalValidationSnapshot) -> tuple[DesignSemanticProgram, tuple[SemanticRepairAction, ...]]:
         by_id = {feature.id: feature for feature in program.features}
         changes: dict[str, dict[str, bool]] = {}
-
         def request(feature_id: str, operation: str) -> None:
             if feature_id in by_id:
                 changes.setdefault(feature_id, {})[operation] = True
-
         for failure in snapshot.layout_failures:
             if failure.startswith("pair/"):
                 pair = failure.removeprefix("pair/").split("/", 1)[0]
                 first, second = pair.split("--", 1)
-                request(first, "shrink")
-                request(second, "shrink")
-                continue
+                request(first, "shrink"); request(second, "shrink"); continue
             feature_id = self._failure_feature_id(failure)
-            if failure.endswith("/opening_clearance"):
-                request(feature_id, "lower")
-            elif failure.endswith("/base_clearance"):
-                request(feature_id, "raise")
-            elif failure.endswith("/inside_grid"):
-                request(feature_id, "shrink")
-
+            if failure.endswith("/opening_clearance"): request(feature_id, "lower")
+            elif failure.endswith("/base_clearance"): request(feature_id, "raise")
+            elif failure.endswith("/inside_grid"): request(feature_id, "shrink")
         for failure in snapshot.manufacturability_failures:
             feature_id = self._failure_feature_id(failure)
-            if failure.endswith("/maximum_depth") or failure.endswith(
-                "/wall_reserve"
-            ):
-                request(feature_id, "reduce_depth")
-            elif failure.endswith("/minimum_depth"):
-                request(feature_id, "increase_depth")
-            elif failure.endswith("/minimum_feature"):
-                request(feature_id, "grow")
-
+            if failure.endswith("/maximum_depth") or failure.endswith("/wall_reserve"): request(feature_id, "reduce_depth")
+            elif failure.endswith("/minimum_depth"): request(feature_id, "increase_depth")
+            elif failure.endswith("/minimum_feature"): request(feature_id, "grow")
         features: list[FeatureIntent] = []
         actions: list[SemanticRepairAction] = []
         for index, feature in enumerate(program.features):
@@ -445,126 +343,35 @@ class SemanticProposalRepairer:
             if operations.get("lower"):
                 value = max(0.0, anchor.vertical - self.vertical_step)
                 if value != anchor.vertical:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].anchor.vertical",
-                            anchor.vertical,
-                            value,
-                            "move feature below the vessel opening clearance",
-                        )
-                    )
+                    actions.append(self._action(f"features[{index}].anchor.vertical", anchor.vertical, value, "move feature below the vessel opening clearance"))
                     anchor = replace(anchor, vertical=value)
             if operations.get("raise"):
                 value = min(1.0, anchor.vertical + self.vertical_step)
                 if value != anchor.vertical:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].anchor.vertical",
-                            anchor.vertical,
-                            value,
-                            "move feature above the vessel base clearance",
-                        )
-                    )
+                    actions.append(self._action(f"features[{index}].anchor.vertical", anchor.vertical, value, "move feature above the vessel base clearance"))
                     anchor = replace(anchor, vertical=value)
             if operations.get("shrink"):
-                minimum_width = min(
-                    1.0,
-                    1.05
-                    * program.manufacturing.minimum_feature_mm
-                    / program.body.width_mm,
-                )
-                minimum_height = min(
-                    1.0,
-                    1.05
-                    * program.manufacturing.minimum_feature_mm
-                    / program.body.height_mm,
-                )
+                minimum_width = min(1.0, 1.05 * program.manufacturing.minimum_feature_mm / program.body.width_mm)
+                minimum_height = min(1.0, 1.05 * program.manufacturing.minimum_feature_mm / program.body.height_mm)
                 width = max(minimum_width, size.width_ratio * self.size_scale)
                 height = max(minimum_height, size.height_ratio * self.size_scale)
-                if width != size.width_ratio:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].size.width_ratio",
-                            size.width_ratio,
-                            width,
-                            "reduce a conflicting feature footprint",
-                        )
-                    )
-                if height != size.height_ratio:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].size.height_ratio",
-                            size.height_ratio,
-                            height,
-                            "reduce a conflicting feature footprint",
-                        )
-                    )
+                if width != size.width_ratio: actions.append(self._action(f"features[{index}].size.width_ratio", size.width_ratio, width, "reduce a conflicting feature footprint"))
+                if height != size.height_ratio: actions.append(self._action(f"features[{index}].size.height_ratio", size.height_ratio, height, "reduce a conflicting feature footprint"))
                 size = replace(size, width_ratio=width, height_ratio=height)
             if operations.get("grow"):
-                width = max(
-                    size.width_ratio,
-                    1.1
-                    * program.manufacturing.minimum_feature_mm
-                    / program.body.width_mm,
-                )
-                height = max(
-                    size.height_ratio,
-                    1.1
-                    * program.manufacturing.minimum_feature_mm
-                    / program.body.height_mm,
-                )
-                if width != size.width_ratio:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].size.width_ratio",
-                            size.width_ratio,
-                            width,
-                            "increase feature width to the manufacturing minimum",
-                        )
-                    )
-                if height != size.height_ratio:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].size.height_ratio",
-                            size.height_ratio,
-                            height,
-                            "increase feature height to the manufacturing minimum",
-                        )
-                    )
+                width = max(size.width_ratio, 1.1 * program.manufacturing.minimum_feature_mm / program.body.width_mm)
+                height = max(size.height_ratio, 1.1 * program.manufacturing.minimum_feature_mm / program.body.height_mm)
+                if width != size.width_ratio: actions.append(self._action(f"features[{index}].size.width_ratio", size.width_ratio, width, "increase feature width to the manufacturing minimum"))
+                if height != size.height_ratio: actions.append(self._action(f"features[{index}].size.height_ratio", size.height_ratio, height, "increase feature height to the manufacturing minimum"))
                 size = replace(size, width_ratio=width, height_ratio=height)
             if operations.get("reduce_depth"):
-                depth = min(
-                    size.depth_mm,
-                    0.95 * program.manufacturing.maximum_relief_depth_mm,
-                    0.8 * program.manufacturing.minimum_wall_mm,
-                )
+                depth = min(size.depth_mm, 0.95 * program.manufacturing.maximum_relief_depth_mm, 0.8 * program.manufacturing.minimum_wall_mm)
                 if depth != size.depth_mm:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].size.depth_mm",
-                            size.depth_mm,
-                            depth,
-                            "preserve wall reserve and maximum relief depth",
-                        )
-                    )
+                    actions.append(self._action(f"features[{index}].size.depth_mm", size.depth_mm, depth, "preserve wall reserve and maximum relief depth"))
                     size = replace(size, depth_mm=depth)
             if operations.get("increase_depth"):
-                depth = max(
-                    size.depth_mm,
-                    min(
-                        0.8,
-                        0.5 * program.manufacturing.maximum_relief_depth_mm,
-                    ),
-                )
-                if depth != size.depth_mm:
-                    actions.append(
-                        self._action(
-                            f"features[{index}].size.depth_mm",
-                            size.depth_mm,
-                            depth,
-                            "increase relief depth to the manufacturing minimum",
-                        )
-                    )
+                depth = max(size.depth_mm, min(0.8, 0.5 * program.manufacturing.maximum_relief_depth_mm))
+                if depth != size.depth_mm: actions.append(self._action(f"features[{index}].size.depth_mm", size.depth_mm, depth, "increase relief depth to the manufacturing minimum"))
                 size = replace(size, depth_mm=depth)
             features.append(replace(feature, anchor=anchor, size=size))
         return replace(program, features=tuple(features)), tuple(actions)
@@ -577,20 +384,11 @@ class SemanticProposalRepairer:
         return node.split("[", 1)[0].split(".mirror_", 1)[0]
 
     @staticmethod
-    def _action(
-        path: str, before: Any, after: Any, reason: str
-    ) -> SemanticRepairAction:
-        return SemanticRepairAction(
-            field_path=path,
-            before=str(before),
-            after=str(after),
-            reason=reason,
-        )
+    def _action(path: str, before: Any, after: Any, reason: str) -> SemanticRepairAction:
+        return SemanticRepairAction(field_path=path, before=str(before), after=str(after), reason=reason)
 
     @classmethod
-    def _normalize_raw(
-        cls, value: dict[str, Any]
-    ) -> tuple[dict[str, Any], tuple[SemanticRepairAction, ...]]:
+    def _normalize_raw(cls, value: dict[str, Any]) -> tuple[dict[str, Any], tuple[SemanticRepairAction, ...]]:
         if not isinstance(value, dict):
             raise TypeError("semantic proposal must be an object.")
         data = deepcopy(value)
@@ -599,63 +397,22 @@ class SemanticProposalRepairer:
         if isinstance(manufacturing, dict):
             wall = manufacturing.get("minimum_wall_mm")
             relief = manufacturing.get("maximum_relief_depth_mm")
-            if (
-                isinstance(wall, (int, float))
-                and not isinstance(wall, bool)
-                and wall > 0.0
-                and isinstance(relief, (int, float))
-                and not isinstance(relief, bool)
-                and relief >= wall
-            ):
+            if isinstance(wall, (int, float)) and not isinstance(wall, bool) and wall > 0.0 and isinstance(relief, (int, float)) and not isinstance(relief, bool) and relief >= wall:
                 repaired = max(0.1, min(0.75 * wall, wall - 0.1))
                 manufacturing["maximum_relief_depth_mm"] = repaired
-                actions.append(
-                    cls._action(
-                        "manufacturing.maximum_relief_depth_mm",
-                        relief,
-                        repaired,
-                        "keep maximum relief below wall thickness",
-                    )
-                )
+                actions.append(cls._action("manufacturing.maximum_relief_depth_mm", relief, repaired, "keep maximum relief below wall thickness"))
         features = data.get("features")
-        maximum_relief = (
-            manufacturing.get("maximum_relief_depth_mm")
-            if isinstance(manufacturing, dict)
-            else None
-        )
+        maximum_relief = manufacturing.get("maximum_relief_depth_mm") if isinstance(manufacturing, dict) else None
         if isinstance(features, list):
             for index, feature in enumerate(features):
                 if not isinstance(feature, dict):
                     continue
-                if feature.get("priority") == "required" and feature.get(
-                    "can_omit"
-                ) is True:
+                if feature.get("priority") == "required" and feature.get("can_omit") is True:
                     feature["can_omit"] = False
-                    actions.append(
-                        cls._action(
-                            f"features[{index}].can_omit",
-                            True,
-                            False,
-                            "required features cannot be omitted",
-                        )
-                    )
+                    actions.append(cls._action(f"features[{index}].can_omit", True, False, "required features cannot be omitted"))
                 size = feature.get("size")
-                if (
-                    isinstance(size, dict)
-                    and isinstance(maximum_relief, (int, float))
-                    and not isinstance(maximum_relief, bool)
-                    and isinstance(size.get("depth_mm"), (int, float))
-                    and not isinstance(size.get("depth_mm"), bool)
-                    and size["depth_mm"] > maximum_relief
-                ):
+                if isinstance(size, dict) and isinstance(maximum_relief, (int, float)) and not isinstance(maximum_relief, bool) and isinstance(size.get("depth_mm"), (int, float)) and not isinstance(size.get("depth_mm"), bool) and size["depth_mm"] > maximum_relief:
                     before = size["depth_mm"]
                     size["depth_mm"] = float(maximum_relief)
-                    actions.append(
-                        cls._action(
-                            f"features[{index}].size.depth_mm",
-                            before,
-                            maximum_relief,
-                            "cap feature depth at the manufacturing relief limit",
-                        )
-                    )
+                    actions.append(cls._action(f"features[{index}].size.depth_mm", before, maximum_relief, "cap feature depth at the manufacturing relief limit"))
         return data, tuple(actions)
