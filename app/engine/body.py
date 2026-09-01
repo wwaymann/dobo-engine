@@ -99,11 +99,7 @@ def build_body(
 
 
 def _register_consolidation_angular_router() -> None:
-    """Register high-level CAD routing only while the consolidated pipeline loads.
-
-    Direct low-level uses of engine.body remain independent; the guarded import
-    fires only after the design pipeline module already exists in sys.modules.
-    """
+    """Register high-level angular CAD capabilities during pipeline load."""
     import sys
 
     if "product_generators.design_interpreter.design_pipeline" not in sys.modules:
@@ -112,9 +108,13 @@ def _register_consolidation_angular_router() -> None:
         from product_generators.design_interpreter.native_cad_primitive_adapter import (
             install_native_cad_primitive_adapter,
         )
+        from product_generators.design_interpreter.native_angular_text_reconnection import (
+            install_native_angular_text_reconnection,
+        )
     except ImportError:
         return
     install_native_cad_primitive_adapter()
+    install_native_angular_text_reconnection()
 
 
 _register_consolidation_angular_router()
