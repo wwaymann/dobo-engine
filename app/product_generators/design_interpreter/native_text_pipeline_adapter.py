@@ -1,32 +1,43 @@
 from __future__ import annotations
 
-"""Adapter that reconnects DOBO's existing native CAD text capability.
+"""Capability router for cylindrical DOBO text.
 
-This is intentionally an orchestration layer, not another text engine.
-The structural engine owns the vessel/body. Cylindrical text is removed from
-voxel generation, then the already-existing SurfaceDesigner native text tool is
-mapped on an analytic reference cylinder and booleaned onto the generated body.
+Compatible cylindrical planters stay in DOBO's historical CadQuery body/drain
+representation, receive DOBO's existing native surface text, and are tessellated
+only for final STL/3MF output. Unsupported compositions keep the existing
+structural/volumetric route rather than silently losing features.
 """
 
 from dataclasses import replace
 from pathlib import Path
+from time import perf_counter
 from typing import Any
+import math
+import unicodedata
 
 import cadquery as cq
 import numpy as np
 import trimesh
 
-from .semantic_contract import DesignSemanticProgram
-from . import core_capability_reconnection as _text_core
-from .text_surface_consolidation import _prompt_lines
+from engine.body import build_body
+from engine.context import EngineContext
+from engine.drain import build_drain
+from product_generators.organic_shapes.vessel_engine import OrganicVesselResult
 from product_generators.surface_designer.advanced_body_adapter import (
     load_advanced_stl_as_cadquery_shape,
 )
 from product_generators.surface_designer.native_text import NativeSurfaceTextBuilder
 from product_generators.surface_mapping.cylinder_mapper import CylinderSurfaceMapper
 
+from . import core_capability_reconnection as _text_core
+from .design_pipeline import DoboDesignPipeline
+from .semantic_contract import DesignSemanticProgram
+from .text_surface_consolidation import _prompt_lines
 
-NATIVE_TEXT_PIPELINE_ADAPTER_VERSION = "NTC.1-existing-native-cad-reconnection"
+
+NATIVE_TEXT_PIPELINE_ADAPTER_VERSION = "NTC.2-analytic-capability-routing"
+_ANALYTIC_ROUTE = "analytic_cad_cylindrical_text"
+_ORIGINAL_GENERATE_WITH_RETRY = DoboDesignPipeline._generate_with_retry.__func__
 
 
 def _text_features(program: DesignSemanticProgram):
@@ -34,77 +45,290 @@ def _text_features(program: DesignSemanticProgram):
 
 
 def body_program_without_text(program: DesignSemanticProgram) -> DesignSemanticProgram:
-    """Return a temporary expansion view without text-owned structural features."""
     text_ids = {feature.id for feature in _text_features(program)}
     if not text_ids:
         return program
-    features = tuple(feature for feature in program.features if feature.id not in text_ids)
-    relations = tuple(
-        relation
-        for relation in program.relations
-        if relation.subject_id not in text_ids and relation.object_id not in text_ids
+    return replace(
+        program,
+        features=tuple(feature for feature in program.features if feature.id not in text_ids),
+        relations=tuple(
+            relation
+            for relation in program.relations
+            if relation.subject_id not in text_ids and relation.object_id not in text_ids
+        ),
     )
-    return replace(program, features=features, relations=relations)
 
 
-def strip_text_from_motor(motor: dict[str, Any], program: DesignSemanticProgram) -> None:
-    """Remove compiled text nodes/templates so the structural mesh stays text-free."""
-    text_ids = {str(feature.id) for feature in _text_features(program)}
-    if not text_ids:
-        return
-    template_ids = {f"{feature_id}_template" for feature_id in text_ids}
-    hierarchy = motor.get("hierarchy_program")
-    if not isinstance(hierarchy, dict):
-        return
+def _plain(value: object) -> str:
+    decomposed = unicodedata.normalize("NFKD", str(value).lower())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
-    def prune(node: dict[str, Any]):
-        node_id = str(node.get("id", ""))
-        ids = {str(value) for value in node.get("template_ids", [])}
-        if node_id in text_ids or ids.intersection(template_ids):
-            return None
-        cleaned = dict(node)
-        children = []
-        for child in node.get("children", []):
-            if not isinstance(child, dict):
-                children.append(child)
-                continue
-            kept = prune(child)
-            if kept is not None:
-                children.append(kept)
-        cleaned["children"] = children
-        return cleaned
 
-    roots = []
-    for root in hierarchy.get("roots", []):
-        if not isinstance(root, dict):
-            roots.append(root)
-            continue
-        kept = prune(root)
-        if kept is not None:
-            roots.append(kept)
-    hierarchy["roots"] = roots
-    hierarchy["templates"] = [
-        template
-        for template in hierarchy.get("templates", [])
-        if not isinstance(template, dict)
-        or str(template.get("id", "")) not in template_ids
-    ]
+def _plumbing_feature(feature) -> bool:
+    value = f"{getattr(feature, 'id', '')}_{getattr(feature, 'concept', '')}"
+    tokens = set(_plain(value).replace("-", "_").replace(" ", "_").split("_"))
+    return bool(tokens & {
+        "drain", "drainage", "drenaje", "agujero",
+        "opening", "abertura", "apertura", "boca",
+        "cavity", "cavidad", "hueco", "hollow", "interior",
+    })
 
 
 def uses_native_cylindrical_text(program: DesignSemanticProgram) -> bool:
     return program.body.family == "cylindrical" and bool(_text_features(program))
 
 
+def _supports_analytic_route(program: DesignSemanticProgram) -> bool:
+    if not uses_native_cylindrical_text(program):
+        return False
+    unsupported = tuple(
+        feature
+        for feature in program.features
+        if feature.form_hint != "text" and not _plumbing_feature(feature)
+    )
+    return not unsupported
+
+
+def _line_contract(program: DesignSemanticProgram):
+    text_features = _text_features(program)
+    explicit_lines = _prompt_lines(getattr(program.source, "prompt", None))
+    if explicit_lines:
+        feature = text_features[0]
+        return tuple((feature, line) for line in explicit_lines)
+    return tuple(
+        (feature, _text_core._literal_from_concept(feature.concept))
+        for feature in text_features
+    )
+
+
+def _analytic_route_payload(motor: dict[str, Any], program: DesignSemanticProgram) -> dict[str, Any]:
+    vessel = motor.get("vessel", {})
+    if not isinstance(vessel, dict):
+        raise RuntimeError("Analytic cylindrical route requires vessel contract.")
+    base_z = float(vessel.get("base_z_mm", 0.0))
+    bottom_mm = float(vessel.get("cavity_floor_z_mm", 0.0)) - base_z
+    diameter = 0.5 * (float(program.body.width_mm) + float(program.body.depth_mm))
+    entries = []
+    for feature, literal in _line_contract(program):
+        entries.append({
+            "literal": literal,
+            "horizontal": float(feature.anchor.horizontal),
+            "vertical": float(feature.anchor.vertical),
+            "height_ratio": float(feature.size.height_ratio),
+            "depth_mm": float(feature.size.depth_mm),
+            "mode": "deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss",
+        })
+    return {
+        "diameter_mm": diameter,
+        "height_mm": float(program.body.height_mm),
+        "wall_mm": float(vessel.get("wall_mm", program.manufacturing.minimum_wall_mm)),
+        "bottom_mm": bottom_mm,
+        "drain_required": bool(program.manufacturing.drainage_required),
+        "drain_diameter_mm": 2.0 * float(vessel.get("drain_radius_mm", 2.0)),
+        "minimum_feature_mm": float(program.manufacturing.minimum_feature_mm),
+        "text_entries": entries,
+    }
+
+
+def strip_text_from_motor(motor: dict[str, Any], program: DesignSemanticProgram) -> None:
+    """Keep text semantic intent but remove text nodes from volumetric hierarchy."""
+    text_ids = {str(feature.id) for feature in _text_features(program)}
+    if not text_ids:
+        return
+    template_ids = {f"{feature_id}_template" for feature_id in text_ids}
+    hierarchy = motor.get("hierarchy_program")
+    if isinstance(hierarchy, dict):
+        def prune(node: dict[str, Any]):
+            node_id = str(node.get("id", ""))
+            ids = {str(value) for value in node.get("template_ids", [])}
+            if node_id in text_ids or ids.intersection(template_ids):
+                return None
+            cleaned = dict(node)
+            cleaned["children"] = [
+                kept
+                for child in node.get("children", [])
+                if not isinstance(child, dict) or (kept := prune(child)) is not None
+            ]
+            return cleaned
+
+        hierarchy["roots"] = [
+            kept
+            for root in hierarchy.get("roots", [])
+            if not isinstance(root, dict) or (kept := prune(root)) is not None
+        ]
+        hierarchy["templates"] = [
+            template
+            for template in hierarchy.get("templates", [])
+            if not isinstance(template, dict)
+            or str(template.get("id", "")) not in template_ids
+        ]
+
+    if _supports_analytic_route(program):
+        motor["_capability_route"] = _ANALYTIC_ROUTE
+        motor["_analytic_cylindrical"] = _analytic_route_payload(motor, program)
+
+
+def _inside(shape: cq.Shape, point: tuple[float, float, float]) -> bool:
+    return bool(shape.isInside(cq.Vector(*point), 0.02, True))
+
+
+def _apply_native_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
+    entries = tuple(route.get("text_entries", []))
+    if not entries:
+        return shape
+
+    radius = 0.5 * float(route["diameter_mm"])
+    height = float(route["height_mm"])
+    minimum_feature = float(route["minimum_feature_mm"])
+    surface = CylinderSurfaceMapper(radius=radius)
+    builder = NativeSurfaceTextBuilder()
+
+    first = entries[0]
+    block_center = float(first["vertical"]) * height
+    total_block_height = max(minimum_feature, float(first["height_ratio"]) * height)
+    gap_ratio = 0.22
+    slot_height = total_block_height / (len(entries) + gap_ratio * max(len(entries) - 1, 0))
+    gap = gap_ratio * slot_height
+    block_top = block_center + 0.5 * total_block_height
+
+    current = shape
+    for index, entry in enumerate(entries):
+        if len(entries) == 1:
+            v_offset = float(entry["vertical"]) * height
+            size = max(minimum_feature, float(entry["height_ratio"]) * height)
+        else:
+            v_offset = block_top - 0.5 * slot_height - index * (slot_height + gap)
+            size = slot_height
+        u_offset = 0.25 * float(entry["horizontal"]) * (2.0 * math.pi * radius)
+        result = builder.apply(
+            base_shape=current,
+            surface=surface,
+            text_value=str(entry["literal"]),
+            size=size,
+            depth=max(0.1, float(entry["depth_mm"])),
+            mode=str(entry["mode"]),
+            font="Arial",
+            kind="regular",
+            u_offset=u_offset,
+            v_offset=v_offset,
+        )
+        current = result.shape
+    return current
+
+
+def _generate_analytic_cylindrical(motor: dict[str, Any]) -> OrganicVesselResult:
+    route = motor.get("_analytic_cylindrical")
+    if not isinstance(route, dict):
+        raise RuntimeError("Analytic cylindrical capability route is missing its contract.")
+
+    started = perf_counter()
+    diameter = float(route["diameter_mm"])
+    radius = 0.5 * diameter
+    height = float(route["height_mm"])
+    wall = float(route["wall_mm"])
+    bottom = float(route["bottom_mm"])
+    drain_diameter = float(route["drain_diameter_mm"])
+
+    context = EngineContext({
+        "top_diameter": diameter,
+        "bottom_diameter": diameter,
+        "height": height,
+        "wall_thickness": wall,
+        "bottom_thickness": bottom,
+        "drain_hole": bool(route["drain_required"]),
+        "drain_diameter": drain_diameter,
+    })
+
+    body = build_body(None, context)
+    body = build_drain(body, context)
+    shape = body.val()
+    if not isinstance(shape, cq.Shape) or not shape.isValid():
+        raise RuntimeError("Historical CAD body/drain capability produced invalid geometry.")
+
+    shape = _apply_native_text(shape, route).clean()
+    if not shape.isValid():
+        raise RuntimeError("Native CAD text produced invalid analytic planter geometry.")
+
+    output = motor.get("output", {})
+    output_dir = Path(str(output["directory"]))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stl_path = output_dir / f"{output['basename']}.stl"
+    cq.exporters.export(shape, str(stl_path), tolerance=0.035, angularTolerance=0.08)
+
+    mesh = trimesh.load_mesh(str(stl_path), process=False)
+    if isinstance(mesh, trimesh.Scene):
+        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
+    if not isinstance(mesh, trimesh.Trimesh):
+        raise RuntimeError("Analytic CAD route did not export a triangle mesh.")
+
+    components = tuple(mesh.split(only_watertight=False))
+    drain_radius = 0.5 * drain_diameter
+    base_ring_x = max(drain_radius + 3.0, 0.25 * radius)
+    mid_z = max(bottom + 1.0, 0.5 * height)
+    semantic_checks = {
+        "outside_is_empty": not _inside(shape, (radius + 2.0 * wall, 0.0, mid_z)),
+        "wall_is_solid": _inside(shape, (radius - 0.5 * wall, 0.0, mid_z)),
+        "cavity_is_empty": not _inside(shape, (0.0, 0.0, mid_z)),
+        "opening_is_clear": not _inside(shape, (0.0, 0.0, height + 1.0)),
+        "base_ring_is_solid": _inside(shape, (base_ring_x, 0.0, 0.5 * bottom)),
+        "drain_is_clear": (
+            not _inside(shape, (0.0, 0.0, 0.5 * bottom))
+            if bool(route["drain_required"])
+            else True
+        ),
+        "below_base_is_empty": not _inside(shape, (base_ring_x, 0.0, -1.0)),
+    }
+
+    flat_tolerance = 0.08
+    flat_count = int(np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= flat_tolerance))
+    result = OrganicVesselResult(
+        product_id=str(motor.get("id", "analytic_cylindrical")),
+        mesh=mesh,
+        stl_path=str(stl_path),
+        vertex_count=int(len(mesh.vertices)),
+        face_count=int(len(mesh.faces)),
+        component_count=len(components),
+        volume_mm3=float(abs(mesh.volume)),
+        watertight=bool(mesh.is_watertight),
+        winding_consistent=bool(mesh.is_winding_consistent),
+        nominal_wall_mm=wall,
+        bottom_mm=bottom,
+        flat_base_z_mm=0.0,
+        flat_base_vertex_count=flat_count,
+        semantic_checks=semantic_checks,
+        mesh_quality=None,
+        stage_seconds={"analytic_cad_body_drain_text_export": perf_counter() - started},
+        generation_seconds=perf_counter() - started,
+        max_generation_seconds=float(output.get("max_generation_seconds", 45.0)),
+    )
+    result.validate()
+    return result
+
+
+def _generate_with_capability_route(
+    cls,
+    motor_program: dict[str, Any],
+    *,
+    parser: Any,
+    engine: Any,
+):
+    if motor_program.get("_capability_route") == _ANALYTIC_ROUTE:
+        result = _generate_analytic_cylindrical(motor_program)
+        return result, motor_program, 1, "analytic_cad_native_text"
+    return _ORIGINAL_GENERATE_WITH_RETRY(
+        cls,
+        motor_program,
+        parser=parser,
+        engine=engine,
+    )
+
+
 def _body_radius_from_motor(motor: dict[str, Any], program: DesignSemanticProgram) -> float:
     for field in motor.get("fields", []):
-        if not isinstance(field, dict):
-            continue
-        if str(field.get("id")) == "body" and str(field.get("kind")) == "capped_cylinder":
+        if isinstance(field, dict) and str(field.get("id")) == "body" and str(field.get("kind")) == "capped_cylinder":
             radii = field.get("radii")
-            if isinstance(radii, list) and radii:
-                radius = float(radii[0])
-                if radius > 0.0:
-                    return radius
+            if isinstance(radii, list) and radii and float(radii[0]) > 0.0:
+                return float(radii[0])
     return 0.5 * float(program.body.width_mm)
 
 
@@ -115,158 +339,41 @@ def _mesh_surface_radius(stl_path: str | Path, fallback: float) -> float:
     if not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
         return fallback
     vertices = np.asarray(mesh.vertices, dtype=np.float64)
-    z_min, z_max = float(vertices[:, 2].min()), float(vertices[:, 2].max())
-    span = max(z_max - z_min, 1.0e-9)
-    z_fraction = (vertices[:, 2] - z_min) / span
     radial = np.linalg.norm(vertices[:, :2], axis=1)
-    band = radial[(z_fraction >= 0.30) & (z_fraction <= 0.75)]
-    if len(band) < 16:
-        band = radial
-    high = band[band >= np.quantile(band, 0.80)] if len(band) else band
-    if len(high) == 0:
-        return fallback
-    measured = float(np.median(high))
-    return measured if measured > 0.0 else fallback
+    high = radial[radial >= np.quantile(radial, 0.80)]
+    return float(np.median(high)) if len(high) else fallback
 
 
-def _vessel_z(motor: dict[str, Any], program: DesignSemanticProgram) -> tuple[float, float]:
-    vessel = motor.get("vessel", {})
-    if isinstance(vessel, dict):
-        base = float(vessel.get("base_z_mm", 0.0))
-        top = float(vessel.get("opening_start_z_mm", base + program.body.height_mm))
-        if top > base:
-            return base, top
-    return 0.0, float(program.body.height_mm)
-
-
-def _line_contract(program: DesignSemanticProgram):
-    text_features = _text_features(program)
-    source_prompt = getattr(program.source, "prompt", None)
-    explicit_lines = _prompt_lines(source_prompt)
-    if explicit_lines:
-        feature = text_features[0]
-        return tuple((feature, line) for line in explicit_lines)
-    return tuple((feature, _text_core._literal_from_concept(feature.concept)) for feature in text_features)
-
-
-def _native_text_tool(
-    *,
-    reference_radius: float,
-    base_z: float,
-    top_z: float,
-    text_value: str,
-    size_mm: float,
-    depth_mm: float,
-    u_offset_mm: float,
-    v_center_mm: float,
-) -> cq.Shape:
-    height = top_z - base_z
-    reference = cq.Solid.makeCylinder(
-        reference_radius,
-        height,
-        cq.Vector(0.0, 0.0, base_z),
-        cq.Vector(0.0, 0.0, 1.0),
-    )
-    surface = CylinderSurfaceMapper(radius=reference_radius)
-    builder = NativeSurfaceTextBuilder()
-    _projected, tool = builder._cylinder_text(
-        base_shape=reference,
-        surface=surface,
-        text_value=text_value,
-        size=size_mm,
-        depth=depth_mm,
-        mode="emboss",
-        font="Arial",
-        kind="regular",
-        u_offset=u_offset_mm,
-        v_offset=v_center_mm,
-    )
-    return tool
-
-
-def decorate_mesh_result_with_native_text(
-    mesh_result,
-    motor: dict[str, Any],
-    program: DesignSemanticProgram,
-):
-    """Apply existing native CAD text and return an updated vessel result."""
+def decorate_mesh_result_with_native_text(mesh_result, motor: dict[str, Any], program: DesignSemanticProgram):
+    """Fallback bridge for cylindrical text cases not eligible for analytic routing."""
     if not uses_native_cylindrical_text(program):
+        return mesh_result
+    if motor.get("_capability_route") == _ANALYTIC_ROUTE:
         return mesh_result
 
     base_shape = load_advanced_stl_as_cadquery_shape(mesh_result.stl_path)
-    fallback_radius = _body_radius_from_motor(motor, program)
-    measured_radius = _mesh_surface_radius(mesh_result.stl_path, fallback_radius)
-
-    # A small inward reference offset guarantees overlap with the triangulated
-    # structural boundary while preserving the requested outward relief depth.
-    embed_mm = min(0.30, max(0.10, 0.08 * program.manufacturing.minimum_wall_mm))
-    reference_radius = max(1.0, measured_radius - embed_mm)
-    base_z, top_z = _vessel_z(motor, program)
-    usable_height = top_z - base_z
-
-    contracts = _line_contract(program)
-    if not contracts:
-        return mesh_result
-
-    first_feature = contracts[0][0]
-    block_center = base_z + float(first_feature.anchor.vertical) * usable_height
-    total_block_height = max(
-        program.manufacturing.minimum_feature_mm,
-        float(first_feature.size.height_ratio) * usable_height,
-    )
-    line_gap_ratio = 0.22
-    slot_height = total_block_height / (
-        len(contracts) + line_gap_ratio * max(len(contracts) - 1, 0)
-    )
-    gap = line_gap_ratio * slot_height
-    block_top = block_center + 0.5 * total_block_height
-
+    radius = _mesh_surface_radius(mesh_result.stl_path, _body_radius_from_motor(motor, program))
     current = base_shape
-    for index, (feature, literal) in enumerate(contracts):
-        if len(contracts) == 1:
-            v_center = base_z + float(feature.anchor.vertical) * usable_height
-            size_mm = max(
-                program.manufacturing.minimum_feature_mm,
-                float(feature.size.height_ratio) * usable_height,
-            )
-        else:
-            v_center = block_top - 0.5 * slot_height - index * (slot_height + gap)
-            size_mm = slot_height
-
-        circumference = 2.0 * np.pi * reference_radius
-        u_offset = 0.25 * float(feature.anchor.horizontal) * circumference
-        requested_depth = max(0.1, float(feature.size.depth_mm))
-        tool = _native_text_tool(
-            reference_radius=reference_radius,
-            base_z=base_z,
-            top_z=top_z,
+    builder = NativeSurfaceTextBuilder()
+    surface = CylinderSurfaceMapper(radius=radius)
+    contracts = _line_contract(program)
+    for feature, literal in contracts:
+        current = builder.apply(
+            base_shape=current,
+            surface=surface,
             text_value=literal,
-            size_mm=size_mm,
-            depth_mm=requested_depth + embed_mm,
-            u_offset_mm=u_offset,
-            v_center_mm=v_center,
-        )
-        try:
-            current = current.fuse(tool, tol=0.02).clean()
-        except Exception as error:
-            raise RuntimeError(
-                f"Native CAD text boolean failed for '{literal}'."
-            ) from error
-        if not current.isValid():
-            raise RuntimeError(f"Native CAD text produced invalid geometry for '{literal}'.")
+            size=max(program.manufacturing.minimum_feature_mm, feature.size.height_ratio * program.body.height_mm),
+            depth=max(0.1, feature.size.depth_mm),
+            mode="deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss",
+            u_offset=0.25 * feature.anchor.horizontal * (2.0 * math.pi * radius),
+            v_offset=feature.anchor.vertical * program.body.height_mm,
+        ).shape
 
     output_path = Path(mesh_result.stl_path)
-    cq.exporters.export(
-        current,
-        str(output_path),
-        tolerance=0.035,
-        angularTolerance=0.08,
-    )
+    cq.exporters.export(current, str(output_path), tolerance=0.035, angularTolerance=0.08)
     final_mesh = trimesh.load_mesh(str(output_path), process=False)
     if isinstance(final_mesh, trimesh.Scene):
         final_mesh = trimesh.util.concatenate(tuple(final_mesh.geometry.values()))
-    if not isinstance(final_mesh, trimesh.Trimesh):
-        raise RuntimeError("Native CAD text export did not produce a triangle mesh.")
     components = tuple(final_mesh.split(only_watertight=False))
     return replace(
         mesh_result,
@@ -278,3 +385,6 @@ def decorate_mesh_result_with_native_text(
         watertight=bool(final_mesh.is_watertight),
         winding_consistent=bool(final_mesh.is_winding_consistent),
     )
+
+
+DoboDesignPipeline._generate_with_retry = classmethod(_generate_with_capability_route)
