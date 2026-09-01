@@ -15,7 +15,7 @@ from .semantic_parser import SemanticProgramParser
 from .text_surface_consolidation import _prompt_lines
 
 
-REPAIR_VERSION = "3E.3-multiline-semantic-layout-block"
+REPAIR_VERSION = "3E.4-prevalidation-multiline-block"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,9 +136,10 @@ class SemanticProposalRepairer:
         *,
         initial_actions: tuple[SemanticRepairAction, ...] = (),
     ) -> SemanticRepairResult:
+        program, block_actions = self._consolidate_explicit_multiline_block(program)
         program.validate()
         candidate = program
-        actions = list(initial_actions)
+        actions = [*initial_actions, *block_actions]
         before, compilation = self._evaluate(candidate)
         current = before
         attempts = 0
@@ -185,15 +186,78 @@ class SemanticProposalRepairer:
             report=report,
         )
 
+    @classmethod
+    def _consolidate_explicit_multiline_block(
+        cls, program: DesignSemanticProgram
+    ) -> tuple[DesignSemanticProgram, tuple[SemanticRepairAction, ...]]:
+        """Collapse explicit prompt lines to one semantic text feature before layout validation.
+
+        Native cylindrical text owns the internal line layout. Keeping one semantic
+        feature per line causes the generic layout engine to demand clearance between
+        lines that are intentionally part of the same typographic block. Consolidate
+        them before semantic compilation and let the downstream native text adapter
+        recover the literal lines from the original prompt via ``_prompt_lines``.
+        """
+        lines = _prompt_lines(getattr(program.source, "prompt", None))
+        text_features = tuple(
+            feature for feature in program.features if feature.form_hint == "text"
+        )
+        if len(lines) < 2 or len(text_features) < 2:
+            return program, ()
+
+        representative = text_features[0]
+        removed_ids = {feature.id for feature in text_features[1:]}
+        kept_features = tuple(
+            feature for feature in program.features if feature.id not in removed_ids
+        )
+
+        remapped_relations = []
+        relation_keys: set[tuple[str, str, str]] = set()
+        for relation in program.relations:
+            subject_id = (
+                representative.id
+                if relation.subject_id in removed_ids
+                else relation.subject_id
+            )
+            object_id = (
+                representative.id
+                if relation.object_id in removed_ids
+                else relation.object_id
+            )
+            if subject_id == object_id:
+                continue
+            key = (relation.kind, subject_id, object_id)
+            if key in relation_keys:
+                continue
+            relation_keys.add(key)
+            remapped_relations.append(
+                replace(
+                    relation,
+                    subject_id=subject_id,
+                    object_id=object_id,
+                )
+            )
+
+        action = SemanticRepairAction(
+            field_path="features[text_multiline_block]",
+            before=", ".join(feature.id for feature in text_features),
+            after=representative.id,
+            reason=(
+                "consolidate explicit multiline text before generic layout validation; "
+                "native text layout owns internal line spacing"
+            ),
+        )
+        return (
+            replace(
+                program,
+                features=kept_features,
+                relations=tuple(remapped_relations),
+            ),
+            (action,),
+        )
+
     @staticmethod
     def _explicit_multiline_text_ids(program: DesignSemanticProgram) -> set[str]:
-        """Return the text features that intentionally belong to one text block.
-
-        Use the canonical prompt-line parser rather than feature-id naming. The
-        interpreter is free to emit ids such as text_1, text_plantas_1, or any
-        other semantic name; multiline ownership comes from the requested text
-        block, not from those generated ids.
-        """
         lines = _prompt_lines(getattr(program.source, "prompt", None))
         if len(lines) < 2:
             return set()
@@ -202,9 +266,6 @@ class SemanticProposalRepairer:
             for feature in program.features
             if feature.form_hint == "text"
         )
-        # A prompt with N explicit lines can be represented either as one text
-        # feature carrying the block or as N text features. Clearance filtering
-        # is only needed in the latter case, and only among those text features.
         return set(text_ids) if len(text_ids) >= 2 else set()
 
     @classmethod
