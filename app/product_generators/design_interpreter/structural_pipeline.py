@@ -15,7 +15,6 @@ from .intelligent_surfaces import (
     SurfaceLayerIntent,
 )
 from .native_text_pipeline_adapter import (
-    body_program_without_text,
     decorate_mesh_result_with_native_text,
     strip_text_from_motor,
     uses_native_cylindrical_text,
@@ -183,15 +182,12 @@ class DoboStructuralPipeline:
         compilation = StructuralSemanticCompiler.compile(repair.program, structural)
         motor = compilation.motor_program
 
-        # Consolidation routing rule: the semantic program remains complete, but
-        # cylindrical text is not sent through the voxel body expander. The
-        # existing native CAD text capability owns that surface operation later.
-        expansion_program = (
-            body_program_without_text(repair.program)
-            if uses_native_cylindrical_text(repair.program)
-            else repair.program
-        )
-        GeneralBodyFamilyExpander.apply(motor, expansion_program)
+        # Consolidation routing rule: let the existing body-family/text contract
+        # normalize vessel sampling first. In particular, it preserves the
+        # established invariant that wall and bottom span at least three voxels.
+        # Native cylindrical text is then removed from the hierarchy before mesh
+        # generation, so glyph geometry itself never enters the voxel field.
+        GeneralBodyFamilyExpander.apply(motor, repair.program)
         if uses_native_cylindrical_text(repair.program):
             strip_text_from_motor(motor, repair.program)
 
