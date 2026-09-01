@@ -152,13 +152,14 @@ class NativeSurfaceTextBuilder:
 
         try:
             if mode == "emboss":
-                # `depth` is already the semantic/manufacturing contract for
-                # relief thickness. Do not replace it with a visual hard floor:
-                # doing so made smaller requested values ineffective and could
-                # make the apparent relief grow after semantic regeneration.
-                # Only the joining anchor gets a small independent minimum.
-                outward_depth = depth
-                anchor_depth = min(0.20, max(0.08, 0.10 * outward_depth))
+                # The semantic depth can legitimately be several millimetres,
+                # but native surface lettering needs a shallower presentation
+                # relief. Previous changes altered a minimum (max), which had
+                # no effect whenever semantic depth was already larger. Apply
+                # the intended *maximum* here instead: preserve smaller values,
+                # cap larger ones at 0.80 mm.
+                outward_depth = min(depth, 0.80)
+                anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
                 outward_tool = offset(projected, -outward_depth, cap=True)
                 inward_anchor = offset(projected, anchor_depth, cap=True)
                 tool = outward_tool.fuse(inward_anchor, tol=0.01).clean()
