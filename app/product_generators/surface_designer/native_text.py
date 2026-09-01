@@ -135,19 +135,36 @@ class NativeSurfaceTextBuilder:
 
     @staticmethod
     def _projection_size_limit(radius: float, text_value: str, requested_size: float) -> float:
-        """Keep a line inside the same frontal arc without globally shrinking the block.
-
-        The arc itself is capped at 82% of a half circumference. CadQuery can return
-        a null TopoDS shape when a text wire is wider than the projectable span. Use
-        the same width model as _frontal_arc and reserve a small projection margin.
-        Shorter lines therefore retain the requested size; only an over-wide line is
-        reduced enough to fit the existing native-CAD projection contract.
-        """
+        """Keep a line inside the same frontal arc without globally shrinking the block."""
         glyph_count = max(1, len(text_value.strip()))
         usable_arc = math.pi * radius * 0.82 * 0.92
         width_per_size = max(1.0, glyph_count * 0.72) * 1.18
         safe_size = usable_arc / width_per_size
         return min(float(requested_size), safe_size)
+
+    @staticmethod
+    def _angular_bounds_center(shape: cq.Shape, reference_angle: float) -> float:
+        """Measure the visual angular midpoint of projected glyph geometry.
+
+        CadQuery's path text can be centered parametrically on a spine while the
+        resulting glyph outlines are not centered on the same cylindrical meridian.
+        Use the actual projected vertices, unwrap them around the known +Y reference,
+        and return the midpoint of their angular extent. This centers the visible
+        text block, not merely the path used to create it.
+        """
+        angles: list[float] = []
+        for vertex in shape.Vertices():
+            point = vertex.toTuple()
+            angle = math.atan2(float(point[1]), float(point[0]))
+            while angle - reference_angle > math.pi:
+                angle -= 2.0 * math.pi
+            while angle - reference_angle < -math.pi:
+                angle += 2.0 * math.pi
+            angles.append(angle)
+        if not angles:
+            center = shape.Center()
+            return math.atan2(float(center.y), float(center.x))
+        return 0.5 * (min(angles) + max(angles))
 
     def _cylinder_text(self, *, base_shape: cq.Shape, surface: CylinderSurfaceMapper,
                        text_value: str, size: float, depth: float, mode: str,
@@ -204,15 +221,16 @@ class NativeSurfaceTextBuilder:
         if not tool.isValid():
             raise RuntimeError(f"Native text {mode} offset tool is invalid.")
 
-        # CadQuery projects reliably on the +Y reference arc, while DOBO's canonical
-        # front (and the Lab frontal camera) is -Y. Preserve the known-good projection
-        # and typography, then move the completed projected/tool geometry rigidly by
-        # 180 degrees. Semantic circumferential u_offset remains an additional rotation.
-        angle_deg = 180.0 + (
-            float(u_offset) / float(surface.radius) * 180.0 / math.pi
-            if abs(u_offset) > 1e-12
-            else 0.0
-        )
+        # Measure where the generated glyphs actually landed before moving them.
+        # The Lab/DOBO front is -Y (angle -90°). Center the measured angular bounds
+        # there, then apply the semantic circumferential offset as an additional
+        # rigid rotation. Size, relief, line spacing and vertical placement are
+        # untouched.
+        measured_center = self._angular_bounds_center(projected, math.pi / 2.0)
+        target_center = -math.pi / 2.0
+        semantic_offset = float(u_offset) / float(surface.radius)
+        angle_deg = math.degrees(target_center - measured_center + semantic_offset)
+
         projected = projected.rotate(
             (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
         )
