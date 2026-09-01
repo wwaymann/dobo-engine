@@ -7,9 +7,13 @@ on:
       - '.github/workflows/consolidation-cube-physical-regression.yml'
       - 'app/engine/body.py'
       - 'app/engine/drain.py'
+      - 'app/product_generators/surface_mapping/plane_mapper.py'
+      - 'app/product_generators/surface_designer/planar_text.py'
       - 'app/product_generators/design_interpreter/body_family_expansion.py'
       - 'app/product_generators/design_interpreter/native_cad_primitive_adapter.py'
+      - 'app/product_generators/design_interpreter/native_angular_text_reconnection.py'
       - 'app/product_generators/design_interpreter/cube_physical_regression.py'
+      - 'app/product_generators/design_interpreter/angular_native_text_regression.py'
       - 'app/product_generators/design_interpreter/fixtures/primitive_cube.semantic.json'
       - 'app/product_generators/design_interpreter/fixtures/primitive_rectangular.semantic.json'
   workflow_dispatch:
@@ -34,13 +38,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install jsonschema numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib cadquery
-      - name: Run strict cube and rectangular CAD regression without model/API
+      - name: Run strict cube and rectangular CAD body regression
         run: python -m product_generators.design_interpreter.cube_physical_regression
+      - name: Run native planar text regression on angular CAD bodies
+        run: python -m product_generators.design_interpreter.angular_native_text_regression
       - name: Upload angular CAD evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dobo-angular-cad-physical-regression
-          path: outputs-ci/cube-physical-regression
+          path: |
+            outputs-ci/cube-physical-regression
+            outputs-ci/angular-native-text-regression
           if-no-files-found: warn
           retention-days: 30
