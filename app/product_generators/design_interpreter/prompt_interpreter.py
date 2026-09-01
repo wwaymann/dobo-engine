@@ -12,7 +12,7 @@ from .semantic_contract import DesignSemanticProgram
 from .semantic_parser import SemanticProgramParser
 
 
-PROMPT_INTERPRETER_VERSION = "3C.8"
+PROMPT_INTERPRETER_VERSION = "3C.9"
 DEFAULT_SCHEMA_PATH = Path(__file__).with_name("semantic_program.schema.json")
 
 _OPENAI_UNSUPPORTED_SCHEMA_KEYWORDS = frozenset({"uniqueItems"})
@@ -133,6 +133,19 @@ def _normalize_functional_prompt_output(prompt: str, output: dict[str, Any]) -> 
     return data
 
 
+def _bind_prompt_provenance(prompt: str, output: dict[str, Any]) -> dict[str, Any]:
+    """Bind trusted prompt provenance outside the probabilistic model output."""
+    data = deepcopy(output)
+    source = data.get("source")
+    if not isinstance(source, dict):
+        source = {}
+        data["source"] = source
+    source["kind"] = "prompt"
+    source["prompt"] = prompt
+    source["image_reference"] = None
+    return data
+
+
 def _json_schema_type(value: Any) -> str:
     if value is None:
         return "null"
@@ -235,11 +248,12 @@ class PromptSemanticInterpreter:
         if not isinstance(response.output, dict):
             raise TypeError("Semantic model output must be a JSON object.")
         normalized_output = _normalize_functional_prompt_output(normalized, response.output)
+        normalized_output = _bind_prompt_provenance(normalized, normalized_output)
         program = SemanticProgramParser().parse_dict(normalized_output)
         if program.source.kind != "prompt":
             raise ValueError("Prompt interpretation must set source.kind to prompt.")
         if program.source.prompt != normalized:
-            raise ValueError("Semantic model did not preserve the exact source prompt.")
+            raise ValueError("Prompt provenance binding failed to preserve the exact source prompt.")
         if program.source.image_reference is not None:
             raise ValueError("Prompt-only interpretation cannot include an image reference.")
         trace = PromptInterpretationTrace(
