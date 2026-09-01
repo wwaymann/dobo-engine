@@ -128,10 +128,6 @@ class NativeSurfaceTextBuilder:
         left = point(-half_angle)
         middle = point(0.0)
         right = point(half_angle)
-        # CadQuery orients glyphs from the direction of the spine. The earlier
-        # left->right arc placed the projected glyph frame upside down on this
-        # cylinder face, so traverse the same frontal arc in the opposite
-        # direction while keeping exactly the same bounded surface region.
         arc = cq.Edge.makeThreePointArc(right, middle, left)
         if not arc.isValid():
             raise RuntimeError("Native frontal text arc is invalid.")
@@ -157,18 +153,14 @@ class NativeSurfaceTextBuilder:
         try:
             if mode == "emboss":
                 # On the selected outer cylindrical face CadQuery's positive
-                # offset points inward. Use the observed face orientation:
-                # negative = outward relief, positive = inward joining anchor.
-                # Keep only a shallow anchor inside the wall while guaranteeing
-                # a visibly useful external relief for native surface text.
-                outward_depth = max(depth, 1.20)
+                # offset points inward. Keep a small fixed visible relief while
+                # preserving only a shallow joining anchor inside the wall.
+                outward_depth = max(depth, 1.00)
                 anchor_depth = min(0.30, max(0.10, 0.15 * outward_depth))
                 outward_tool = offset(projected, -outward_depth, cap=True)
                 inward_anchor = offset(projected, anchor_depth, cap=True)
                 tool = outward_tool.fuse(inward_anchor, tol=0.01).clean()
             else:
-                # Deboss follows the same face orientation: positive goes into
-                # the vessel wall.
                 tool = offset(projected, depth, cap=True)
         except Exception as error:
             raise RuntimeError(f"Native text {mode} offset failed.") from error
