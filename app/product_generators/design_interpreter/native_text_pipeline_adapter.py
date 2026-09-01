@@ -35,7 +35,7 @@ from .semantic_contract import DesignSemanticProgram
 from .text_surface_consolidation import _prompt_lines
 
 
-NATIVE_TEXT_PIPELINE_ADAPTER_VERSION = "NTC.2-analytic-capability-routing"
+NATIVE_TEXT_PIPELINE_ADAPTER_VERSION = "NTC.3-centered-multiline-layout"
 _ANALYTIC_ROUTE = "analytic_cad_cylindrical_text"
 _ORIGINAL_GENERATE_WITH_RETRY = DoboDesignPipeline._generate_with_retry.__func__
 
@@ -188,9 +188,6 @@ def _load_welded_stl(path: str | Path) -> trimesh.Trimesh:
         mesh.process(validate=True)
     if not isinstance(mesh, trimesh.Trimesh):
         raise RuntimeError("CAD route did not export a triangle mesh.")
-    # CAD/STL tessellation emits coincident vertices independently per face.
-    # Merge them before connected-component/watertight validation; otherwise
-    # a single valid CAD solid can be misreported as many disconnected shells.
     mesh.merge_vertices()
     mesh.remove_unreferenced_vertices()
     return mesh
@@ -208,7 +205,13 @@ def _apply_native_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
     builder = NativeSurfaceTextBuilder()
 
     first = entries[0]
-    block_center = float(first["vertical"]) * height
+    multiline = len(entries) > 1
+    # The semantic vertical anchor is normalized around the body's midpoint:
+    # 0.0 means centered, negative lower, positive higher. The previous code
+    # multiplied it directly by height, incorrectly placing a centered block
+    # near z=0. Multiline is one layout block, so translate that block around
+    # the physical mid-height of the vessel.
+    block_center = (0.5 + 0.5 * float(first["vertical"])) * height
     total_block_height = max(minimum_feature, float(first["height_ratio"]) * height)
     gap_ratio = 0.22
     slot_height = total_block_height / (len(entries) + gap_ratio * max(len(entries) - 1, 0))
@@ -217,13 +220,16 @@ def _apply_native_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
 
     current = shape
     for index, entry in enumerate(entries):
-        if len(entries) == 1:
+        if not multiline:
             v_offset = float(entry["vertical"]) * height
             size = max(minimum_feature, float(entry["height_ratio"]) * height)
         else:
             v_offset = block_top - 0.5 * slot_height - index * (slot_height + gap)
             size = slot_height
-        u_offset = 0.25 * float(entry["horizontal"]) * (2.0 * math.pi * radius)
+        # All explicit lines inherit the same horizontal anchor and therefore
+        # remain centered as a block on the same frontal meridian. CadQuery's
+        # halign="center" centers each literal on that common meridian.
+        u_offset = 0.25 * float(first["horizontal"] if multiline else entry["horizontal"]) * (2.0 * math.pi * radius)
         result = builder.apply(
             base_shape=current,
             surface=surface,
@@ -326,22 +332,11 @@ def _generate_analytic_cylindrical(motor: dict[str, Any]) -> OrganicVesselResult
     return result
 
 
-def _generate_with_capability_route(
-    cls,
-    motor_program: dict[str, Any],
-    *,
-    parser: Any,
-    engine: Any,
-):
+def _generate_with_capability_route(cls, motor_program: dict[str, Any], *, parser: Any, engine: Any):
     if motor_program.get("_capability_route") == _ANALYTIC_ROUTE:
         result = _generate_analytic_cylindrical(motor_program)
         return result, motor_program, 1, "analytic_cad_native_text"
-    return _ORIGINAL_GENERATE_WITH_RETRY(
-        cls,
-        motor_program,
-        parser=parser,
-        engine=engine,
-    )
+    return _ORIGINAL_GENERATE_WITH_RETRY(cls, motor_program, parser=parser, engine=engine)
 
 
 def _body_radius_from_motor(motor: dict[str, Any], program: DesignSemanticProgram) -> float:
@@ -375,32 +370,32 @@ def decorate_mesh_result_with_native_text(mesh_result, motor: dict[str, Any], pr
     current = base_shape
     builder = NativeSurfaceTextBuilder()
     surface = CylinderSurfaceMapper(radius=radius)
-    contracts = _line_contract(program)
-    for feature, literal in contracts:
-        current = builder.apply(
+    entries = _line_contract(program)
+    for feature, literal in entries:
+        result = builder.apply(
             base_shape=current,
             surface=surface,
             text_value=literal,
-            size=max(program.manufacturing.minimum_feature_mm, feature.size.height_ratio * program.body.height_mm),
-            depth=max(0.1, feature.size.depth_mm),
+            size=max(float(program.manufacturing.minimum_feature_mm), float(feature.size.height_ratio) * float(program.body.height_mm)),
+            depth=max(0.1, float(feature.size.depth_mm)),
             mode="deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss",
-            u_offset=0.25 * feature.anchor.horizontal * (2.0 * math.pi * radius),
-            v_offset=feature.anchor.vertical * program.body.height_mm,
-        ).shape
-
-    output_path = Path(mesh_result.stl_path)
-    cq.exporters.export(current, str(output_path), tolerance=0.035, angularTolerance=0.08)
-    final_mesh = _load_welded_stl(output_path)
-    components = tuple(final_mesh.split(only_watertight=False))
+            font="Arial",
+            kind="regular",
+            u_offset=0.25 * float(feature.anchor.horizontal) * (2.0 * math.pi * radius),
+            v_offset=float(feature.anchor.vertical) * float(program.body.height_mm),
+        )
+        current = result.shape
+    cq.exporters.export(current, mesh_result.stl_path, tolerance=0.035, angularTolerance=0.08)
+    decorated = _load_welded_stl(mesh_result.stl_path)
     return replace(
         mesh_result,
-        mesh=final_mesh,
-        vertex_count=int(len(final_mesh.vertices)),
-        face_count=int(len(final_mesh.faces)),
-        component_count=len(components),
-        volume_mm3=float(abs(final_mesh.volume)),
-        watertight=bool(final_mesh.is_watertight),
-        winding_consistent=bool(final_mesh.is_winding_consistent),
+        mesh=decorated,
+        vertex_count=int(len(decorated.vertices)),
+        face_count=int(len(decorated.faces)),
+        component_count=len(tuple(decorated.split(only_watertight=False))),
+        volume_mm3=float(abs(decorated.volume)),
+        watertight=bool(decorated.is_watertight),
+        winding_consistent=bool(decorated.is_winding_consistent),
     )
 
 
