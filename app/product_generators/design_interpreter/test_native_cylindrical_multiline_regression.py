@@ -36,7 +36,7 @@ def _fixture():
         features=[
             _feature(
                 "front_text",
-                "PLANTA UNA IDEA",
+                "planta_una_idea",
                 "text",
                 "raised",
                 region="front",
