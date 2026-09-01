@@ -169,7 +169,7 @@ def strip_text_from_motor(motor: dict[str, Any], program: DesignSemanticProgram)
 
 
 def _inside(shape: cq.Shape, point: tuple[float, float, float]) -> bool:
-    return bool(shape.isInside(cq.Vector(*point), 0.02, True))
+    return bool(shape.isInside(cq.Vector(*point), 0.02))
 
 
 def _apply_native_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
