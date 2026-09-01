@@ -265,19 +265,31 @@ def evaluate_manufacturability(
     feature_sizes: list[float] = []
     relief_depths: list[float] = []
     for placement in placements:
-        singular = np.linalg.svd(
-            placement.matrix[:3, :3], compute_uv=False
-        )
-        minimum_scale = float(singular.min())
         extents = feature_half_extents(placement.feature)
-        minimum_feature = 2.0 * float(extents.min()) * minimum_scale
         depth_axis = feature_depth_axis(placement.feature)
+
+        # minimum_feature describes the printable footprint of a surface
+        # feature. Relief extrusion has its own minimum/maximum depth checks
+        # and must not make a wide, printable glyph fail minimum_feature just
+        # because the requested relief is intentionally shallow.
+        footprint_axes = tuple(axis for axis in range(3) if axis != depth_axis)
+        footprint_sizes = []
+        for axis in footprint_axes:
+            axis_scale = float(np.linalg.norm(placement.matrix[:3, axis]))
+            footprint_sizes.append(2.0 * float(extents[axis]) * axis_scale)
+        minimum_feature = min(footprint_sizes)
+
         depth_scale = float(
             np.linalg.norm(placement.matrix[:3, depth_axis])
         )
         if np.isclose(depth_scale, 1.0, rtol=0.0, atol=1e-12):
             depth_scale = 1.0
         depth = feature_depth_mm(placement.feature) * depth_scale
+
+        singular = np.linalg.svd(
+            placement.matrix[:3, :3], compute_uv=False
+        )
+        minimum_scale = float(singular.min())
         blend = float(placement.feature.blend_mm) * minimum_scale
         feature_sizes.append(minimum_feature)
         relief_depths.append(depth)
