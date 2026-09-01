@@ -116,7 +116,7 @@ class NativeSurfaceTextBuilder:
 
     @staticmethod
     def _frontal_arc(radius: float, z: float, text_value: str, size: float) -> cq.Edge:
-        """Return a bounded, correctly oriented arc centred on the front (+Y)."""
+        """Return the known-good bounded arc centred on the front (+Y)."""
         glyph_count = max(1, len(text_value.strip()))
         estimated_width = max(size, glyph_count * size * 0.72)
         arc_length = min(estimated_width * 1.18, math.pi * radius * 0.82)
@@ -133,6 +133,22 @@ class NativeSurfaceTextBuilder:
             raise RuntimeError("Native frontal text arc is invalid.")
         return arc
 
+    @staticmethod
+    def _projection_size_limit(radius: float, text_value: str, requested_size: float) -> float:
+        """Keep a line inside the same frontal arc without globally shrinking the block.
+
+        The arc itself is capped at 82% of a half circumference. CadQuery can return
+        a null TopoDS shape when a text wire is wider than the projectable span. Use
+        the same width model as _frontal_arc and reserve a small projection margin.
+        Shorter lines therefore retain the requested size; only an over-wide line is
+        reduced enough to fit the existing native-CAD projection contract.
+        """
+        glyph_count = max(1, len(text_value.strip()))
+        usable_arc = math.pi * radius * 0.82 * 0.92
+        width_per_size = max(1.0, glyph_count * 0.72) * 1.18
+        safe_size = usable_arc / width_per_size
+        return min(float(requested_size), safe_size)
+
     def _cylinder_text(self, *, base_shape: cq.Shape, surface: CylinderSurfaceMapper,
                        text_value: str, size: float, depth: float, mode: str,
                        font: str, kind: str, u_offset: float,
@@ -141,19 +157,44 @@ class NativeSurfaceTextBuilder:
         if not cylindrical_faces:
             raise RuntimeError("Base shape contains no cylindrical face.")
         lateral_face = max(cylindrical_faces, key=lambda face: float(face.Area()))
-        spine = self._frontal_arc(float(surface.radius), float(v_offset), text_value, size)
 
-        projected = text(
-            text_value, size, spine, lateral_face, font=font, kind=kind,
-            halign="center", valign="center",
+        projection_size = self._projection_size_limit(
+            float(surface.radius), text_value, size
         )
+        spine = self._frontal_arc(
+            float(surface.radius), float(v_offset), text_value, projection_size
+        )
+
+        try:
+            projected = text(
+                text_value, projection_size, spine, lateral_face, font=font, kind=kind,
+                halign="center", valign="center",
+            )
+        except ValueError as error:
+            if "Null TopoDS_Shape" not in str(error):
+                raise
+            # OCC projection can still reject a borderline font outline. Retry only
+            # that line with a small deterministic safety reduction; do not change
+            # block spacing, relief, vessel geometry, or any other line.
+            projection_size *= 0.94
+            spine = self._frontal_arc(
+                float(surface.radius), float(v_offset), text_value, projection_size
+            )
+            try:
+                projected = text(
+                    text_value, projection_size, spine, lateral_face,
+                    font=font, kind=kind, halign="center", valign="center",
+                )
+            except ValueError as retry_error:
+                raise RuntimeError(
+                    f"Native cylindrical text projection failed for {text_value!r} "
+                    f"at safe size {projection_size:.3f} mm."
+                ) from retry_error
         if not projected.isValid():
             raise RuntimeError("Native projected text is invalid.")
 
         try:
             if mode == "emboss":
-                # Native cylindrical lettering uses the semantic relief when it
-                # is already shallow, with a 1.50 mm presentation maximum.
                 outward_depth = min(depth, 1.50)
                 anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
                 outward_tool = offset(projected, -outward_depth, cap=True)
