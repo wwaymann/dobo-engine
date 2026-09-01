@@ -11,7 +11,6 @@ Complex or decorated bodies remain on the existing volumetric path.
 from pathlib import Path
 from time import perf_counter
 from typing import Any
-import unicodedata
 
 import cadquery as cq
 import numpy as np
@@ -22,69 +21,86 @@ from engine.context import EngineContext
 from engine.drain import build_drain
 from product_generators.organic_shapes.vessel_engine import OrganicVesselResult
 
-from .semantic_contract import DesignSemanticProgram
+from .design_pipeline import DoboDesignPipeline
 
 
-NATIVE_CAD_PRIMITIVE_ADAPTER_VERSION = "NCAP.1"
+NATIVE_CAD_PRIMITIVE_ADAPTER_VERSION = "NCAP.2-motor-router"
 _ANALYTIC_ANGULAR_ROUTE = "analytic_cad_angular_primitive"
-
-_CUBOID_ALIASES = {
-    "cuboid", "cube", "cubic", "architectural_cube", "boxy",
-}
-_RECTANGULAR_ALIASES = {
-    "rectangular", "rectangular_prism", "elongated_planter", "oblong",
-}
+_PREVIOUS_GENERATE_WITH_RETRY = None
 
 
-def _normalized(value: object) -> str:
-    decomposed = unicodedata.normalize("NFKD", str(value).strip().lower())
-    return "".join(
-        character
-        for character in decomposed
-        if not unicodedata.combining(character)
-    ).replace("-", "_").replace(" ", "_")
+def _plain_angular_motor(motor: dict[str, Any]) -> bool:
+    hierarchy = motor.get("hierarchy_program", {})
+    if not isinstance(hierarchy, dict):
+        return False
+    return not hierarchy.get("templates") and not hierarchy.get("roots")
 
 
-def analytic_angular_profile(program: DesignSemanticProgram) -> str | None:
-    values = {_normalized(program.body.family)}
-    values.update(_normalized(tag) for tag in program.body.style_tags)
-    if values & _CUBOID_ALIASES:
-        return "cuboid"
-    if values & _RECTANGULAR_ALIASES:
-        return "rectangular_prism"
-    return None
-
-
-def uses_native_cad_primitive(program: DesignSemanticProgram) -> bool:
-    """Route only plain angular bodies; decoration remains on the rich path."""
-    return analytic_angular_profile(program) is not None and not program.features
-
-
-def prepare_native_cad_primitive_route(
+def _angular_dimensions_from_motor(
     motor: dict[str, Any],
-    program: DesignSemanticProgram,
-) -> bool:
-    profile = analytic_angular_profile(program)
-    if profile is None or program.features:
+    profile: str,
+) -> tuple[float, float, float]:
+    fields = {
+        str(field.get("id")): field
+        for field in motor.get("fields", [])
+        if isinstance(field, dict)
+    }
+    if profile == "cuboid":
+        field = fields.get("body")
+        if not isinstance(field, dict):
+            raise RuntimeError("Cuboid CAD route is missing body field.")
+        radii = field.get("radii", [])
+        if len(radii) != 3:
+            raise RuntimeError("Cuboid CAD route has invalid body radii.")
+        width = float(radii[0]) / 0.49
+        depth = float(radii[1]) / 0.49
+        height = float(radii[2]) / 0.29
+        return width, depth, height
+
+    if profile == "rectangular_prism":
+        field = fields.get("rectangular_mid")
+        if not isinstance(field, dict):
+            raise RuntimeError("Rectangular CAD route is missing mid field.")
+        radii = field.get("radii", [])
+        if len(radii) != 3:
+            raise RuntimeError("Rectangular CAD route has invalid mid radii.")
+        width = float(radii[0]) / 0.49
+        depth = float(radii[1]) / 0.48
+        height = float(radii[2]) / 0.29
+        return width, depth, height
+
+    raise RuntimeError(f"Unsupported native CAD angular profile: {profile!r}")
+
+
+def prepare_native_cad_primitive_route_from_motor(motor: dict[str, Any]) -> bool:
+    morphology = motor.get("morphogenesis", {})
+    if not isinstance(morphology, dict):
+        return False
+    profile = str(morphology.get("profile", ""))
+    if profile not in {"cuboid", "rectangular_prism"}:
+        return False
+    if not _plain_angular_motor(motor):
         return False
 
     vessel = motor.get("vessel", {})
     if not isinstance(vessel, dict):
         raise RuntimeError("Native CAD primitive route requires vessel contract.")
-
+    width, depth, height = _angular_dimensions_from_motor(motor, profile)
     base_z = float(vessel.get("base_z_mm", 0.0))
     bottom_mm = float(vessel.get("cavity_floor_z_mm", 0.0)) - base_z
+    drain_radius = float(vessel.get("drain_radius_mm", 0.0))
+
     motor["_capability_route"] = _ANALYTIC_ANGULAR_ROUTE
     motor["_analytic_angular"] = {
         "adapter_version": NATIVE_CAD_PRIMITIVE_ADAPTER_VERSION,
         "profile": profile,
-        "width_mm": float(program.body.width_mm),
-        "depth_mm": float(program.body.depth_mm),
-        "height_mm": float(program.body.height_mm),
-        "wall_mm": float(vessel.get("wall_mm", program.manufacturing.minimum_wall_mm)),
+        "width_mm": width,
+        "depth_mm": depth,
+        "height_mm": height,
+        "wall_mm": float(vessel.get("wall_mm", 3.0)),
         "bottom_mm": bottom_mm,
-        "drain_required": bool(program.manufacturing.drainage_required),
-        "drain_diameter_mm": 2.0 * float(vessel.get("drain_radius_mm", 2.0)),
+        "drain_required": drain_radius > 0.0,
+        "drain_diameter_mm": 2.0 * drain_radius,
     }
     return True
 
@@ -136,12 +152,9 @@ def generate_native_cad_primitive_if_routed(
 
     body = build_body(None, context)
     body = build_drain(body, context)
-    shape = body.val()
+    shape = body.val().clean()
     if not isinstance(shape, cq.Shape) or not shape.isValid():
         raise RuntimeError("Native CAD body/drain capability produced invalid angular geometry.")
-    shape = shape.clean()
-    if not shape.isValid():
-        raise RuntimeError("Native CAD angular geometry became invalid after cleanup.")
     if len(tuple(shape.Solids())) != 1:
         raise RuntimeError("Native CAD angular planter must remain one solid before tessellation.")
 
@@ -156,7 +169,6 @@ def generate_native_cad_primitive_if_routed(
     drain_radius = 0.5 * drain_diameter
     mid_z = max(bottom + 1.0, 0.5 * height)
     half_width = 0.5 * width
-    half_depth = 0.5 * depth
     base_probe_x = min(
         half_width - wall - 1.0,
         max(drain_radius + 3.0, 0.25 * width),
@@ -180,8 +192,7 @@ def generate_native_cad_primitive_if_routed(
         "profile_is_angular": str(route["profile"]) in {"cuboid", "rectangular_prism"},
     }
 
-    flat_tolerance = 0.08
-    flat_count = int(np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= flat_tolerance))
+    flat_count = int(np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= 0.08))
     elapsed = perf_counter() - started
     result = OrganicVesselResult(
         product_id=str(motor.get("id", "analytic_angular")),
@@ -205,3 +216,35 @@ def generate_native_cad_primitive_if_routed(
     )
     result.validate()
     return result
+
+
+def _generate_with_native_cad_primitive(
+    cls,
+    motor_program: dict[str, Any],
+    *,
+    parser: Any,
+    engine: Any,
+):
+    prepare_native_cad_primitive_route_from_motor(motor_program)
+    native_result = generate_native_cad_primitive_if_routed(motor_program)
+    if native_result is not None:
+        return native_result, motor_program, 1, "analytic_cad_native_primitive"
+    if _PREVIOUS_GENERATE_WITH_RETRY is None:
+        raise RuntimeError("Native CAD primitive router was not installed correctly.")
+    return _PREVIOUS_GENERATE_WITH_RETRY(
+        cls,
+        motor_program,
+        parser=parser,
+        engine=engine,
+    )
+
+
+def install_native_cad_primitive_adapter() -> str:
+    global _PREVIOUS_GENERATE_WITH_RETRY
+    current = DoboDesignPipeline._generate_with_retry.__func__
+    if getattr(current, "_dobo_native_cad_primitive_adapter", False):
+        return NATIVE_CAD_PRIMITIVE_ADAPTER_VERSION
+    _PREVIOUS_GENERATE_WITH_RETRY = current
+    _generate_with_native_cad_primitive._dobo_native_cad_primitive_adapter = True
+    DoboDesignPipeline._generate_with_retry = classmethod(_generate_with_native_cad_primitive)
+    return NATIVE_CAD_PRIMITIVE_ADAPTER_VERSION
