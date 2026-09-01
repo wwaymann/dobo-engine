@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from .phase_5_design_matrix import _feature, _program
-from .structural_pipeline import DoboStructuralPipeline
+APP = Path(__file__).resolve().parents[2]
+if str(APP) not in sys.path:
+    sys.path.insert(0, str(APP))
+
+from product_generators.design_interpreter.phase_5_design_matrix import _feature, _program
+from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
 
 
 PROMPT = (
