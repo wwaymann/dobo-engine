@@ -56,6 +56,17 @@ def _angular_error_from_front(theta: np.ndarray) -> np.ndarray:
     return np.angle(np.exp(1j * (theta + 0.5 * math.pi)))
 
 
+def _angular_bounds_center_from_front(theta: np.ndarray) -> float:
+    """Return visible angular midpoint around the canonical -Y front.
+
+    The production centering route deliberately uses the angular bounds of the
+    projected glyph geometry rather than a vertex-density weighted mean. Mirror
+    that contract here so triangulation density cannot create a false regression.
+    """
+    error = _angular_error_from_front(theta)
+    return 0.5 * (float(error.min()) + float(error.max()))
+
+
 def test_native_cylindrical_multiline_text_regression() -> None:
     with TemporaryDirectory(prefix="dobo-native-text-") as temporary:
         result = DoboStructuralPipeline().generate_from_semantic(
@@ -81,11 +92,10 @@ def test_native_cylindrical_multiline_text_regression() -> None:
 
         theta = np.arctan2(relief[:, 1], relief[:, 0])
         error = _angular_error_from_front(theta)
-        # The complete relief must remain in the frontal hemisphere and its
-        # circular centre must stay close to the -Y meridian.
+        # The complete relief must remain in the frontal hemisphere and the
+        # visible angular bounds midpoint must stay close to the -Y meridian.
         assert np.percentile(np.abs(error), 95) < math.radians(75.0)
-        mean_angle = math.atan2(float(np.mean(np.sin(theta))), float(np.mean(np.cos(theta))))
-        centre_error = abs(float(_angular_error_from_front(np.asarray([mean_angle]))[0]))
+        centre_error = abs(_angular_bounds_center_from_front(theta))
         assert centre_error < math.radians(8.0)
 
         # Three explicit lines must occupy a real vertical block, not collapse
