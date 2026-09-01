@@ -152,13 +152,9 @@ class NativeSurfaceTextBuilder:
 
         try:
             if mode == "emboss":
-                # The semantic depth can legitimately be several millimetres,
-                # but native surface lettering needs a shallower presentation
-                # relief. Previous changes altered a minimum (max), which had
-                # no effect whenever semantic depth was already larger. Apply
-                # the intended *maximum* here instead: preserve smaller values,
-                # cap larger ones at 0.80 mm.
-                outward_depth = min(depth, 0.80)
+                # Native cylindrical lettering uses the semantic relief when it
+                # is already shallow, with a 1.00 mm presentation maximum.
+                outward_depth = min(depth, 1.00)
                 anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
                 outward_tool = offset(projected, -outward_depth, cap=True)
                 inward_anchor = offset(projected, anchor_depth, cap=True)
