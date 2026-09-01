@@ -35,7 +35,7 @@ from .semantic_contract import DesignSemanticProgram
 from .text_surface_consolidation import _prompt_lines
 
 
-NATIVE_TEXT_PIPELINE_ADAPTER_VERSION = "NTC.3-centered-multiline-layout"
+NATIVE_TEXT_PIPELINE_ADAPTER_VERSION = "NTC.4-multiline-block-metrics"
 _ANALYTIC_ROUTE = "analytic_cad_cylindrical_text"
 _ORIGINAL_GENERATE_WITH_RETRY = DoboDesignPipeline._generate_with_retry.__func__
 
@@ -112,6 +112,7 @@ def _analytic_route_payload(motor: dict[str, Any], program: DesignSemanticProgra
     for feature, literal in _line_contract(program):
         entries.append({
             "literal": literal,
+            "region": str(feature.anchor.region),
             "horizontal": float(feature.anchor.horizontal),
             "vertical": float(feature.anchor.vertical),
             "height_ratio": float(feature.size.height_ratio),
@@ -206,17 +207,36 @@ def _apply_native_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
 
     first = entries[0]
     multiline = len(entries) > 1
-    # The semantic vertical anchor is normalized around the body's midpoint:
-    # 0.0 means centered, negative lower, positive higher. The previous code
-    # multiplied it directly by height, incorrectly placing a centered block
-    # near z=0. Multiline is one layout block, so translate that block around
-    # the physical mid-height of the vessel.
-    block_center = (0.5 + 0.5 * float(first["vertical"])) * height
-    total_block_height = max(minimum_feature, float(first["height_ratio"]) * height)
     gap_ratio = 0.22
-    slot_height = total_block_height / (len(entries) + gap_ratio * max(len(entries) - 1, 0))
-    gap = gap_ratio * slot_height
-    block_top = block_center + 0.5 * total_block_height
+
+    if multiline:
+        # The semantic proposal originally describes each requested line with a
+        # line-sized height. After pre-validation consolidation there is one
+        # representative feature, but its height must remain the size of EACH
+        # line rather than being divided by the number of lines again.
+        slot_height = max(minimum_feature, float(first["height_ratio"]) * height)
+        gap = gap_ratio * slot_height
+        total_block_height = (
+            len(entries) * slot_height
+            + max(len(entries) - 1, 0) * gap
+        )
+
+        # Explicit multiline text on the front is a typographic block. The
+        # individual feature anchor that survives consolidation may have been the
+        # first line's anchor, not the block center. Center the block physically
+        # on the vessel for the canonical frontal case. Non-frontal regions keep
+        # the semantic vertical anchor.
+        if str(first.get("region", "")) == "front":
+            block_center = 0.5 * height
+        else:
+            block_center = float(first["vertical"]) * height
+        block_top = block_center + 0.5 * total_block_height
+    else:
+        slot_height = max(minimum_feature, float(first["height_ratio"]) * height)
+        gap = 0.0
+        total_block_height = slot_height
+        block_center = float(first["vertical"]) * height
+        block_top = block_center + 0.5 * total_block_height
 
     current = shape
     for index, entry in enumerate(entries):
@@ -226,10 +246,18 @@ def _apply_native_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
         else:
             v_offset = block_top - 0.5 * slot_height - index * (slot_height + gap)
             size = slot_height
-        # All explicit lines inherit the same horizontal anchor and therefore
-        # remain centered as a block on the same frontal meridian. CadQuery's
-        # halign="center" centers each literal on that common meridian.
-        u_offset = 0.25 * float(first["horizontal"] if multiline else entry["horizontal"]) * (2.0 * math.pi * radius)
+
+        # A front-region multiline block is centered on the true frontal
+        # meridian. This prevents a per-line semantic horizontal anchor from
+        # shifting the entire block sideways. Other regions retain the semantic
+        # circumferential offset.
+        if multiline and str(first.get("region", "")) == "front":
+            u_offset = 0.0
+        else:
+            u_offset = 0.25 * float(
+                first["horizontal"] if multiline else entry["horizontal"]
+            ) * (2.0 * math.pi * radius)
+
         result = builder.apply(
             base_shape=current,
             surface=surface,
