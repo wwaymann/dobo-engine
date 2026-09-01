@@ -19,12 +19,17 @@ from .native_text_pipeline_adapter import (
     strip_text_from_motor,
     uses_native_cylindrical_text,
 )
+from .native_tapered_cad_adapter import install_native_tapered_cad_adapter
 from .prompt_interpreter import PromptSemanticInterpreter, SemanticModelClient
 from .proposal_repair import SemanticProposalRepairer, SemanticRepairResult
 from .semantic_contract import DesignSemanticProgram
 from .structural_compiler import StructuralCompilationResult, StructuralSemanticCompiler
 from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
+
+# Install after native cylindrical text routing so tapered bodies wrap the
+# current consolidated retry chain without replacing any earlier capability.
+install_native_tapered_cad_adapter()
 
 STRUCTURAL_PIPELINE_VERSION = "8.3-native-text-routing"
 STRUCTURAL_FUSION_VERSION = "7C.3"
