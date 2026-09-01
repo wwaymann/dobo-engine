@@ -34,11 +34,15 @@ def _strip_text_nodes(motor: dict[str, Any], program) -> None:
         if node_id in text_ids or ids.intersection(template_ids):
             return None
         cleaned = dict(node)
-        cleaned["children"] = [
-            kept
-            for child in node.get("children", [])
-            if not isinstance(child, dict) or (kept := prune(child)) is not None
-        ]
+        children = []
+        for child in node.get("children", []):
+            if isinstance(child, dict):
+                kept = prune(child)
+                if kept is not None:
+                    children.append(kept)
+            else:
+                children.append(child)
+        cleaned["children"] = children
         return cleaned
 
     roots = []
@@ -70,9 +74,6 @@ def install_native_angular_text_reconnection() -> str:
     current = GeneralBodyFamilyExpander.apply.__func__
     if getattr(current, "_dobo_native_angular_text", False):
         return ANGULAR_TEXT_RECONNECTION_VERSION
-    # Install only while the original expansion function is still directly
-    # reachable.  Later consolidation wrappers capture this function and keep it
-    # in their delegation chain.
     _apply_with_native_angular_text._dobo_native_angular_text = True
     GeneralBodyFamilyExpander.apply = classmethod(_apply_with_native_angular_text)
     return ANGULAR_TEXT_RECONNECTION_VERSION
