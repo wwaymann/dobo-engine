@@ -50,6 +50,62 @@ jobs:
           import runpy
           runpy.run_path('tools/dobo_capability_repairs_check.py', run_name='__main__')
           PY
+      - name: Validate cube and rectangular prism through live DOBO Lab
+        env:
+          PYTHONPATH: app:tools
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import dobo_capability_lab_live as live
+
+          cases = {
+              'cube': 'Crea una maceta cúbica',
+              'rectangular': 'Crea una maceta prisma rectangular',
+          }
+          report = {}
+          for key, prompt in cases.items():
+              result = live.generate(prompt, mode='offline')
+              motor = result['motor']
+              route = motor.get('_capability_route')
+              if route != 'analytic_cad_angular_primitive':
+                  raise RuntimeError(
+                      f'{key} did not use promoted angular CAD route: {route!r}'
+                  )
+              vessel = result['vessel']
+              if not vessel.get('opening') or not vessel.get('drain'):
+                  raise RuntimeError(
+                      f'{key} live-lab vessel checks failed: {vessel!r}'
+                  )
+              validation = result['validation']
+              if not validation.get('watertight'):
+                  raise RuntimeError(f'{key} live-lab mesh is not watertight')
+              if int(validation.get('component_count', 0)) != 1:
+                  raise RuntimeError(
+                      f"{key} live-lab component count is {validation.get('component_count')}"
+                  )
+              report[key] = {
+                  'prompt': prompt,
+                  'source': result['source'],
+                  'morphology': result['morphology'],
+                  'capability_route': route,
+                  'watertight': validation.get('watertight'),
+                  'winding_consistent': validation.get('winding_consistent'),
+                  'component_count': validation.get('component_count'),
+                  'opening': bool(vessel.get('opening')),
+                  'drain': bool(vessel.get('drain')),
+                  'stl': result['artifacts']['stl'],
+                  'three_mf': result['artifacts']['three_mf'],
+              }
+
+          out = Path('outputs-ci/capability-lab-live-angular')
+          out.mkdir(parents=True, exist_ok=True)
+          (out / 'LIVE_ANGULAR_VALIDATION.json').write_text(
+              json.dumps(report, indent=2, ensure_ascii=False) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(report, indent=2, ensure_ascii=False))
+          PY
       - name: Validate promoted cylindrical text and vessel core path
         env:
           PYTHONPATH: app:tools
@@ -61,6 +117,7 @@ jobs:
           name: dobo-capability-lab-repair-evidence
           path: |
             outputs-ci/capability-repairs/**
+            outputs-ci/capability-lab-live-angular/**
             outputs-ci/exact-walter/**
           if-no-files-found: warn
           retention-days: 30
