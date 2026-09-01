@@ -69,7 +69,7 @@ class NativeSurfaceTextBuilder:
         cadquery.func.offset(...)
 
     Offset direction:
-        emboss -> positive / outward
+        emboss -> positive / outward, with a small inward anchoring overlap
         deboss -> negative / inward
     """
 
@@ -278,21 +278,37 @@ class NativeSurfaceTextBuilder:
                 "Native projected text is invalid."
             )
 
-        # Critical correction:
-        # lateral cylinder normals point outward.
-        # emboss needs outward thickness; deboss must penetrate inward.
-        signed_depth = (
-            depth
-            if mode == "emboss"
-            else -depth
-        )
-
         try:
-            tool = offset(
-                projected,
-                signed_depth,
-                cap=True,
-            )
+            if mode == "emboss":
+                # A purely outward offset can be only tangential to the vessel
+                # wall. OCC then has no volumetric overlap to fuse, producing
+                # an unchanged body. Preserve the requested outward relief but
+                # add a small inward anchor so the text tool crosses the wall
+                # surface and the Boolean has real shared volume.
+                outward_tool = offset(
+                    projected,
+                    depth,
+                    cap=True,
+                )
+                anchor_depth = min(
+                    0.25,
+                    max(0.05, 0.15 * depth),
+                )
+                inward_anchor = offset(
+                    projected,
+                    -anchor_depth,
+                    cap=True,
+                )
+                tool = outward_tool.fuse(
+                    inward_anchor,
+                    tol=0.01,
+                ).clean()
+            else:
+                tool = offset(
+                    projected,
+                    -depth,
+                    cap=True,
+                )
         except Exception as error:
             raise RuntimeError(
                 f"Native text {mode} offset failed."
