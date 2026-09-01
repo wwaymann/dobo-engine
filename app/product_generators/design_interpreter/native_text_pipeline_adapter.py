@@ -144,18 +144,26 @@ def strip_text_from_motor(motor: dict[str, Any], program: DesignSemanticProgram)
             if node_id in text_ids or ids.intersection(template_ids):
                 return None
             cleaned = dict(node)
-            cleaned["children"] = [
-                kept
-                for child in node.get("children", [])
-                if not isinstance(child, dict) or (kept := prune(child)) is not None
-            ]
+            children = []
+            for child in node.get("children", []):
+                if isinstance(child, dict):
+                    kept_child = prune(child)
+                    if kept_child is not None:
+                        children.append(kept_child)
+                else:
+                    children.append(child)
+            cleaned["children"] = children
             return cleaned
 
-        hierarchy["roots"] = [
-            kept
-            for root in hierarchy.get("roots", [])
-            if not isinstance(root, dict) or (kept := prune(root)) is not None
-        ]
+        roots = []
+        for root in hierarchy.get("roots", []):
+            if isinstance(root, dict):
+                kept_root = prune(root)
+                if kept_root is not None:
+                    roots.append(kept_root)
+            else:
+                roots.append(root)
+        hierarchy["roots"] = roots
         hierarchy["templates"] = [
             template
             for template in hierarchy.get("templates", [])
@@ -170,6 +178,22 @@ def strip_text_from_motor(motor: dict[str, Any], program: DesignSemanticProgram)
 
 def _inside(shape: cq.Shape, point: tuple[float, float, float]) -> bool:
     return bool(shape.isInside(cq.Vector(*point), 0.02))
+
+
+def _load_welded_stl(path: str | Path) -> trimesh.Trimesh:
+    """Load STL with coincident CAD tessellation vertices welded for topology checks."""
+    mesh = trimesh.load_mesh(str(path), process=True)
+    if isinstance(mesh, trimesh.Scene):
+        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
+        mesh.process(validate=True)
+    if not isinstance(mesh, trimesh.Trimesh):
+        raise RuntimeError("CAD route did not export a triangle mesh.")
+    # CAD/STL tessellation emits coincident vertices independently per face.
+    # Merge them before connected-component/watertight validation; otherwise
+    # a single valid CAD solid can be misreported as many disconnected shells.
+    mesh.merge_vertices()
+    mesh.remove_unreferenced_vertices()
+    return mesh
 
 
 def _apply_native_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
@@ -248,6 +272,8 @@ def _generate_analytic_cylindrical(motor: dict[str, Any]) -> OrganicVesselResult
     shape = _apply_native_text(shape, route).clean()
     if not shape.isValid():
         raise RuntimeError("Native CAD text produced invalid analytic planter geometry.")
+    if len(tuple(shape.Solids())) != 1:
+        raise RuntimeError("Analytic planter must remain one CAD solid before tessellation.")
 
     output = motor.get("output", {})
     output_dir = Path(str(output["directory"]))
@@ -255,12 +281,7 @@ def _generate_analytic_cylindrical(motor: dict[str, Any]) -> OrganicVesselResult
     stl_path = output_dir / f"{output['basename']}.stl"
     cq.exporters.export(shape, str(stl_path), tolerance=0.035, angularTolerance=0.08)
 
-    mesh = trimesh.load_mesh(str(stl_path), process=False)
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
-    if not isinstance(mesh, trimesh.Trimesh):
-        raise RuntimeError("Analytic CAD route did not export a triangle mesh.")
-
+    mesh = _load_welded_stl(stl_path)
     components = tuple(mesh.split(only_watertight=False))
     drain_radius = 0.5 * drain_diameter
     base_ring_x = max(drain_radius + 3.0, 0.25 * radius)
@@ -333,10 +354,8 @@ def _body_radius_from_motor(motor: dict[str, Any], program: DesignSemanticProgra
 
 
 def _mesh_surface_radius(stl_path: str | Path, fallback: float) -> float:
-    mesh = trimesh.load_mesh(str(stl_path), process=False)
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
-    if not isinstance(mesh, trimesh.Trimesh) or len(mesh.vertices) == 0:
+    mesh = _load_welded_stl(stl_path)
+    if len(mesh.vertices) == 0:
         return fallback
     vertices = np.asarray(mesh.vertices, dtype=np.float64)
     radial = np.linalg.norm(vertices[:, :2], axis=1)
@@ -371,9 +390,7 @@ def decorate_mesh_result_with_native_text(mesh_result, motor: dict[str, Any], pr
 
     output_path = Path(mesh_result.stl_path)
     cq.exporters.export(current, str(output_path), tolerance=0.035, angularTolerance=0.08)
-    final_mesh = trimesh.load_mesh(str(output_path), process=False)
-    if isinstance(final_mesh, trimesh.Scene):
-        final_mesh = trimesh.util.concatenate(tuple(final_mesh.geometry.values()))
+    final_mesh = _load_welded_stl(output_path)
     components = tuple(final_mesh.split(only_watertight=False))
     return replace(
         mesh_result,
