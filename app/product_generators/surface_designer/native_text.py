@@ -66,9 +66,13 @@ class NativeSurfaceTextBuilder:
                 u_offset=float(u_offset), v_offset=float(v_offset),
             )
         elif isinstance(surface, ConeSurfaceMapper):
-            raise NotImplementedError("Native text Phase 2 currently validates cylindrical surfaces only. Cone support is next.")
+            projected, tool = self._cone_text(
+                base_shape=base_shape, surface=surface, text_value=text_value,
+                size=size, depth=depth, mode=mode, font=font, kind=kind,
+                u_offset=float(u_offset), v_offset=float(v_offset),
+            )
         else:
-            raise NotImplementedError("Native text Phase 2 currently validates cylindrical surfaces only.")
+            raise NotImplementedError("Native text supports cylindrical and conical surfaces.")
 
         base_contract = SolidFactory.from_shape(
             geometry=base_shape.clean(), source="surface_designer:native_text_base",
@@ -116,7 +120,7 @@ class NativeSurfaceTextBuilder:
 
     @staticmethod
     def _frontal_arc(radius: float, z: float, text_value: str, size: float) -> cq.Edge:
-        """Return the known-good bounded projection arc on the +Y reference meridian."""
+        """Return a bounded constant-Z arc on a rotational receiving surface."""
         glyph_count = max(1, len(text_value.strip()))
         estimated_width = max(size, glyph_count * size * 0.72)
         arc_length = min(estimated_width * 1.18, math.pi * radius * 0.82)
@@ -144,14 +148,7 @@ class NativeSurfaceTextBuilder:
 
     @staticmethod
     def _angular_bounds_center(shape: cq.Shape, reference_angle: float) -> float:
-        """Measure the visual angular midpoint of projected glyph geometry.
-
-        CadQuery's path text can be centered parametrically on a spine while the
-        resulting glyph outlines are not centered on the same cylindrical meridian.
-        Use the actual projected vertices, unwrap them around the known +Y reference,
-        and return the midpoint of their angular extent. This centers the visible
-        text block, not merely the path used to create it.
-        """
+        """Measure the visual angular midpoint of projected glyph geometry."""
         angles: list[float] = []
         for vertex in shape.Vertices():
             point = vertex.toTuple()
@@ -165,6 +162,32 @@ class NativeSurfaceTextBuilder:
             center = shape.Center()
             return math.atan2(float(center.y), float(center.x))
         return 0.5 * (min(angles) + max(angles))
+
+    @staticmethod
+    def _relief_tool(projected: cq.Shape, *, depth: float, mode: str) -> cq.Shape:
+        try:
+            if mode == "emboss":
+                outward_depth = min(depth, 1.50)
+                anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
+                outward_tool = offset(projected, -outward_depth, cap=True)
+                inward_anchor = offset(projected, anchor_depth, cap=True)
+                tool = outward_tool.fuse(inward_anchor, tol=0.01).clean()
+            else:
+                tool = offset(projected, depth, cap=True)
+        except Exception as error:
+            raise RuntimeError(f"Native text {mode} offset failed.") from error
+        if not tool.isValid():
+            raise RuntimeError(f"Native text {mode} offset tool is invalid.")
+        return tool
+
+    @staticmethod
+    def _front_rotation(projected: cq.Shape, *, local_radius: float, u_offset: float) -> float:
+        measured_center = NativeSurfaceTextBuilder._angular_bounds_center(
+            projected, math.pi / 2.0
+        )
+        target_center = -math.pi / 2.0
+        semantic_offset = float(u_offset) / float(local_radius)
+        return math.degrees(target_center - measured_center + semantic_offset)
 
     def _cylinder_text(self, *, base_shape: cq.Shape, surface: CylinderSurfaceMapper,
                        text_value: str, size: float, depth: float, mode: str,
@@ -207,30 +230,59 @@ class NativeSurfaceTextBuilder:
         if not projected.isValid():
             raise RuntimeError("Native projected text is invalid.")
 
+        tool = self._relief_tool(projected, depth=depth, mode=mode)
+        angle_deg = self._front_rotation(
+            projected, local_radius=float(surface.radius), u_offset=u_offset
+        )
+        projected = projected.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
+        tool = tool.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
+        return projected, tool
+
+    def _cone_text(self, *, base_shape: cq.Shape, surface: ConeSurfaceMapper,
+                   text_value: str, size: float, depth: float, mode: str,
+                   font: str, kind: str, u_offset: float,
+                   v_offset: float) -> tuple[cq.Shape, cq.Shape]:
+        conical_faces = [face for face in base_shape.Faces() if face.geomType() == "CONE"]
+        if not conical_faces:
+            raise RuntimeError("Base shape contains no conical face.")
+        lateral_face = max(conical_faces, key=lambda face: float(face.Area()))
+
+        z = min(max(float(v_offset), 0.12 * float(surface.height)), 0.88 * float(surface.height))
+        local_radius = float(surface.radius_at(z))
+        projection_size = self._projection_size_limit(local_radius, text_value, size)
+        spine = self._frontal_arc(local_radius, z, text_value, projection_size)
+
         try:
-            if mode == "emboss":
-                outward_depth = min(depth, 1.50)
-                anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
-                outward_tool = offset(projected, -outward_depth, cap=True)
-                inward_anchor = offset(projected, anchor_depth, cap=True)
-                tool = outward_tool.fuse(inward_anchor, tol=0.01).clean()
-            else:
-                tool = offset(projected, depth, cap=True)
-        except Exception as error:
-            raise RuntimeError(f"Native text {mode} offset failed.") from error
-        if not tool.isValid():
-            raise RuntimeError(f"Native text {mode} offset tool is invalid.")
+            projected = text(
+                text_value, projection_size, spine, lateral_face,
+                font=font, kind=kind, halign="center", valign="center",
+            )
+        except ValueError as error:
+            if "Null TopoDS_Shape" not in str(error):
+                raise
+            projection_size *= 0.92
+            spine = self._frontal_arc(local_radius, z, text_value, projection_size)
+            try:
+                projected = text(
+                    text_value, projection_size, spine, lateral_face,
+                    font=font, kind=kind, halign="center", valign="center",
+                )
+            except ValueError as retry_error:
+                raise RuntimeError(
+                    f"Native conical text projection failed for {text_value!r} "
+                    f"at safe size {projection_size:.3f} mm."
+                ) from retry_error
+        if not projected.isValid():
+            raise RuntimeError("Native projected conical text is invalid.")
 
-        # Measure where the generated glyphs actually landed before moving them.
-        # The Lab/DOBO front is -Y (angle -90°). Center the measured angular bounds
-        # there, then apply the semantic circumferential offset as an additional
-        # rigid rotation. Size, relief, line spacing and vertical placement are
-        # untouched.
-        measured_center = self._angular_bounds_center(projected, math.pi / 2.0)
-        target_center = -math.pi / 2.0
-        semantic_offset = float(u_offset) / float(surface.radius)
-        angle_deg = math.degrees(target_center - measured_center + semantic_offset)
-
+        tool = self._relief_tool(projected, depth=depth, mode=mode)
+        angle_deg = self._front_rotation(
+            projected, local_radius=local_radius, u_offset=u_offset
+        )
         projected = projected.rotate(
             (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
         )
