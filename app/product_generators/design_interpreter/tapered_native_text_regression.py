@@ -12,7 +12,7 @@ from .structural_pipeline import DoboStructuralPipeline
 OUTPUT = Path("outputs-ci/tapered-native-text")
 
 
-def _case(case_id: str, prompt: str, *, effect: str, concept: str = "WALTER"):
+def _case(case_id: str, prompt: str, *, effect: str, concept: str = "walter"):
     feature = _feature(
         "front_text",
         concept,
@@ -57,7 +57,7 @@ def run() -> dict:
             "cone_multiline_emboss",
             "Crea una maceta cono con texto frontal en tres líneas: línea 1: PLANTA; línea 2: UNA; línea 3: IDEA.",
             effect="raised",
-            concept="PLANTA",
+            concept="planta",
         ),
     }
 
