@@ -12,8 +12,10 @@ surface decoration.
 from dataclasses import replace
 import math
 from pathlib import Path
+import re
 from time import perf_counter
 from typing import Any
+import unicodedata
 
 import cadquery as cq
 import numpy as np
@@ -33,7 +35,7 @@ from .native_text_pipeline_adapter import (
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_TAPERED_TEXT_ADAPTER_VERSION = "NTT.1-cone-cad-text-reconnection"
+NATIVE_TAPERED_TEXT_ADAPTER_VERSION = "NTT.2-cone-cad-multiline-reconnection"
 _TAPERED_TEXT_ROUTE = "analytic_cad_tapered_text"
 _BASE_TAPERED_ROUTE = "analytic_cad_tapered_primitive"
 
@@ -48,6 +50,45 @@ def uses_native_tapered_text(program: DesignSemanticProgram) -> bool:
         if feature.form_hint != "text" and not _plumbing_feature(feature)
     )
     return not unsupported
+
+
+def _plain(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", str(value).lower())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _tapered_line_contract(program: DesignSemanticProgram):
+    """Reuse canonical line parsing and accept the Lab's A / B / C phrasing."""
+    entries = tuple(_line_contract(program))
+    if len(entries) > 1:
+        return entries
+
+    prompt = str(getattr(program.source, "prompt", "") or "")
+    normalized = _plain(prompt)
+    if "/" not in prompt or "linea" not in normalized:
+        return entries
+
+    # Typical user phrasing: "exactamente en tres líneas: PLANTA / UNA / IDEA."
+    marker = re.search(r"lineas?\s*:\s*", normalized)
+    if marker is None:
+        return entries
+    raw_start = marker.end()
+    # Accent removal does not change string length for the characters used here,
+    # so the same offset selects the payload in the original prompt.
+    payload = prompt[raw_start:]
+    payload = re.split(r"[.\n\r]", payload, maxsplit=1)[0]
+    parts = tuple(
+        part.strip(" \t,;:\"'“”")
+        for part in payload.split("/")
+        if part.strip(" \t,;:\"'“”")
+    )
+    if not 2 <= len(parts) <= 6:
+        return entries
+    text_features = _text_features(program)
+    if not text_features:
+        return entries
+    feature = text_features[0]
+    return tuple((feature, part.upper()) for part in parts)
 
 
 def _base_shape(route: dict[str, Any]) -> cq.Shape:
@@ -74,10 +115,11 @@ def _apply_text_block(
     shape: cq.Shape,
     route: dict[str, Any],
     program: DesignSemanticProgram,
-) -> tuple[cq.Shape, float, float]:
-    entries = tuple(_line_contract(program))
+) -> tuple[cq.Shape, float, float, int]:
+    entries = tuple(_tapered_line_contract(program))
     if not entries:
-        return shape, float(shape.Volume()), float(shape.Volume())
+        volume = float(shape.Volume())
+        return shape, volume, volume, 0
 
     height = float(route["height_mm"])
     base_radius = 0.5 * float(route["bottom_diameter_mm"])
@@ -120,7 +162,8 @@ def _apply_text_block(
 
         # Keep enough room from the bottom and rim for the whole glyph contour.
         half_size = 0.55 * size
-        v_offset = min(height - max(half_size, 0.12 * height), max(max(half_size, 0.12 * height), v_offset))
+        safe_edge = max(half_size, 0.12 * height)
+        v_offset = min(height - safe_edge, max(safe_edge, v_offset))
         local_radius = float(surface.radius_at(v_offset))
 
         if multiline and str(first_feature.anchor.region) == "front":
@@ -148,7 +191,7 @@ def _apply_text_block(
     final = current.clean()
     if not final.isValid() or len(tuple(final.Solids())) != 1:
         raise RuntimeError("Native tapered text did not preserve one valid CAD vessel solid.")
-    return final, base_volume, float(final.Volume())
+    return final, base_volume, float(final.Volume()), len(entries)
 
 
 def decorate_tapered_mesh_result_with_native_text(
@@ -169,7 +212,7 @@ def decorate_tapered_mesh_result_with_native_text(
 
     started = perf_counter()
     shape = _base_shape(route)
-    final_shape, base_volume, final_volume = _apply_text_block(shape, route, program)
+    final_shape, base_volume, final_volume, line_count = _apply_text_block(shape, route, program)
 
     output = motor.get("output", {})
     stl_path = Path(str(mesh_result.stl_path))
@@ -190,7 +233,7 @@ def decorate_tapered_mesh_result_with_native_text(
     motor["_capability_route"] = _TAPERED_TEXT_ROUTE
     motor["_native_tapered_text"] = {
         "adapter_version": NATIVE_TAPERED_TEXT_ADAPTER_VERSION,
-        "line_count": len(_line_contract(program)),
+        "line_count": line_count,
         "base_volume_mm3": base_volume,
         "final_volume_mm3": final_volume,
         "volume_delta_mm3": final_volume - base_volume,
