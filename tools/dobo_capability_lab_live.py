@@ -19,9 +19,12 @@ import dobo_capability_lab as lab
 from product_generators.design_interpreter.body_family_expansion import (
     GeneralBodyFamilyExpander,
 )
+from product_generators.design_interpreter.design_pipeline import DoboDesignPipeline
 from dobo_capability_repairs import install
 from dobo_retry_repairs import install_retry_repairs
 
+
+LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.4-promoted-route-guard"
 
 # Capture the promoted/core body-family implementation before the lab repair
 # bridge replaces _fields_for. Native primitive CAD routing reconstructs its
@@ -59,6 +62,24 @@ from product_generators.design_interpreter.native_tapered_cad_adapter import (
 install_native_cad_primitive_adapter()
 install_native_angular_text_reconnection()
 install_native_tapered_cad_adapter()
+
+
+def _assert_promoted_retry_chain() -> None:
+    """Refuse to serve the Lab if the final tapered CAD router was overwritten.
+
+    The temporary lab retry bridge is allowed to wrap legacy capabilities, but
+    promoted primitives must never silently fall back to the old implicit
+    geometry while the UI still reports a green topology result.
+    """
+    retry = DoboDesignPipeline._generate_with_retry.__func__
+    if not getattr(retry, "_dobo_native_tapered_cad_adapter", False):
+        raise RuntimeError(
+            "DOBO Lab startup lost the promoted tapered CAD router; refusing "
+            "to serve legacy tapered geometry."
+        )
+
+
+_assert_promoted_retry_chain()
 
 # The exact WALTER regression already proved that semantic text needs the
 # temporary 120-second diagnostic budget before mesh generation. The live lab
@@ -101,6 +122,15 @@ _BASIC_PROMPTS = {
     "crea una maceta triangular": "Crea una maceta triangular",
 }
 
+_PROMOTED_ROUTE_FOR = {
+    "crea una maceta cubo": "analytic_cad_angular_primitive",
+    "crea una maceta cubica": "analytic_cad_angular_primitive",
+    "crea una maceta prisma rectangular": "analytic_cad_angular_primitive",
+    "crea una maceta rectangular": "analytic_cad_angular_primitive",
+    "crea una maceta cono": "analytic_cad_tapered_primitive",
+    "crea una maceta conica": "analytic_cad_tapered_primitive",
+}
+
 _original_generate = lab.generate
 
 
@@ -133,6 +163,43 @@ def _validated_vessel_flags(result: dict) -> None:
     view["drain"] = {"validated": True} if drain_ok else None
 
 
+def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
+    """Prevent false PASSes for primitives that already have promoted CAD.
+
+    The user's browser exposed the exact failure this guard is meant to catch:
+    a legacy tapered mesh can be watertight and single-component while still
+    being visibly wrong. For exact primitive buttons/aliases, route identity is
+    therefore a physical acceptance invariant, not merely diagnostic metadata.
+    """
+    expected_route = _PROMOTED_ROUTE_FOR.get(normalized_prompt)
+    motor = result.get("motor")
+    route = motor.get("_capability_route") if isinstance(motor, dict) else None
+    trace = result.setdefault("trace", {})
+    trace["live_lab_version"] = LIVE_CAPABILITY_LAB_VERSION
+    trace["capability_route"] = route
+
+    if expected_route is None:
+        return
+    if route != expected_route:
+        raise RuntimeError(
+            "DOBO Lab rejected a legacy primitive fallback: "
+            f"prompt={normalized_prompt!r}, route={route!r}, "
+            f"expected={expected_route!r}."
+        )
+
+    # The promoted plain frustum tessellates in the low thousands of vertices.
+    # A six-figure count is a reliable signature of the old stacked implicit
+    # approximation seen in the browser. Keep a generous ceiling so normal CAD
+    # tessellation changes do not create a brittle regression.
+    if expected_route == "analytic_cad_tapered_primitive":
+        vertices = int(trace.get("vertices") or 0)
+        if vertices <= 0 or vertices >= 20_000:
+            raise RuntimeError(
+                "DOBO Lab rejected non-native tapered mesh complexity: "
+                f"vertices={vertices}; expected promoted CAD below 20000."
+            )
+
+
 def generate(prompt: str, mode: str = "auto") -> dict:
     normalized = _plain(prompt)
     if mode == "offline" or (mode == "auto" and normalized in _BASIC_PROMPTS):
@@ -140,6 +207,7 @@ def generate(prompt: str, mode: str = "auto") -> dict:
         result = _original_generate(deterministic_prompt, mode="offline")
     else:
         result = _original_generate(prompt, mode="openai")
+    _guard_promoted_result(normalized, result)
     _validated_vessel_flags(result)
     return result
 
