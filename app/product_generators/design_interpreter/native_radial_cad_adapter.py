@@ -22,7 +22,7 @@ from product_generators.organic_shapes.vessel_engine import OrganicVesselResult
 from .design_pipeline import DoboDesignPipeline
 
 
-NATIVE_RADIAL_CAD_ADAPTER_VERSION = "NRAD.1-sphere-ovoid-loft"
+NATIVE_RADIAL_CAD_ADAPTER_VERSION = "NRAD.2-printable-tessellation"
 _SPHERICAL_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_ROUTE = "analytic_cad_ovoid_primitive"
 _PREVIOUS_GENERATE_WITH_RETRY = None
@@ -125,7 +125,6 @@ def _ovoid_scale(t: float, top_scale: float) -> float:
     for (t0, s0), (t1, s1) in zip(controls, controls[1:]):
         if t <= t1:
             alpha = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
-            # Smoothstep prevents visible kinks between analytic loft sections.
             alpha = alpha * alpha * (3.0 - 2.0 * alpha)
             return s0 + alpha * (s1 - s0)
     return top
@@ -188,8 +187,6 @@ def _build_radial_shape(route: dict[str, Any]) -> tuple[cq.Shape, Callable[[floa
         if min(rx, ry) <= 0.8:
             raise RuntimeError("Radial CAD wall leaves no valid cavity section.")
         inner_sections.append((t * height, rx, ry))
-    # Extend the final inner section above the rim so subtraction always opens
-    # the top instead of depending on coincident loft caps.
     _, top_rx, top_ry = inner_sections[-1]
     inner_sections.append((height + max(1.0, wall), top_rx, top_ry))
     inner = _loft(tuple(inner_sections))
@@ -235,7 +232,11 @@ def generate_native_radial_cad_if_routed(motor: dict[str, Any]) -> OrganicVessel
     output_dir = Path(str(output["directory"]))
     output_dir.mkdir(parents=True, exist_ok=True)
     stl_path = output_dir / f"{output['basename']}.stl"
-    cq.exporters.export(shape, str(stl_path), tolerance=0.035, angularTolerance=0.08)
+    # Radial B-spline surfaces need a coarser tessellation than planes/cones.
+    # 0.18 mm chord tolerance is well below normal FDM layer/nozzle scales for
+    # these 100–125 mm planters, while avoiding six-figure STL meshes that add
+    # no manufacturable detail and previously resembled the legacy voxel path.
+    cq.exporters.export(shape, str(stl_path), tolerance=0.18, angularTolerance=0.22)
     mesh = _load_welded_stl(stl_path)
     components = tuple(mesh.split(only_watertight=False))
 
