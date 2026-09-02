@@ -12,17 +12,27 @@ from .structural_pipeline import DoboStructuralPipeline
 OUTPUT = Path("outputs-ci/tapered-native-text")
 
 
-def _case(case_id: str, prompt: str, *, effect: str, concept: str = "walter"):
+def _case(
+    case_id: str,
+    prompt: str,
+    *,
+    effect: str,
+    concept: str = "walter",
+    feature_id: str = "front_text",
+    vertical: float = 0.52,
+    width: float = 0.55,
+    height: float = 0.14,
+):
     feature = _feature(
-        "front_text",
+        feature_id,
         concept,
         "text",
         effect,
         region="front",
         horizontal=0.0,
-        vertical=0.52,
-        width=0.55,
-        height=0.14,
+        vertical=vertical,
+        width=width,
+        height=height,
         depth=1.2,
     )
     return _program(
@@ -52,6 +62,15 @@ def run() -> dict:
             "cone_walter_deboss",
             "Crea una maceta cono con el texto WALTER en bajorrelieve sobre la cara frontal.",
             effect="recessed",
+        ),
+        "deboss_repair_boundary": _case(
+            "cone_walter_deboss_repair_boundary",
+            "Crea una maceta cono con el texto WALTER en bajorrelieve sobre la cara frontal.",
+            effect="recessed",
+            feature_id="feature_text_walter",
+            vertical=0.90,
+            width=0.95,
+            height=0.28,
         ),
         "multiline": _case(
             "cone_multiline_emboss",
@@ -98,7 +117,7 @@ def run() -> dict:
             ),
         }
         delta = float(text_route.get("volume_delta_mm3", 0.0))
-        assertions["relief_direction"] = delta < 0.0 if name == "deboss" else delta > 0.0
+        assertions["relief_direction"] = delta < 0.0 if "deboss" in name else delta > 0.0
         if not all(assertions.values()):
             failed = [key for key, value in assertions.items() if not value]
             raise RuntimeError(f"{name} tapered native text regression failed: {failed}")
