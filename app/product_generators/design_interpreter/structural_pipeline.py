@@ -14,6 +14,7 @@ from .intelligent_surfaces import (
     IntelligentSurfaceReport,
     SurfaceLayerIntent,
 )
+from .native_radial_cad_adapter import install_native_radial_cad_adapter
 from .native_text_pipeline_adapter import (
     decorate_mesh_result_with_native_text,
     strip_text_from_motor,
@@ -31,11 +32,13 @@ from .structural_compiler import StructuralCompilationResult, StructuralSemantic
 from .structural_vocabulary import StructuralVocabularyResolver
 from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 
-# Install after native cylindrical text routing so tapered bodies wrap the
-# current consolidated retry chain without replacing any earlier capability.
+# Install promoted primitive routes as wrappers around the already consolidated
+# retry chain. Radial bodies are installed last so sphere/ovoid promotion does
+# not replace cylindrical, angular or tapered capabilities.
 install_native_tapered_cad_adapter()
+install_native_radial_cad_adapter()
 
-STRUCTURAL_PIPELINE_VERSION = "8.4-tapered-native-text-routing"
+STRUCTURAL_PIPELINE_VERSION = "8.5-radial-native-body-routing"
 STRUCTURAL_FUSION_VERSION = "7C.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
