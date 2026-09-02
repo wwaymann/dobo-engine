@@ -164,16 +164,30 @@ class NativeSurfaceTextBuilder:
         return 0.5 * (min(angles) + max(angles))
 
     @staticmethod
-    def _relief_tool(projected: cq.Shape, *, depth: float, mode: str) -> cq.Shape:
+    def _relief_tool(
+        projected: cq.Shape,
+        *,
+        depth: float,
+        mode: str,
+        outward_sign: float,
+    ) -> cq.Shape:
+        """Build relief along the receiving face orientation.
+
+        OCC cylindrical and conical projection faces expose opposite offset
+        directions in the current CadQuery path-text implementation. The caller
+        supplies the known outward sign so emboss always protrudes and deboss
+        always cuts into the vessel instead of depending on face orientation.
+        """
+        sign = 1.0 if float(outward_sign) >= 0.0 else -1.0
         try:
             if mode == "emboss":
                 outward_depth = min(depth, 1.50)
                 anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
-                outward_tool = offset(projected, -outward_depth, cap=True)
-                inward_anchor = offset(projected, anchor_depth, cap=True)
+                outward_tool = offset(projected, sign * outward_depth, cap=True)
+                inward_anchor = offset(projected, -sign * anchor_depth, cap=True)
                 tool = outward_tool.fuse(inward_anchor, tol=0.01).clean()
             else:
-                tool = offset(projected, depth, cap=True)
+                tool = offset(projected, -sign * depth, cap=True)
         except Exception as error:
             raise RuntimeError(f"Native text {mode} offset failed.") from error
         if not tool.isValid():
@@ -230,7 +244,9 @@ class NativeSurfaceTextBuilder:
         if not projected.isValid():
             raise RuntimeError("Native projected text is invalid.")
 
-        tool = self._relief_tool(projected, depth=depth, mode=mode)
+        tool = self._relief_tool(
+            projected, depth=depth, mode=mode, outward_sign=-1.0
+        )
         angle_deg = self._front_rotation(
             projected, local_radius=float(surface.radius), u_offset=u_offset
         )
@@ -279,7 +295,9 @@ class NativeSurfaceTextBuilder:
         if not projected.isValid():
             raise RuntimeError("Native projected conical text is invalid.")
 
-        tool = self._relief_tool(projected, depth=depth, mode=mode)
+        tool = self._relief_tool(
+            projected, depth=depth, mode=mode, outward_sign=1.0
+        )
         angle_deg = self._front_rotation(
             projected, local_radius=local_radius, u_offset=u_offset
         )
