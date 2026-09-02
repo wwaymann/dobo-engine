@@ -153,6 +153,60 @@ jobs:
               raise RuntimeError('Exact live cone prompt did not preserve tapered_revolution intent.')
           PY
 
+      - name: Generate exact cone through live DOBO Lab
+        if: always()
+        env:
+          PYTHONPATH: app:tools
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+
+          os.environ['DOBO_OPENAI_MODEL'] = os.environ['DOBO_SEMANTIC_MODEL']
+          import dobo_capability_lab_live as live
+
+          out = Path('outputs-ci/consolidation-live-prompt/cone')
+          out.mkdir(parents=True, exist_ok=True)
+          result = live.generate(os.environ['CONE_PROMPT'], mode='openai')
+          motor = result['motor']
+          validation = result['validation']
+          vessel = result['vessel']
+          audit = {
+              'schema': 'dobo.consolidation.live_cone_geometry.1',
+              'source': result['source'],
+              'profile': result['profile'],
+              'morphology': result['morphology'],
+              'capability_route': motor.get('_capability_route'),
+              'analytic_contract': motor.get('_analytic_tapered'),
+              'watertight': validation.get('watertight'),
+              'winding_consistent': validation.get('winding_consistent'),
+              'component_count': validation.get('component_count'),
+              'opening': bool(vessel.get('opening')),
+              'drain': bool(vessel.get('drain')),
+              'vertices': result['trace'].get('vertices'),
+              'faces': result['trace'].get('faces'),
+              'generation_attempts': result['trace'].get('generation_attempts'),
+          }
+          audit['verdict'] = 'PASS' if all([
+              audit['morphology'] == 'tapered_revolution',
+              audit['capability_route'] == 'analytic_cad_tapered_primitive',
+              audit['watertight'],
+              audit['winding_consistent'],
+              int(audit['component_count'] or 0) == 1,
+              audit['opening'],
+              audit['drain'],
+          ]) else 'FAIL'
+          (out/'LIVE_GEOMETRY_AUDIT.json').write_text(
+              json.dumps(audit, indent=2, ensure_ascii=False) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          if audit['verdict'] != 'PASS':
+              raise RuntimeError('Exact free cone prompt did not use the promoted analytic CAD route in DOBO Lab.')
+          PY
+
       - name: Upload semantic continuity evidence
         if: always()
         uses: actions/upload-artifact@v4
