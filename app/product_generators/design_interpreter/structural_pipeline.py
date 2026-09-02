@@ -15,6 +15,10 @@ from .intelligent_surfaces import (
     SurfaceLayerIntent,
 )
 from .native_radial_cad_adapter import install_native_radial_cad_adapter
+from .native_radial_text_adapter import (
+    decorate_radial_mesh_result_with_native_text,
+    uses_native_radial_text,
+)
 from .native_text_pipeline_adapter import (
     decorate_mesh_result_with_native_text,
     strip_text_from_motor,
@@ -38,7 +42,7 @@ from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 install_native_tapered_cad_adapter()
 install_native_radial_cad_adapter()
 
-STRUCTURAL_PIPELINE_VERSION = "8.5-radial-native-body-routing"
+STRUCTURAL_PIPELINE_VERSION = "8.6-radial-native-text-routing"
 STRUCTURAL_FUSION_VERSION = "7C.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
@@ -195,12 +199,13 @@ class DoboStructuralPipeline:
         motor = compilation.motor_program
 
         # Normalize the body first, then remove native text from the volumetric
-        # hierarchy. Cylinders and tapered vessels both keep their promoted CAD
-        # bodies; glyphs are applied only after the body/cavity/drain are proven.
+        # hierarchy. Cylinders, tapered vessels and promoted radial bodies keep
+        # their CAD bodies; glyphs are applied only after body/cavity/drain pass.
         GeneralBodyFamilyExpander.apply(motor, repair.program)
         native_cylindrical_text = uses_native_cylindrical_text(repair.program)
         native_tapered_text = uses_native_tapered_text(repair.program)
-        native_cad_text = native_cylindrical_text or native_tapered_text
+        native_radial_text = uses_native_radial_text(repair.program)
+        native_cad_text = native_cylindrical_text or native_tapered_text or native_radial_text
         if native_cad_text:
             strip_text_from_motor(motor, repair.program)
 
@@ -271,10 +276,8 @@ class DoboStructuralPipeline:
             engine=engine,
         )
 
-        # Reconnect text to the already-proven CAD body. The tapered decorator
-        # reconstructs the exact loft from the route contract and uses the
-        # existing ConeSurfaceMapper + NativeSurfaceTextBuilder, so no text node
-        # can deform the planter silhouette, opening, cavity or drain.
+        # Reconnect text only after the promoted CAD body is proven. No native
+        # text route is allowed to deform the planter body through voxel fallback.
         if native_cylindrical_text:
             mesh_result = decorate_mesh_result_with_native_text(
                 mesh_result,
@@ -283,6 +286,12 @@ class DoboStructuralPipeline:
             )
         elif native_tapered_text:
             mesh_result = decorate_tapered_mesh_result_with_native_text(
+                mesh_result,
+                selected_motor,
+                repair.program,
+            )
+        elif native_radial_text:
+            mesh_result = decorate_radial_mesh_result_with_native_text(
                 mesh_result,
                 selected_motor,
                 repair.program,
@@ -354,6 +363,7 @@ class DoboStructuralPipeline:
                         "painted_triangles": three_mf.painted_triangle_count,
                         "native_cad_text": native_cad_text,
                         "native_tapered_text": native_tapered_text,
+                        "native_radial_text": native_radial_text,
                     },
                 },
                 indent=2,
