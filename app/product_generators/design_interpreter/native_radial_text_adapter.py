@@ -35,7 +35,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.2-straddled-deboss"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.3-tessellation-cleanup"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -330,6 +330,32 @@ def _apply_relief(
     return final
 
 
+def _single_tessellated_component(mesh):
+    """Remove only negligible STL slivers produced by OCC curved-face cuts.
+
+    The CAD result has already been proven to contain exactly one solid. OCC can
+    nevertheless emit a handful of zero-area or near-zero-volume triangles at
+    deboss Boolean seams. They are not product geometry. Reject any meaningful
+    secondary shell, but discard these numerical residues before validation.
+    """
+    components = tuple(mesh.split(only_watertight=False))
+    if len(components) <= 1:
+        return mesh
+    ordered = sorted(components, key=lambda item: abs(float(item.volume)), reverse=True)
+    primary = ordered[0]
+    primary_volume = max(abs(float(primary.volume)), 1.0)
+    meaningful_limit = max(1e-3, primary_volume * 1e-8)
+    for residue in ordered[1:]:
+        if len(residue.faces) > 16 or abs(float(residue.volume)) > meaningful_limit:
+            raise RuntimeError(
+                "Native radial text STL contains a meaningful disconnected component."
+            )
+    cleaned = primary.copy()
+    cleaned.merge_vertices()
+    cleaned.remove_unreferenced_vertices()
+    return cleaned
+
+
 def _apply_text_block(
     shape: cq.Shape,
     route: dict[str, Any],
@@ -438,7 +464,10 @@ def decorate_radial_mesh_result_with_native_text(
     stl_path = Path(str(mesh_result.stl_path))
     stl_path.parent.mkdir(parents=True, exist_ok=True)
     cq.exporters.export(final_shape, str(stl_path), tolerance=0.08, angularTolerance=0.08)
-    mesh = _load_welded_stl(stl_path)
+    mesh = _single_tessellated_component(_load_welded_stl(stl_path))
+    # Persist the physically validated, single-component tessellation rather
+    # than leaving numerical sliver triangles in the user-facing STL artifact.
+    mesh.export(str(stl_path))
     components = tuple(mesh.split(only_watertight=False))
 
     checks = dict(getattr(mesh_result, "semantic_checks", {}) or {})
