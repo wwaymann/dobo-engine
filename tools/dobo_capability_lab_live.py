@@ -157,10 +157,8 @@ def _patch_live_lab_html() -> None:
         "q('#placeholder').style.display='grid';q('#placeholder').innerHTML="
         "'<div><strong>Generación fallida</strong>No se muestra geometría de una ejecución anterior.</div>';"
         "['#shot1','#shot2','#shot3'].forEach(id=>q(id).removeAttribute('src'));"
-        "q('#summary').innerHTML='<div class=\"muted\">Resultado actual</div>'+
-        "'<div class=\"big\">Sin modelo válido</div><div class=\"muted\">'+message+'</div>';"
-        "q('#checks').innerHTML='<span>Watertight</span><b>—</b><span>Winding consistente</span><b>—</b>'+
-        "'<span>Componentes</span><b>—</b><span>Intentos</span><b>—</b>';"
+        "q('#summary').innerHTML=`<div class=\"muted\">Resultado actual</div><div class=\"big\">Sin modelo válido</div><div class=\"muted\">${message}</div>`;"
+        "q('#checks').innerHTML='<span>Watertight</span><b>—</b><span>Winding consistente</span><b>—</b><span>Componentes</span><b>—</b><span>Intentos</span><b>—</b>';"
         "['#cSemantic','#cGeometry','#cCavity','#cDrain','#cMfg'].forEach(id=>{"
         "const e=q(id);e.textContent='—';e.className='';});"
         "q('#json').textContent='La generación actual falló; no hay semántica/motor válido para mostrar.';"
