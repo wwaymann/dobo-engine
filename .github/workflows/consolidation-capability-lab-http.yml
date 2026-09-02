@@ -11,6 +11,7 @@ on:
       - 'app/product_generators/design_interpreter/body_family_expansion.py'
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
+      - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - '.github/workflows/consolidation-capability-lab-http.yml'
   pull_request:
@@ -23,6 +24,7 @@ on:
       - 'app/product_generators/design_interpreter/body_family_expansion.py'
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
+      - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - '.github/workflows/consolidation-capability-lab-http.yml'
   workflow_dispatch:
@@ -90,82 +92,97 @@ jobs:
               raise RuntimeError(f'Live Lab UI integrity contract failed: {failed}')
           PY
 
-      - name: POST exact cone button prompt through browser API
+      - name: POST cone sphere and ovoid through browser API
         run: |
-          mkdir -p outputs-ci/capability-lab-http-cone
+          mkdir -p outputs-ci/capability-lab-http-primitives
           python - <<'PY'
           from __future__ import annotations
           import json
           from pathlib import Path
           import urllib.request
 
-          payload = json.dumps({
-              'prompt': 'Crea una maceta cono',
-              'mode': 'auto',
-          }).encode('utf-8')
-          request = urllib.request.Request(
-              'http://127.0.0.1:8765/api/generate',
-              data=payload,
-              headers={'Content-Type': 'application/json'},
-              method='POST',
-          )
-          with urllib.request.urlopen(request, timeout=90) as response:
-              result = json.loads(response.read().decode('utf-8'))
-
-          out = Path('outputs-ci/capability-lab-http-cone')
-          (out / 'HTTP_RESPONSE.json').write_text(
-              json.dumps(result, indent=2, ensure_ascii=False) + '\n',
-              encoding='utf-8',
-          )
-
-          if not result.get('ok'):
-              raise RuntimeError(f"HTTP Lab generation failed: {result!r}")
-
-          motor = result.get('motor', {})
-          validation = result.get('validation', {})
-          vessel = result.get('vessel', {})
-          trace = result.get('trace', {})
-          audit = {
-              'schema': 'dobo.capability_lab.http_cone.2',
-              'source': result.get('source'),
-              'profile': result.get('profile'),
-              'morphology': result.get('morphology'),
-              'capability_route': motor.get('_capability_route'),
-              'live_lab_version': trace.get('live_lab_version'),
-              'trace_route': trace.get('capability_route'),
-              'vertices': trace.get('vertices'),
-              'faces': trace.get('faces'),
-              'watertight': validation.get('watertight'),
-              'winding_consistent': validation.get('winding_consistent'),
-              'component_count': validation.get('component_count'),
-              'opening': bool(vessel.get('opening')),
-              'drain': bool(vessel.get('drain')),
-              'analytic_tapered': motor.get('_analytic_tapered'),
+          cases = {
+              'cone': {
+                  'prompt': 'Crea una maceta cono',
+                  'morphology': 'tapered_revolution',
+                  'route': 'analytic_cad_tapered_primitive',
+                  'vertex_ceiling': 20000,
+              },
+              'sphere': {
+                  'prompt': 'Crea una maceta esfera',
+                  'morphology': 'spherical',
+                  'route': 'analytic_cad_spherical_primitive',
+                  'vertex_ceiling': 30000,
+              },
+              'ovoid': {
+                  'prompt': 'Crea una maceta ovoide',
+                  'morphology': 'ovoid',
+                  'route': 'analytic_cad_ovoid_primitive',
+                  'vertex_ceiling': 30000,
+              },
           }
-          checks = [
-              audit['source'] == 'offline-semantic',
-              audit['morphology'] == 'tapered_revolution',
-              audit['capability_route'] == 'analytic_cad_tapered_primitive',
-              audit['trace_route'] == 'analytic_cad_tapered_primitive',
-              audit['live_lab_version'] == 'LABLIVE.5-text-ui-integrity',
-              bool(audit['watertight']),
-              bool(audit['winding_consistent']),
-              int(audit['component_count'] or 0) == 1,
-              audit['opening'],
-              audit['drain'],
-              0 < int(audit['vertices'] or 0) < 20_000,
-              0 < int(audit['faces'] or 0) < 40_000,
-          ]
-          audit['verdict'] = 'PASS' if all(checks) else 'FAIL'
-          (out / 'HTTP_CONE_AUDIT.json').write_text(
-              json.dumps(audit, indent=2, ensure_ascii=False) + '\n',
+          out = Path('outputs-ci/capability-lab-http-primitives')
+          report = {}
+
+          for name, case in cases.items():
+              payload = json.dumps({'prompt': case['prompt'], 'mode': 'auto'}).encode('utf-8')
+              request = urllib.request.Request(
+                  'http://127.0.0.1:8765/api/generate',
+                  data=payload,
+                  headers={'Content-Type': 'application/json'},
+                  method='POST',
+              )
+              with urllib.request.urlopen(request, timeout=90) as response:
+                  result = json.loads(response.read().decode('utf-8'))
+              (out / f'{name.upper()}_HTTP_RESPONSE.json').write_text(
+                  json.dumps(result, indent=2, ensure_ascii=False) + '\n',
+                  encoding='utf-8',
+              )
+              if not result.get('ok'):
+                  raise RuntimeError(f"HTTP Lab {name} generation failed: {result!r}")
+
+              motor = result.get('motor', {})
+              validation = result.get('validation', {})
+              vessel = result.get('vessel', {})
+              trace = result.get('trace', {})
+              audit = {
+                  'source': result.get('source'),
+                  'profile': result.get('profile'),
+                  'morphology': result.get('morphology'),
+                  'capability_route': motor.get('_capability_route'),
+                  'live_lab_version': trace.get('live_lab_version'),
+                  'trace_route': trace.get('capability_route'),
+                  'vertices': trace.get('vertices'),
+                  'faces': trace.get('faces'),
+                  'watertight': validation.get('watertight'),
+                  'winding_consistent': validation.get('winding_consistent'),
+                  'component_count': validation.get('component_count'),
+                  'opening': bool(vessel.get('opening')),
+                  'drain': bool(vessel.get('drain')),
+              }
+              checks = [
+                  audit['source'] == 'offline-semantic',
+                  audit['morphology'] == case['morphology'],
+                  audit['capability_route'] == case['route'],
+                  audit['trace_route'] == case['route'],
+                  audit['live_lab_version'] == 'LABLIVE.6-radial-primitive-guard',
+                  bool(audit['watertight']),
+                  bool(audit['winding_consistent']),
+                  int(audit['component_count'] or 0) == 1,
+                  audit['opening'],
+                  audit['drain'],
+                  0 < int(audit['vertices'] or 0) < case['vertex_ceiling'],
+              ]
+              audit['verdict'] = 'PASS' if all(checks) else 'FAIL'
+              report[name] = audit
+              if audit['verdict'] != 'PASS':
+                  raise RuntimeError(f'Actual DOBO Lab HTTP {name} path failed promoted CAD audit: {audit}')
+
+          (out / 'HTTP_PROMOTED_PRIMITIVES_AUDIT.json').write_text(
+              json.dumps(report, indent=2, ensure_ascii=False) + '\n',
               encoding='utf-8',
           )
-          print(json.dumps(audit, indent=2, ensure_ascii=False))
-          if audit['verdict'] != 'PASS':
-              raise RuntimeError(
-                  'Actual DOBO Lab HTTP path did not use the promoted analytic cone route.'
-              )
+          print(json.dumps(report, indent=2, ensure_ascii=False))
           PY
 
       - name: Print server log on failure
@@ -183,7 +200,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dobo-capability-lab-http-cone
-          path: outputs-ci/capability-lab-http-cone
+          name: dobo-capability-lab-http-primitives
+          path: outputs-ci/capability-lab-http-primitives
           if-no-files-found: warn
           retention-days: 30
