@@ -35,7 +35,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.1-revolved-surface-text"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.2-straddled-deboss"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -234,7 +234,7 @@ def _project_line(
 
     try:
         projected = build(projection_size)
-    except (ValueError, RuntimeError) as first_error:
+    except (ValueError, RuntimeError):
         try:
             projected = build(projection_size * 0.90)
         except Exception as retry_error:
@@ -247,15 +247,20 @@ def _project_line(
 
 
 def _offset_tool(projected: cq.Shape, *, depth: float, mode: str, sign: float) -> cq.Shape:
+    """Create a relief tool that crosses the receiving surface robustly.
+
+    A projected face is exactly coincident with the vessel skin. On BSpline and
+    spherical faces a one-sided deboss tool can remain merely tangent after OCC
+    tolerance resolution, producing zero subtraction. Both emboss and deboss
+    therefore straddle the skin by a small anchor depth. Trying both signs in
+    the Boolean stage then determines the actual inward/outward face direction.
+    """
     try:
-        if mode == "emboss":
-            outward_depth = min(float(depth), 1.50)
-            anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
-            primary = offset(projected, float(sign) * outward_depth, cap=True)
-            anchor = offset(projected, -float(sign) * anchor_depth, cap=True)
-            tool = primary.fuse(anchor, tol=0.01).clean()
-        else:
-            tool = offset(projected, float(sign) * float(depth), cap=True).clean()
+        primary_depth = min(float(depth), 1.50) if mode == "emboss" else float(depth)
+        anchor_depth = min(0.16, max(0.06, 0.10 * primary_depth))
+        primary = offset(projected, float(sign) * primary_depth, cap=True)
+        anchor = offset(projected, -float(sign) * anchor_depth, cap=True)
+        tool = primary.fuse(anchor, tol=0.01).clean()
     except Exception as error:
         raise RuntimeError("Native radial text offset failed.") from error
     if not tool.isValid():
