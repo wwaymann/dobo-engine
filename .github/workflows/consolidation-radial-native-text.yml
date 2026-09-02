@@ -5,6 +5,7 @@ on:
     paths:
       - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_radial_text_adapter.py'
+      - 'app/product_generators/design_interpreter/native_ovoid_text_adapter.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - 'app/product_generators/design_interpreter/radial_native_text_regression.py'
       - '.github/workflows/consolidation-radial-native-text.yml'
