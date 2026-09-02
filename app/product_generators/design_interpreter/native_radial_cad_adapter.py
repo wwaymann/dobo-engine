@@ -23,7 +23,7 @@ from product_generators.organic_shapes.vessel_engine import OrganicVesselResult
 from .design_pipeline import DoboDesignPipeline
 
 
-NATIVE_RADIAL_CAD_ADAPTER_VERSION = "NRAD.3-smooth-revolution"
+NATIVE_RADIAL_CAD_ADAPTER_VERSION = "NRAD.4-wide-opening-profile-check"
 _SPHERICAL_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_ROUTE = "analytic_cad_ovoid_primitive"
 _PREVIOUS_GENERATE_WITH_RETRY = None
@@ -340,9 +340,12 @@ def generate_native_radial_cad_if_routed(motor: dict[str, Any]) -> OrganicVessel
         "surface_is_continuous_revolution": str(route.get("surface_model", "")).startswith("revolved_"),
     }
     if profile == "spherical":
+        edge_radius = max(top_x, bottom_x)
+        symmetric_ends = abs(top_x - bottom_x) <= 0.03 * max(top_x, bottom_x)
+        visible_bulge = outer_mid - edge_radius
         semantic_checks["profile_is_spherical"] = (
-            abs(top_x - bottom_x) <= 0.03 * max(top_x, bottom_x)
-            and outer_mid > 1.20 * top_x
+            symmetric_ends
+            and visible_bulge > max(0.25 * wall, 0.005 * outer_mid)
         )
     else:
         semantic_checks["profile_is_ovoid"] = (
