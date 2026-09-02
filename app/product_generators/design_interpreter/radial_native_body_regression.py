@@ -49,13 +49,23 @@ def _ovoid():
 def run() -> dict:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     cases = {
-        "sphere": (_sphere(), "analytic_cad_spherical_primitive", "spherical"),
-        "ovoid": (_ovoid(), "analytic_cad_ovoid_primitive", "ovoid"),
+        "sphere": (
+            _sphere(),
+            "analytic_cad_spherical_primitive",
+            "spherical",
+            "revolved_circle",
+        ),
+        "ovoid": (
+            _ovoid(),
+            "analytic_cad_ovoid_primitive",
+            "ovoid",
+            "revolved_spline",
+        ),
     }
     report: dict[str, dict] = {}
     pipeline = DoboStructuralPipeline()
 
-    for name, (program, expected_route, expected_profile) in cases.items():
+    for name, (program, expected_route, expected_profile, expected_surface) in cases.items():
         result = pipeline.generate_from_semantic(
             program,
             output_root=OUTPUT / name,
@@ -69,6 +79,7 @@ def run() -> dict:
         assertions = {
             "route": route == expected_route,
             "profile": radial.get("profile") == expected_profile,
+            "surface_model": radial.get("surface_model") == expected_surface,
             "watertight": bool(result.mesh_result.watertight),
             "winding_consistent": bool(result.mesh_result.winding_consistent),
             "one_component": int(result.mesh_result.component_count) == 1,
@@ -81,8 +92,9 @@ def run() -> dict:
             "below_base": bool(checks.get("below_base_is_empty")),
             "radial_profile": bool(checks.get("profile_is_radial")),
             "profile_specific": bool(checks.get(f"profile_is_{expected_profile}")),
+            "continuous_surface": bool(checks.get("surface_is_continuous_revolution")),
             "printable": bool(checks.get("dimensions_are_printable")),
-            "mesh_not_legacy_dense": 0 < int(result.mesh_result.vertex_count) < 30_000,
+            "mesh_is_smooth_and_compact": 1_000 < int(result.mesh_result.vertex_count) < 15_000,
         }
         if name == "sphere":
             assertions["dimensions"] = (
@@ -104,6 +116,7 @@ def run() -> dict:
         report[name] = {
             "route": route,
             "profile": expected_profile,
+            "surface_model": expected_surface,
             "vertices": result.mesh_result.vertex_count,
             "faces": result.mesh_result.face_count,
             "generation_seconds": result.mesh_result.generation_seconds,
