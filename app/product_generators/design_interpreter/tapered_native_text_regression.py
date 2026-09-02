@@ -55,7 +55,7 @@ def run() -> dict:
         ),
         "multiline": _case(
             "cone_multiline_emboss",
-            "Crea una maceta cono con texto frontal en tres líneas: línea 1: PLANTA; línea 2: UNA; línea 3: IDEA.",
+            "Crea una maceta cono con texto en sobrerrelieve sobre la cara frontal, centrado y distribuido exactamente en tres líneas: PLANTA / UNA / IDEA. Mantén las tres líneas separadas.",
             effect="raised",
             concept="planta",
         ),
