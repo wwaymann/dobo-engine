@@ -7,6 +7,10 @@ is requested. Text is removed from the volumetric hierarchy before generation,
 then DOBO's existing ConeSurfaceMapper + NativeSurfaceTextBuilder are applied to
 the exact analytic body. This keeps cone shape, cavity and drain independent of
 surface decoration.
+
+The native tapered route also owns final text-to-surface placement. Generic
+volumetric hierarchy diagnostics that belong only to those text nodes must not
+block the proposal before the native mapper gets a chance to place them.
 """
 
 from dataclasses import replace
@@ -32,10 +36,11 @@ from .native_text_pipeline_adapter import (
     _plumbing_feature,
     _text_features,
 )
+from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepairer
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_TAPERED_TEXT_ADAPTER_VERSION = "NTT.2-cone-cad-multiline-reconnection"
+NATIVE_TAPERED_TEXT_ADAPTER_VERSION = "NTT.3-native-repair-boundary"
 _TAPERED_TEXT_ROUTE = "analytic_cad_tapered_text"
 _BASE_TAPERED_ROUTE = "analytic_cad_tapered_primitive"
 
@@ -50,6 +55,66 @@ def uses_native_tapered_text(program: DesignSemanticProgram) -> bool:
         if feature.form_hint != "text" and not _plumbing_feature(feature)
     )
     return not unsupported
+
+
+def _failure_owned_by_native_text(name: str, text_ids: set[str]) -> bool:
+    """Identify generic hierarchy diagnostics that belong to native text nodes."""
+    value = str(name)
+    for feature_id in text_ids:
+        template_id = f"{feature_id}_template"
+        if (
+            value.startswith(feature_id)
+            or f"/{feature_id}" in value
+            or f"/{template_id}" in value
+            or f"{feature_id}--" in value
+            or f"--{feature_id}" in value
+        ):
+            return True
+    return False
+
+
+def install_native_tapered_text_repair_boundary() -> None:
+    """Exclude native text nodes from the generic volumetric repair boundary.
+
+    SemanticProposalRepairer evaluates hierarchy placements before the
+    structural pipeline strips text from that hierarchy. For tapered native text
+    this can create false failures such as ``root/feature_text_walter...`` even
+    though the final placement is owned by ConeSurfaceMapper. Filter only the
+    diagnostics that belong to text nodes and only when the whole program is
+    eligible for the native tapered-text route. Non-text geometry is untouched.
+    """
+    current = SemanticProposalRepairer._evaluate.__func__
+    if getattr(current, "_dobo_native_tapered_text_repair_boundary", False):
+        return
+    previous = current
+
+    def _evaluate_with_native_tapered_text(cls, program: DesignSemanticProgram):
+        snapshot, compilation = previous(cls, program)
+        if not uses_native_tapered_text(program):
+            return snapshot, compilation
+
+        text_ids = {str(feature.id) for feature in _text_features(program)}
+        filtered = ProposalValidationSnapshot(
+            surface_anchor_failures=tuple(
+                failure
+                for failure in snapshot.surface_anchor_failures
+                if not _failure_owned_by_native_text(failure, text_ids)
+            ),
+            layout_failures=tuple(
+                failure
+                for failure in snapshot.layout_failures
+                if not _failure_owned_by_native_text(failure, text_ids)
+            ),
+            manufacturability_failures=tuple(
+                failure
+                for failure in snapshot.manufacturability_failures
+                if not _failure_owned_by_native_text(failure, text_ids)
+            ),
+        )
+        return filtered, compilation
+
+    _evaluate_with_native_tapered_text._dobo_native_tapered_text_repair_boundary = True
+    SemanticProposalRepairer._evaluate = classmethod(_evaluate_with_native_tapered_text)
 
 
 def _plain(value: str) -> str:
@@ -259,3 +324,6 @@ def decorate_tapered_mesh_result_with_native_text(
     )
     decorated.validate()
     return decorated
+
+
+install_native_tapered_text_repair_boundary()
