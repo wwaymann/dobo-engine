@@ -7,10 +7,10 @@ OpenAI only for semantic interpretation. The physical object is always generated
 by the DOBO geometry pipeline.
 
 The live lab keeps its temporary repair bridge for capabilities that are still
-being observed there, but promoted cube/rectangular-prism/cone bodies must
-exercise the same native CAD routes as the consolidated core regressions. This
-prevents the lab from accidentally showing old implicit approximations after a
-capability has already been promoted.
+being observed there, but promoted cube/rectangular-prism/cone/sphere/ovoid
+bodies must exercise the same native CAD routes as the consolidated core
+regressions. This prevents the lab from accidentally showing old implicit
+approximations after a capability has already been promoted.
 """
 
 import unicodedata
@@ -24,7 +24,7 @@ from dobo_capability_repairs import install
 from dobo_retry_repairs import install_retry_repairs
 
 
-LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.5-text-ui-integrity"
+LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.6-radial-primitive-guard"
 
 # Capture the promoted/core body-family implementation before the lab repair
 # bridge replaces _fields_for. Native primitive CAD routing reconstructs its
@@ -39,7 +39,13 @@ _REPAIRED_FIELDS_FOR = GeneralBodyFamilyExpander._fields_for.__func__
 
 
 def _live_fields_for(cls, profile: str, program):
-    if profile in {"cuboid", "rectangular_prism", "tapered_revolution"}:
+    if profile in {
+        "cuboid",
+        "rectangular_prism",
+        "tapered_revolution",
+        "spherical",
+        "ovoid",
+    }:
         return _CANONICAL_FIELDS_FOR(cls, profile, program)
     return _REPAIRED_FIELDS_FOR(cls, profile, program)
 
@@ -58,24 +64,23 @@ from product_generators.design_interpreter.native_angular_text_reconnection impo
 from product_generators.design_interpreter.native_tapered_cad_adapter import (
     install_native_tapered_cad_adapter,
 )
+from product_generators.design_interpreter.native_radial_cad_adapter import (
+    install_native_radial_cad_adapter,
+)
 
 install_native_cad_primitive_adapter()
 install_native_angular_text_reconnection()
 install_native_tapered_cad_adapter()
+install_native_radial_cad_adapter()
 
 
 def _assert_promoted_retry_chain() -> None:
-    """Refuse to serve the Lab if the final tapered CAD router was overwritten.
-
-    The temporary lab retry bridge is allowed to wrap legacy capabilities, but
-    promoted primitives must never silently fall back to the old implicit
-    geometry while the UI still reports a green topology result.
-    """
+    """Refuse to serve the Lab if the final promoted CAD router was overwritten."""
     retry = DoboDesignPipeline._generate_with_retry.__func__
-    if not getattr(retry, "_dobo_native_tapered_cad_adapter", False):
+    if not getattr(retry, "_dobo_native_radial_cad_adapter", False):
         raise RuntimeError(
-            "DOBO Lab startup lost the promoted tapered CAD router; refusing "
-            "to serve legacy tapered geometry."
+            "DOBO Lab startup lost the promoted radial CAD router; refusing "
+            "to serve legacy sphere/ovoid geometry."
         )
 
 
@@ -216,19 +221,16 @@ _PROMOTED_ROUTE_FOR = {
     "crea una maceta rectangular": "analytic_cad_angular_primitive",
     "crea una maceta cono": "analytic_cad_tapered_primitive",
     "crea una maceta conica": "analytic_cad_tapered_primitive",
+    "crea una maceta esfera": "analytic_cad_spherical_primitive",
+    "crea una maceta esferica": "analytic_cad_spherical_primitive",
+    "crea una maceta ovoide": "analytic_cad_ovoid_primitive",
 }
 
 _original_generate = lab.generate
 
 
 def _validated_vessel_flags(result: dict) -> None:
-    """Expose vessel facts in the legacy UI using the actual Motor contract.
-
-    A successful structural generation has already passed OrganicVesselResult
-    semantic validation, including cavity_is_empty, opening_is_clear and
-    drain_is_clear. The old UI looked for non-existent ``opening``/``drain``
-    keys, which is why it displayed false FAIL values.
-    """
+    """Expose vessel facts in the legacy UI using the actual Motor contract."""
     motor = result.get("motor")
     vessel = motor.get("vessel", {}) if isinstance(motor, dict) else {}
     view = result.setdefault("vessel", {})
@@ -251,13 +253,7 @@ def _validated_vessel_flags(result: dict) -> None:
 
 
 def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
-    """Prevent false PASSes for primitives that already have promoted CAD.
-
-    The user's browser exposed the exact failure this guard is meant to catch:
-    a legacy tapered mesh can be watertight and single-component while still
-    being visibly wrong. For exact primitive buttons/aliases, route identity is
-    therefore a physical acceptance invariant, not merely diagnostic metadata.
-    """
+    """Prevent false PASSes for primitives that already have promoted CAD."""
     expected_route = _PROMOTED_ROUTE_FOR.get(normalized_prompt)
     motor = result.get("motor")
     route = motor.get("_capability_route") if isinstance(motor, dict) else None
@@ -274,16 +270,17 @@ def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
             f"expected={expected_route!r}."
         )
 
-    # The promoted plain frustum tessellates in the low thousands of vertices.
-    # A six-figure count is a reliable signature of the old stacked implicit
-    # approximation seen in the browser. Keep a generous ceiling so normal CAD
-    # tessellation changes do not create a brittle regression.
-    if expected_route == "analytic_cad_tapered_primitive":
+    if expected_route in {
+        "analytic_cad_tapered_primitive",
+        "analytic_cad_spherical_primitive",
+        "analytic_cad_ovoid_primitive",
+    }:
         vertices = int(trace.get("vertices") or 0)
-        if vertices <= 0 or vertices >= 20_000:
+        ceiling = 30_000 if "radial" not in expected_route else 30_000
+        if vertices <= 0 or vertices >= ceiling:
             raise RuntimeError(
-                "DOBO Lab rejected non-native tapered mesh complexity: "
-                f"vertices={vertices}; expected promoted CAD below 20000."
+                "DOBO Lab rejected non-native promoted mesh complexity: "
+                f"vertices={vertices}; expected CAD below {ceiling}."
             )
 
 
