@@ -1,0 +1,39 @@
+name: DOBO Consolidation Radial Native Text
+
+on:
+  pull_request:
+    paths:
+      - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_radial_text_adapter.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - 'app/product_generators/design_interpreter/radial_native_text_regression.py'
+      - '.github/workflows/consolidation-radial-native-text.yml'
+  workflow_dispatch:
+
+jobs:
+  radial-native-text:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: app:tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install geometry stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow
+      - name: Run radial native text physical regression
+        run: |
+          python -m product_generators.design_interpreter.radial_native_text_regression
+      - name: Upload radial text evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-radial-native-text-evidence
+          path: outputs-ci/radial-native-text
+          if-no-files-found: warn
+          retention-days: 30
