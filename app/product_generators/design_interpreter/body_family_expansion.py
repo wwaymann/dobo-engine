@@ -7,7 +7,7 @@ from typing import Any
 from .semantic_contract import DesignSemanticProgram
 
 
-BODY_FAMILY_EXPANSION_VERSION = "B28.6"
+BODY_FAMILY_EXPANSION_VERSION = "B28.7-spherical-radial"
 
 
 def _normalized(value: str) -> str:
@@ -34,6 +34,7 @@ class GeneralBodyFamilyExpander:
         ("rectangular_prism", {"rectangular", "rectangular_prism", "elongated_planter", "oblong"}),
         ("cuboid", {"cuboid", "cubic", "cube", "architectural_cube", "boxy"}),
         ("triangular_prism", {"triangular", "triangular_prism", "triangle_prism"}),
+        ("spherical", {"spherical", "sphere", "esfera", "ball", "orb"}),
         ("ovoid", {"ovoid", "egg", "ellipsoidal", "bulbous"}),
         ("cylindrical", {"cylindrical", "cylinder", "straight_cylinder"}),
         ("compound_multivolume", {"compound_multivolume", "multivolume", "multi_volume", "compound_body"}),
@@ -121,6 +122,19 @@ class GeneralBodyFamilyExpander:
                 cls._faceted("triangular_upper", [0.0, 0.0, 0.25 * height], [0.48 * width, 0.48 * depth, 0.27 * height], sides=3, exponent=7.5, round_mm=max(0.8, minimum * 0.012), rotation_degrees=30.0),
             ]
             return fields, max(1.8, minimum * 0.020)
+
+        if profile == "spherical":
+            # The middle field preserves the exact semantic width/depth while
+            # the lower/upper fields keep the legacy volumetric representation
+            # available as a fallback. The promoted CAD route recovers semantic
+            # dimensions from this stable contract instead of approximating a
+            # sphere by fused blobs.
+            fields = [
+                cls._superellipsoid("body", [0.0, 0.0, -0.22 * height], [0.46 * width, 0.46 * depth, 0.30 * height], exponent=2.0, round_mm=max(1.0, minimum * 0.016)),
+                cls._superellipsoid("spherical_mid", [0.0, 0.0, 0.0], [0.50 * width, 0.50 * depth, 0.32 * height], exponent=2.0, round_mm=max(1.0, minimum * 0.016)),
+                cls._superellipsoid("spherical_upper", [0.0, 0.0, 0.22 * height], [0.46 * width, 0.46 * depth, 0.30 * height], exponent=2.0, round_mm=max(1.0, minimum * 0.016)),
+            ]
+            return fields, max(2.4, minimum * 0.026)
 
         if profile == "ovoid":
             fields = [
