@@ -3,9 +3,10 @@ from __future__ import annotations
 """Analytic CAD routes for spherical and ovoid DOBO planter bodies.
 
 These promoted radial families keep semantic interpretation and body-family
-selection unchanged, but replace the old fused implicit blobs with a smooth
-CadQuery loft shell. The body, cavity, open rim, flat base and centered drain
-are generated as one exact CAD solid before STL tessellation.
+selection unchanged, but replace the old fused implicit blobs with smooth
+revolved CAD profiles. The spherical body uses a true circular meridian; the
+ovoid uses one continuous parametric spline meridian. Body, cavity, open rim,
+flat base and centered drain remain one exact CAD solid before STL tessellation.
 """
 
 from pathlib import Path
@@ -22,7 +23,7 @@ from product_generators.organic_shapes.vessel_engine import OrganicVesselResult
 from .design_pipeline import DoboDesignPipeline
 
 
-NATIVE_RADIAL_CAD_ADAPTER_VERSION = "NRAD.2-printable-tessellation"
+NATIVE_RADIAL_CAD_ADAPTER_VERSION = "NRAD.3-smooth-revolution"
 _SPHERICAL_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_ROUTE = "analytic_cad_ovoid_primitive"
 _PREVIOUS_GENERATE_WITH_RETRY = None
@@ -87,6 +88,7 @@ def prepare_native_radial_cad_route_from_motor(motor: dict[str, Any]) -> bool:
     motor["_capability_route"] = route
     motor["_analytic_radial"] = {
         "adapter_version": NATIVE_RADIAL_CAD_ADAPTER_VERSION,
+        "surface_model": "revolved_circle" if profile == "spherical" else "revolved_spline",
         "profile": profile,
         "width_mm": width,
         "depth_mm": depth,
@@ -108,26 +110,27 @@ def _sphere_scale(t: float, edge_scale: float) -> float:
     return math.sqrt(max(edge * edge, 1.0 - q * q))
 
 
+def _hermite(y0: float, y1: float, m0: float, m1: float, s: float) -> float:
+    s = min(1.0, max(0.0, float(s)))
+    h00 = 2.0 * s**3 - 3.0 * s**2 + 1.0
+    h10 = s**3 - 2.0 * s**2 + s
+    h01 = -2.0 * s**3 + 3.0 * s**2
+    h11 = s**3 - s**2
+    return h00 * y0 + h10 * m0 + h01 * y1 + h11 * m1
+
+
 def _ovoid_scale(t: float, top_scale: float) -> float:
+    """Smooth asymmetric ovoid meridian without a conical lower transition."""
+
     top = min(0.82, max(0.34, float(top_scale)))
-    controls = (
-        (0.00, 0.46),
-        (0.10, 0.60),
-        (0.24, 0.82),
-        (0.40, 0.98),
-        (0.50, 1.00),
-        (0.64, 0.93),
-        (0.78, 0.80),
-        (0.90, max(top + 0.07, 0.66)),
-        (1.00, top),
-    )
+    peak_t = 0.46
+    bottom = 0.66
     t = min(1.0, max(0.0, float(t)))
-    for (t0, s0), (t1, s1) in zip(controls, controls[1:]):
-        if t <= t1:
-            alpha = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
-            alpha = alpha * alpha * (3.0 - 2.0 * alpha)
-            return s0 + alpha * (s1 - s0)
-    return top
+    if t <= peak_t:
+        s = t / peak_t
+        return _hermite(bottom, 1.0, 0.18, 0.0, s)
+    s = (t - peak_t) / (1.0 - peak_t)
+    return _hermite(1.0, top, 0.0, -0.12, s)
 
 
 def _profile_functions(route: dict[str, Any]) -> tuple[Callable[[float], float], Callable[[float], float]]:
@@ -153,43 +156,103 @@ def _profile_functions(route: dict[str, Any]) -> tuple[Callable[[float], float],
     raise ValueError(f"Unsupported radial CAD profile: {profile!r}")
 
 
-def _loft(sections: tuple[tuple[float, float, float], ...]) -> cq.Shape:
-    if len(sections) < 2:
-        raise ValueError("Radial loft needs at least two sections.")
-    z0, rx0, ry0 = sections[0]
-    work = cq.Workplane("XY").workplane(offset=float(z0)).ellipse(float(rx0), float(ry0))
-    previous_z = float(z0)
-    for z, rx, ry in sections[1:]:
-        work = work.workplane(offset=float(z) - previous_z).ellipse(float(rx), float(ry))
-        previous_z = float(z)
-    shape = work.loft(combine=True, ruled=False).val().clean()
+def _scale_y(shape: cq.Shape, scale_y: float) -> cq.Shape:
+    if abs(float(scale_y) - 1.0) <= 1e-9:
+        return shape
+    matrix = cq.Matrix(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, float(scale_y), 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    transformed = shape.transformGeometry(matrix).clean()
+    if not transformed.isValid():
+        raise RuntimeError("Radial CAD elliptic scaling produced invalid geometry.")
+    return transformed
+
+
+def _revolved_parametric_profile(
+    radius_at: Callable[[float], float],
+    *,
+    height: float,
+    start_t: float,
+    wall_offset: float = 0.0,
+    extend_top: float = 0.0,
+) -> cq.Shape:
+    start_t = min(1.0, max(0.0, float(start_t)))
+
+    def point(t: float) -> tuple[float, float]:
+        radius = float(radius_at(t)) - float(wall_offset)
+        if radius <= 0.8:
+            raise RuntimeError("Radial CAD wall leaves no valid profile radius.")
+        return radius, float(height) * float(t)
+
+    work = cq.Workplane("XZ").parametricCurve(
+        point,
+        N=80,
+        start=start_t,
+        stop=1.0,
+        tol=1e-4,
+        maxDeg=6,
+        smoothing=(1.0, 1.0, 1.0),
+        makeWire=False,
+    )
+    top_radius = point(1.0)[0]
+    top_z = float(height)
+    if extend_top > 0.0:
+        top_z += float(extend_top)
+        work = work.lineTo(top_radius, top_z)
+    work = work.lineTo(0.0, top_z).lineTo(0.0, float(height) * start_t).close()
+    shape = work.revolve(360.0, (0.0, 0.0), (0.0, 1.0)).val().clean()
     if not isinstance(shape, cq.Shape) or not shape.isValid():
-        raise RuntimeError("Analytic radial loft produced invalid CAD geometry.")
+        raise RuntimeError("Smooth radial revolution produced invalid CAD geometry.")
     return shape
 
 
 def _build_radial_shape(route: dict[str, Any]) -> tuple[cq.Shape, Callable[[float], float], Callable[[float], float]]:
     height = float(route["height_mm"])
+    width = float(route["width_mm"])
+    depth = float(route["depth_mm"])
     wall = float(route["wall_mm"])
     bottom = float(route["bottom_mm"])
+    profile = str(route["profile"])
     rx_at, ry_at = _profile_functions(route)
-    samples = (0.0, 0.08, 0.16, 0.26, 0.38, 0.50, 0.62, 0.74, 0.84, 0.92, 1.0)
-    outer_sections = tuple((t * height, rx_at(t), ry_at(t)) for t in samples)
-    outer = _loft(outer_sections)
+
+    if profile == "spherical":
+        outer = (
+            cq.Workplane("XZ")
+            .moveTo(rx_at(0.0), 0.0)
+            .threePointArc((rx_at(0.5), 0.5 * height), (rx_at(1.0), height))
+            .lineTo(0.0, height)
+            .lineTo(0.0, 0.0)
+            .close()
+            .revolve(360.0, (0.0, 0.0), (0.0, 1.0))
+            .val()
+            .clean()
+        )
+    elif profile == "ovoid":
+        outer = _revolved_parametric_profile(
+            rx_at,
+            height=height,
+            start_t=0.0,
+        )
+    else:
+        raise ValueError(f"Unsupported radial CAD profile: {profile!r}")
+
+    aspect_y = depth / width
+    outer = _scale_y(outer, aspect_y)
 
     inner_t0 = min(0.95, max(0.02, bottom / height))
-    inner_samples = tuple(t for t in samples if t > inner_t0)
-    inner_t_values = (inner_t0, *inner_samples)
-    inner_sections = []
-    for t in inner_t_values:
-        rx = rx_at(t) - wall
-        ry = ry_at(t) - wall
-        if min(rx, ry) <= 0.8:
-            raise RuntimeError("Radial CAD wall leaves no valid cavity section.")
-        inner_sections.append((t * height, rx, ry))
-    _, top_rx, top_ry = inner_sections[-1]
-    inner_sections.append((height + max(1.0, wall), top_rx, top_ry))
-    inner = _loft(tuple(inner_sections))
+    inner = _revolved_parametric_profile(
+        rx_at,
+        height=height,
+        start_t=inner_t0,
+        wall_offset=wall,
+        extend_top=max(1.0, wall),
+    )
+    inner = _scale_y(inner, aspect_y)
     shape = outer.cut(inner, tol=0.01).clean()
 
     if bool(route["drain_required"]):
@@ -232,11 +295,7 @@ def generate_native_radial_cad_if_routed(motor: dict[str, Any]) -> OrganicVessel
     output_dir = Path(str(output["directory"]))
     output_dir.mkdir(parents=True, exist_ok=True)
     stl_path = output_dir / f"{output['basename']}.stl"
-    # Radial B-spline surfaces need a coarser tessellation than planes/cones.
-    # 0.18 mm chord tolerance is well below normal FDM layer/nozzle scales for
-    # these 100–125 mm planters, while avoiding six-figure STL meshes that add
-    # no manufacturable detail and previously resembled the legacy voxel path.
-    cq.exporters.export(shape, str(stl_path), tolerance=0.18, angularTolerance=0.22)
+    cq.exporters.export(shape, str(stl_path), tolerance=0.08, angularTolerance=0.08)
     mesh = _load_welded_stl(stl_path)
     components = tuple(mesh.split(only_watertight=False))
 
@@ -278,6 +337,7 @@ def generate_native_radial_cad_if_routed(motor: dict[str, Any]) -> OrganicVessel
             and height > bottom
             and min(float(route["opening_rx_mm"]), float(route["opening_ry_mm"])) > drain_radius
         ),
+        "surface_is_continuous_revolution": str(route.get("surface_model", "")).startswith("revolved_"),
     }
     if profile == "spherical":
         semantic_checks["profile_is_spherical"] = (
@@ -290,6 +350,7 @@ def generate_native_radial_cad_if_routed(motor: dict[str, Any]) -> OrganicVessel
             and outer_mid > upper_x
             and upper_x > top_x
             and lower_x > bottom_x
+            and bottom_x > 0.60 * outer_mid
         )
 
     flat_count = int(np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= 0.08))
