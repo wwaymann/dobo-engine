@@ -27,6 +27,7 @@ jobs:
     env:
       PYTHONPATH: app
       DESIGN_PROMPT: 'Haz una maceta esférica con la palabra DOBO en sobrerrelieve, centrada al frente.'
+      CONE_PROMPT: 'Crea una maceta con forma de tronco de cono regular, perfectamente simétrica alrededor del eje vertical. La base inferior debe ser circular y más estrecha que la abertura superior. Las paredes exteriores deben ser completamente rectas y lisas desde la base hasta la boca, con una inclinación continua y uniforme. Debe estar hueca, abierta arriba y tener un único agujero de drenaje circular centrado en el fondo. No agregues anillos, ondulaciones, relieves, escalones, curvas, abultamientos, texturas ni decoración.'
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
     steps:
@@ -98,6 +99,57 @@ jobs:
 
           if audit['verdict'] != 'PASS':
               raise RuntimeError('Live prompt semantic intent was not preserved across the consolidation boundary.')
+          PY
+
+      - name: Capture exact live cone semantic evidence
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+
+          from product_generators.design_interpreter.body_family_expansion import GeneralBodyFamilyExpander
+          from product_generators.design_interpreter.prompt_interpreter import OpenAIResponsesSemanticClient, PromptSemanticInterpreter
+
+          out = Path('outputs-ci/consolidation-live-prompt/cone')
+          out.mkdir(parents=True, exist_ok=True)
+          prompt = os.environ['CONE_PROMPT']
+          result = PromptSemanticInterpreter(
+              OpenAIResponsesSemanticClient(model=os.environ['DOBO_SEMANTIC_MODEL'])
+          ).interpret(prompt)
+          semantic = result.program.to_dict()
+          features = semantic.get('features', [])
+          audit = {
+              'schema': 'dobo.consolidation.live_cone_prompt.1',
+              'prompt': prompt,
+              'body_family': semantic.get('body', {}).get('family'),
+              'style_tags': semantic.get('body', {}).get('style_tags', []),
+              'requested_profile': GeneralBodyFamilyExpander.requested_profile(result.program),
+              'feature_count': len(features),
+              'features': [
+                  {
+                      'id': feature.get('id'),
+                      'concept': feature.get('concept'),
+                      'form_hint': feature.get('form_hint'),
+                      'surface_effect': feature.get('surface_effect'),
+                  }
+                  for feature in features
+              ],
+              'relation_count': len(semantic.get('relations', [])),
+              'drainage_required': semantic.get('manufacturing', {}).get('drainage_required'),
+              'interpreter_version': result.trace.interpreter_version,
+          }
+          audit['semantic_taper_ok'] = (
+              audit['body_family'] == 'tapered'
+              and audit['requested_profile'] == 'tapered_revolution'
+          )
+          (out/'PROMPT.txt').write_text(prompt + '\n', encoding='utf-8')
+          (out/'SEMANTIC_PROGRAM.json').write_text(json.dumps(semantic, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          (out/'CONE_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          if not audit['semantic_taper_ok']:
+              raise RuntimeError('Exact live cone prompt did not preserve tapered_revolution intent.')
           PY
 
       - name: Upload semantic continuity evidence
