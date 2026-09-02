@@ -10,6 +10,7 @@ on:
       - 'tools/dobo_retry_repairs.py'
       - 'app/product_generators/design_interpreter/body_family_expansion.py'
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - '.github/workflows/consolidation-capability-lab-http.yml'
   pull_request:
@@ -21,6 +22,7 @@ on:
       - 'tools/dobo_retry_repairs.py'
       - 'app/product_generators/design_interpreter/body_family_expansion.py'
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - '.github/workflows/consolidation-capability-lab-http.yml'
   workflow_dispatch:
@@ -68,6 +70,26 @@ jobs:
               raise RuntimeError('DOBO Lab HTTP server did not become ready.')
           PY
 
+      - name: Validate served Lab UI integrity contract
+        run: |
+          python - <<'PY'
+          import urllib.request
+
+          with urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5) as response:
+              html = response.read().decode('utf-8')
+
+          checks = {
+              'creased_normals': 'toCreasedNormals' in html,
+              'stale_result_clear': 'clearFailedResult' in html,
+              'failure_placeholder': 'No se muestra geometría de una ejecución anterior.' in html,
+              'old_flat_normals_removed': 'g.computeVertexNormals();mesh=' not in html,
+          }
+          print(checks)
+          if not all(checks.values()):
+              failed = [name for name, passed in checks.items() if not passed]
+              raise RuntimeError(f'Live Lab UI integrity contract failed: {failed}')
+          PY
+
       - name: POST exact cone button prompt through browser API
         run: |
           mkdir -p outputs-ci/capability-lab-http-cone
@@ -104,7 +126,7 @@ jobs:
           vessel = result.get('vessel', {})
           trace = result.get('trace', {})
           audit = {
-              'schema': 'dobo.capability_lab.http_cone.1',
+              'schema': 'dobo.capability_lab.http_cone.2',
               'source': result.get('source'),
               'profile': result.get('profile'),
               'morphology': result.get('morphology'),
@@ -125,7 +147,7 @@ jobs:
               audit['morphology'] == 'tapered_revolution',
               audit['capability_route'] == 'analytic_cad_tapered_primitive',
               audit['trace_route'] == 'analytic_cad_tapered_primitive',
-              audit['live_lab_version'] == 'LABLIVE.4-promoted-route-guard',
+              audit['live_lab_version'] == 'LABLIVE.5-text-ui-integrity',
               bool(audit['watertight']),
               bool(audit['winding_consistent']),
               int(audit['component_count'] or 0) == 1,
