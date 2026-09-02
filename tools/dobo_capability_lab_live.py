@@ -24,7 +24,7 @@ from dobo_capability_repairs import install
 from dobo_retry_repairs import install_retry_repairs
 
 
-LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.4-promoted-route-guard"
+LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.5-text-ui-integrity"
 
 # Capture the promoted/core body-family implementation before the lab repair
 # bridge replaces _fields_for. Native primitive CAD routing reconstructs its
@@ -96,6 +96,95 @@ def _live_generate_from_semantic(self, program, **kwargs):
 
 LivePipeline.generate_from_semantic = _live_generate_from_semantic
 lab.DoboStructuralPipeline = LivePipeline
+
+
+def _patch_live_lab_html() -> None:
+    """Keep the visual Lab truthful without changing generated CAD.
+
+    STLLoader exposes duplicated triangle vertices. Recomputing normals directly
+    on that non-indexed geometry leaves every triangle visually faceted, which
+    made valid conical CAD look covered by large triangular defects around text.
+    Three.js ``toCreasedNormals`` smooths only continuous faces while preserving
+    real sharp text/rim edges.
+
+    The base Lab also retained the previous successful model when a new request
+    failed. That made a failed deboss request appear to have generated geometry.
+    On failure the live Lab now clears the stale mesh, renders and PASS cards.
+    """
+    import_line = (
+        "import * as THREE from 'three';import {OrbitControls} from "
+        "'three/addons/controls/OrbitControls.js';import {STLLoader} from "
+        "'three/addons/loaders/STLLoader.js';"
+    )
+    patched_import = import_line + (
+        "import {toCreasedNormals} from "
+        "'three/addons/utils/BufferGeometryUtils.js';"
+    )
+    if import_line not in lab.HTML:
+        raise RuntimeError("DOBO Lab UI import contract changed; live patch cannot be applied safely.")
+    lab.HTML = lab.HTML.replace(import_line, patched_import, 1)
+
+    old_loader = (
+        "async function loadSTL(url){return new Promise((ok,bad)=>new STLLoader().load(url,g=>{"
+        "if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose()}"
+        "g.computeVertexNormals();mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({"
+        "color:0xb7c48b,roughness:.58,metalness:.02,side:THREE.DoubleSide}));"
+        "mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);"
+        "document.querySelector('#placeholder').style.display='none';fit();"
+        "setTimeout(shots,250);ok()},undefined,bad))}"
+    )
+    new_loader = (
+        "async function loadSTL(url){return new Promise((ok,bad)=>new STLLoader().load(url,g=>{"
+        "if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose()}"
+        "const smooth=toCreasedNormals(g,Math.PI/6);if(smooth!==g)g.dispose();"
+        "mesh=new THREE.Mesh(smooth,new THREE.MeshStandardMaterial({"
+        "color:0xb7c48b,roughness:.58,metalness:.02,side:THREE.DoubleSide}));"
+        "mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);"
+        "document.querySelector('#placeholder').style.display='none';fit();"
+        "setTimeout(shots,250);ok()},undefined,bad))}"
+    )
+    if old_loader not in lab.HTML:
+        raise RuntimeError("DOBO Lab STL loader contract changed; live shading patch cannot be applied safely.")
+    lab.HTML = lab.HTML.replace(old_loader, new_loader, 1)
+
+    mark_line = (
+        "function mark(id,val){const e=q(id);e.textContent=val?'PASS':'FAIL';"
+        "e.className=val?'pass':'fail'}"
+    )
+    reset_function = mark_line + (
+        "function clearFailedResult(message){data=null;if(mesh){scene.remove(mesh);"
+        "mesh.geometry.dispose();mesh.material.dispose();mesh=null;}"
+        "q('#placeholder').style.display='grid';q('#placeholder').innerHTML="
+        "'<div><strong>Generación fallida</strong>No se muestra geometría de una ejecución anterior.</div>';"
+        "['#shot1','#shot2','#shot3'].forEach(id=>q(id).removeAttribute('src'));"
+        "q('#summary').innerHTML='<div class=\"muted\">Resultado actual</div>'+
+        "'<div class=\"big\">Sin modelo válido</div><div class=\"muted\">'+message+'</div>';"
+        "q('#checks').innerHTML='<span>Watertight</span><b>—</b><span>Winding consistente</span><b>—</b>'+
+        "'<span>Componentes</span><b>—</b><span>Intentos</span><b>—</b>';"
+        "['#cSemantic','#cGeometry','#cCavity','#cDrain','#cMfg'].forEach(id=>{"
+        "const e=q(id);e.textContent='—';e.className='';});"
+        "q('#json').textContent='La generación actual falló; no hay semántica/motor válido para mostrar.';"
+        "q('#links').innerHTML='<a>STL</a><a>3MF</a><a>Motor JSON</a><a>Manifest</a>';"
+        "}"
+    )
+    if mark_line not in lab.HTML:
+        raise RuntimeError("DOBO Lab status contract changed; stale-result patch cannot be applied safely.")
+    lab.HTML = lab.HTML.replace(mark_line, reset_function, 1)
+
+    old_catch = (
+        "catch(e){q('#error').style.display='block';q('#error').textContent=e.message;"
+        "q('#engineStatus').textContent='Generación fallida'}"
+    )
+    new_catch = (
+        "catch(e){q('#error').style.display='block';q('#error').textContent=e.message;"
+        "q('#engineStatus').textContent='Generación fallida';clearFailedResult(e.message)}"
+    )
+    if old_catch not in lab.HTML:
+        raise RuntimeError("DOBO Lab error contract changed; stale-result patch cannot be applied safely.")
+    lab.HTML = lab.HTML.replace(old_catch, new_catch, 1)
+
+
+_patch_live_lab_html()
 
 
 def _plain(value: str) -> str:
