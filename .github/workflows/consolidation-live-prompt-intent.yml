@@ -102,6 +102,7 @@ jobs:
           PY
 
       - name: Capture exact live cone semantic evidence
+        if: always()
         run: |
           python - <<'PY'
           from __future__ import annotations
