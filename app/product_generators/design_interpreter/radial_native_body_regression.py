@@ -29,6 +29,24 @@ def _sphere():
     )
 
 
+def _sphere_wide_opening():
+    """Model the wider circular opening that free OpenAI prompts can select."""
+    return _program(
+        "sphere_native_body_wide_opening",
+        "Crea una maceta esfera con una abertura superior amplia",
+        family="spherical",
+        height=112.0,
+        width=122.0,
+        depth=122.0,
+        opening_shape="circular",
+        opening_width=0.86,
+        opening_depth=0.86,
+        style_tags=["spherical"],
+        features=[],
+        relations=[],
+    )
+
+
 def _ovoid():
     return _program(
         "ovoid_native_body",
@@ -51,6 +69,12 @@ def run() -> dict:
     cases = {
         "sphere": (
             _sphere(),
+            "analytic_cad_spherical_primitive",
+            "spherical",
+            "revolved_circle",
+        ),
+        "sphere_wide_opening": (
+            _sphere_wide_opening(),
             "analytic_cad_spherical_primitive",
             "spherical",
             "revolved_circle",
@@ -96,7 +120,7 @@ def run() -> dict:
             "printable": bool(checks.get("dimensions_are_printable")),
             "mesh_is_smooth_and_compact": 1_000 < int(result.mesh_result.vertex_count) < 15_000,
         }
-        if name == "sphere":
+        if expected_profile == "spherical":
             assertions["dimensions"] = (
                 abs(float(radial.get("width_mm", 0.0)) - 122.0) < 1e-6
                 and abs(float(radial.get("depth_mm", 0.0)) - 122.0) < 1e-6
