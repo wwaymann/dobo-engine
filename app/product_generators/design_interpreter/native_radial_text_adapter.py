@@ -57,7 +57,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.9-spherical-multiline-block-layout"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.10-stronger-spherical-emboss"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -329,9 +329,9 @@ def _surface_band_parts(
     face = _outer_revolution_face(pristine)
     outward_sign = _outward_offset_sign(face)
     if mode == "emboss":
-        depth = min(max(float(requested_depth), 1.60), 1.80)
+        depth = min(max(float(requested_depth), 2.40), 2.80)
         primary_distance = outward_sign * depth
-        anchor_distance = -outward_sign * 0.18
+        anchor_distance = -outward_sign * 0.22
     elif mode == "deboss":
         depth = min(max(float(requested_depth), 1.00), 1.60)
         primary_distance = -outward_sign * depth
