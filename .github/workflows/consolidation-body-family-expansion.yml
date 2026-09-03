@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install boundary dependencies
-        run: python -m pip install numpy cadquery
+        run: python -m pip install numpy cadquery trimesh
       - name: Validate five reusable base body families
         run: |
           PYTHONPATH=app python - <<'PY'
