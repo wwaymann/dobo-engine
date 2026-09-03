@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install numpy scipy trimesh scikit-image matplotlib shapely
+        run: pip install jsonschema cadquery numpy scipy trimesh scikit-image matplotlib shapely Pillow
       - name: Run D1 compatibility benchmark
         env:
           PYTHONPATH: app
