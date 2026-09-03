@@ -15,6 +15,7 @@ from .intelligent_surfaces import (
     SurfaceLayerIntent,
 )
 from .native_foundational_cad_adapter import install_native_foundational_cad_adapter
+from .native_profiled_cad_adapter import install_native_profiled_cad_adapter
 from .native_ovoid_text_adapter import (
     decorate_ovoid_mesh_result_with_native_text,
     uses_native_ovoid_text,
@@ -47,8 +48,9 @@ from .three_mf_export import ThreeMFExportResult, ThreeMFMeshExporter
 install_native_tapered_cad_adapter()
 install_native_radial_cad_adapter()
 install_native_foundational_cad_adapter()
+install_native_profiled_cad_adapter()
 
-STRUCTURAL_PIPELINE_VERSION = "8.8-foundational-cad-routing"
+STRUCTURAL_PIPELINE_VERSION = "8.9-profiled-cad-routing"
 STRUCTURAL_FUSION_VERSION = "7C.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
