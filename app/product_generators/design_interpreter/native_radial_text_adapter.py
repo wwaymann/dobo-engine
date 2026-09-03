@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-"""Native text reconnection for promoted spherical and ovoid DOBO planters.
+"""Native text reconnection for promoted radial DOBO planters.
 
-Sphere and ovoid bodies stay on their smooth analytic CAD routes when semantic
-text is requested. Text is removed from the volumetric hierarchy before body
-generation, then applied directly to the proven revolved CAD surface.
+The spherical planter keeps its approved analytic CAD body. Text is removed from
+the volumetric hierarchy before body generation and is then rebuilt as physical
+CAD relief against the proven curved surface.
 
-Spherical text is projected one glyph at a time onto the actual curved receiving
-face. Each projected glyph is offset and Booleaned independently, so every glyph
-must both conform to the sphere and create measurable physical relief. This
-avoids the planar tangent-glyph failure mode where a large glyph can be tangent
-only near its centre, leaving strokes floating, partially embedded, or unable to
-intersect the spherical wall at all.
+A projected OCC text face proved insufficient for production quality: individual
+strokes could offset in inconsistent directions, and large tangent glyphs could
+intersect the sphere only near their centres. The spherical route therefore uses
+one local tangent prism per glyph, but clips that prism through a narrow analytic
+surface band generated from the pristine outer REVOLUTION face. The resulting
+emboss/deboss geometry follows the curved vessel surface, while every glyph must
+produce measurable relief before the result can pass.
+
+The promoted ovoid keeps its dedicated adapter. This module retains the shared
+radial helpers used by that adapter and owns the spherical text decorator.
 """
 
 from dataclasses import replace
@@ -19,11 +23,11 @@ import math
 from pathlib import Path
 import re
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 import unicodedata
 
 import cadquery as cq
-from cadquery.func import offset, text
+from cadquery.func import offset
 import numpy as np
 
 from .native_radial_cad_adapter import (
@@ -40,11 +44,14 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.5-per-glyph-curved-projection"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.6-spherical-shell-clipped-glyphs"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
 _OVOID_TEXT_ROUTE = "analytic_cad_ovoid_text"
+_SPHERICAL_FONT = "DejaVu Sans"
+_SPHERICAL_FONT_KIND = "bold"
+_SPHERICAL_MAX_TEXT_MM = 30.0
 
 
 def _radial_profile(program: DesignSemanticProgram) -> str | None:
@@ -152,180 +159,17 @@ def _radial_line_contract(program: DesignSemanticProgram):
     return tuple((feature, part.upper()) for part in parts)
 
 
-def _receiving_face(shape: cq.Shape) -> cq.Face:
-    curved = [face for face in shape.Faces() if face.geomType() != "PLANE"]
-    if not curved:
-        raise RuntimeError("Native radial text found no curved receiving face.")
-    return max(curved, key=lambda face: float(face.Area()))
-
-
-def _projection_size_limit(radius: float, text_value: str, requested_size: float) -> float:
-    glyph_count = max(1, len(text_value.strip()))
-    usable_arc = math.pi * float(radius) * 0.76
-    width_per_size = max(1.0, glyph_count * 0.72) * 1.18
-    return min(float(requested_size), usable_arc / width_per_size)
-
-
-def _front_elliptic_spine(
+def _numeric_derivative(
+    function: Callable[[float], float],
+    value: float,
     *,
-    rx: float,
-    ry: float,
-    z: float,
-    text_value: str,
-    size: float,
-    angular_offset: float = 0.0,
-) -> cq.Edge:
-    effective_radius = math.sqrt(max(1e-9, float(rx) * float(ry)))
-    glyph_count = max(1, len(text_value.strip()))
-    estimated_width = max(size, glyph_count * size * 0.72)
-    arc_length = min(estimated_width * 1.18, math.pi * effective_radius * 0.76)
-    half_angle = max(
-        math.radians(3.0),
-        min(0.5 * arc_length / effective_radius, math.radians(68.0)),
-    )
-    center = -0.5 * math.pi + float(angular_offset)
-    count = max(9, min(31, 2 * glyph_count + 9))
-    points = []
-    for index in range(count):
-        alpha = index / float(count - 1)
-        angle = center - half_angle + 2.0 * half_angle * alpha
-        points.append(
-            cq.Vector(
-                float(rx) * math.cos(angle),
-                float(ry) * math.sin(angle),
-                float(z),
-            )
-        )
-    spine = cq.Edge.makeSpline(points)
-    if not spine.isValid():
-        raise RuntimeError("Native radial text spine is invalid.")
-    return spine
-
-
-def _project_line(
-    *,
-    shape: cq.Shape,
-    rx: float,
-    ry: float,
-    z: float,
-    text_value: str,
-    size: float,
-    u_offset: float,
-) -> cq.Shape:
-    face = _receiving_face(shape)
-    effective_radius = math.sqrt(max(1e-9, float(rx) * float(ry)))
-    projection_size = _projection_size_limit(effective_radius, text_value, size)
-    angular_offset = float(u_offset) / effective_radius
-
-    def build(font_size: float) -> cq.Shape:
-        spine = _front_elliptic_spine(
-            rx=rx,
-            ry=ry,
-            z=z,
-            text_value=text_value,
-            size=font_size,
-            angular_offset=angular_offset,
-        )
-        return text(
-            text_value,
-            font_size,
-            spine,
-            face,
-            font="DejaVu Sans",
-            kind="regular",
-            halign="center",
-            valign="center",
-        )
-
-    try:
-        projected = build(projection_size)
-    except (ValueError, RuntimeError):
-        try:
-            projected = build(projection_size * 0.90)
-        except Exception as retry_error:
-            raise RuntimeError(
-                f"Native radial text projection failed for {text_value!r}."
-            ) from retry_error
-    if not projected.isValid():
-        raise RuntimeError("Native projected radial text is invalid.")
-    return projected
-
-
-def _offset_tool(projected: cq.Shape, *, depth: float, mode: str, sign: float) -> cq.Shape:
-    """Create a relief tool that straddles the curved receiving surface."""
-    try:
-        primary_depth = min(float(depth), 1.50) if mode == "emboss" else float(depth)
-        anchor_depth = min(0.22, max(0.08, 0.14 * primary_depth))
-        primary = offset(projected, float(sign) * primary_depth, cap=True)
-        anchor = offset(projected, -float(sign) * anchor_depth, cap=True)
-        tool = primary.fuse(anchor, tol=0.01).clean()
-    except Exception as error:
-        raise RuntimeError("Native radial text offset failed.") from error
-    if not tool.isValid():
-        raise RuntimeError("Native radial text offset tool is invalid.")
-    return tool
-
-
-def _boolean_candidate(
-    base: cq.Shape,
-    projected: cq.Shape,
-    *,
-    depth: float,
-    mode: str,
-    sign: float,
-) -> tuple[cq.Shape, cq.Shape, float] | None:
-    try:
-        tool = _offset_tool(projected, depth=depth, mode=mode, sign=sign)
-        before = float(base.Volume())
-        if mode == "emboss":
-            current = base
-            solids = tuple(tool.Solids())
-            if not solids:
-                return None
-            for glyph_solid in solids:
-                joined = current.fuse(glyph_solid, tol=0.01).clean()
-                parts = tuple(joined.Solids())
-                if len(parts) != 1:
-                    return None
-                current = parts[0]
-            final = current.clean()
-            delta = float(final.Volume()) - before
-        else:
-            cut = base.cut(tool, tol=0.01).clean()
-            parts = tuple(cut.Solids())
-            if len(parts) != 1:
-                return None
-            final = parts[0].clean()
-            delta = before - float(final.Volume())
-        if not final.isValid() or delta <= 1e-7:
-            return None
-        return final, tool, delta
-    except Exception:
-        return None
-
-
-def _apply_relief(
-    base: cq.Shape,
-    projected: cq.Shape,
-    *,
-    depth: float,
-    mode: str,
-) -> cq.Shape:
-    candidates = []
-    for sign in (1.0, -1.0):
-        candidate = _boolean_candidate(
-            base,
-            projected,
-            depth=depth,
-            mode=mode,
-            sign=sign,
-        )
-        if candidate is not None:
-            candidates.append(candidate)
-    if not candidates:
-        raise RuntimeError(f"Native radial text {mode} did not create a valid relief.")
-    final, _tool, _delta = max(candidates, key=lambda item: item[2])
-    return final
+    step: float = 1e-4,
+) -> float:
+    low = max(0.0, float(value) - step)
+    high = min(1.0, float(value) + step)
+    if high <= low:
+        return 0.0
+    return (float(function(high)) - float(function(low))) / (high - low)
 
 
 def _glyph_width(glyph: str, size: float) -> float:
@@ -337,122 +181,263 @@ def _glyph_width(glyph: str, size: float) -> float:
             float(size),
             0.20,
             combine=False,
-            font="DejaVu Sans",
-            kind="regular",
+            font=_SPHERICAL_FONT,
+            kind=_SPHERICAL_FONT_KIND,
             halign="center",
             valign="center",
         ).vals()
     except Exception:
-        return 0.58 * float(size)
+        return 0.62 * float(size)
     boxes = [value.BoundingBox() for value in values if isinstance(value, cq.Shape)]
     if not boxes:
-        return 0.58 * float(size)
+        return 0.62 * float(size)
     xmin = min(box.xmin for box in boxes)
     xmax = max(box.xmax for box in boxes)
     return max(0.20 * float(size), float(xmax - xmin))
 
 
-def _safe_curved_line_size(radius: float, text_value: str, requested: float) -> float:
+def _safe_spherical_line_size(
+    radius: float,
+    text_value: str,
+    requested: float,
+) -> float:
     glyph_count = max(1, len(text_value.strip()))
     usable_arc = math.pi * float(radius) * 0.72
     estimated_per_size = max(1.0, glyph_count * 0.72) * 1.18
-    return min(float(requested), usable_arc / estimated_per_size)
+    return min(
+        float(requested),
+        _SPHERICAL_MAX_TEXT_MM,
+        usable_arc / estimated_per_size,
+    )
 
 
-def _spherical_projected_glyphs(
+def _outer_revolution_face(shape: cq.Shape) -> cq.Face:
+    revolved = [face for face in shape.Faces() if face.geomType() == "REVOLUTION"]
+    if not revolved:
+        raise RuntimeError("Spherical native text found no outer REVOLUTION face.")
+    return max(revolved, key=lambda face: float(face.Area()))
+
+
+def _radial_extent(shape: cq.Shape) -> float:
+    box = shape.BoundingBox()
+    return max(
+        abs(float(box.xmin)),
+        abs(float(box.xmax)),
+        abs(float(box.ymin)),
+        abs(float(box.ymax)),
+    )
+
+
+def _outward_offset_sign(face: cq.Face) -> float:
+    """Determine OCC offset orientation from geometry instead of assuming it."""
+    probe = 0.25
+    try:
+        positive = offset(face, probe, cap=True)
+        negative = offset(face, -probe, cap=True)
+    except Exception as error:
+        raise RuntimeError("Spherical surface-band orientation probe failed.") from error
+    positive_extent = _radial_extent(positive)
+    negative_extent = _radial_extent(negative)
+    if abs(positive_extent - negative_extent) <= 1e-6:
+        raise RuntimeError("Spherical surface-band orientation is ambiguous.")
+    return 1.0 if positive_extent > negative_extent else -1.0
+
+
+def _surface_band(
+    pristine: cq.Shape,
     *,
-    base: cq.Shape,
+    requested_depth: float,
+    mode: str,
+) -> tuple[cq.Shape, float]:
+    """Build a narrow curved relief band around the pristine outer sphere skin."""
+    face = _outer_revolution_face(pristine)
+    outward_sign = _outward_offset_sign(face)
+    if mode == "emboss":
+        depth = min(max(float(requested_depth), 1.60), 1.80)
+        primary_distance = outward_sign * depth
+        anchor_distance = -outward_sign * 0.14
+    elif mode == "deboss":
+        depth = min(max(float(requested_depth), 1.00), 1.60)
+        primary_distance = -outward_sign * depth
+        anchor_distance = outward_sign * 0.14
+    else:
+        raise ValueError(f"Unsupported spherical text mode: {mode!r}")
+
+    try:
+        primary = offset(face, primary_distance, cap=True)
+        anchor = offset(face, anchor_distance, cap=True)
+        band = primary.fuse(anchor, tol=0.01).clean()
+    except Exception as error:
+        raise RuntimeError(f"Spherical native {mode} surface band failed.") from error
+    if not band.isValid() or not tuple(band.Solids()):
+        raise RuntimeError(f"Spherical native {mode} surface band is invalid.")
+    return band, depth
+
+
+def _glyph_centres(
+    text_value: str,
+    size: float,
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    widths = tuple(
+        _glyph_width(glyph, size) if not glyph.isspace() else 0.35 * size
+        for glyph in text_value
+    )
+    spacing = 0.12 * float(size)
+    advances = tuple(
+        width + (spacing if index < len(widths) - 1 else 0.0)
+        for index, width in enumerate(widths)
+    )
+    cursor = -0.5 * sum(advances)
+    centres: list[float] = []
+    for width, advance in zip(widths, advances):
+        centres.append(cursor + 0.5 * width)
+        cursor += advance
+    return widths, tuple(centres)
+
+
+def _apply_spherical_line(
+    current: cq.Shape,
+    *,
+    pristine: cq.Shape,
     route: dict[str, Any],
     text_value: str,
     size: float,
+    requested_depth: float,
+    mode: str,
     z: float,
     u_offset: float,
-) -> tuple[tuple[str, cq.Shape], ...]:
-    """Project every spherical glyph independently onto the same pristine skin."""
+) -> tuple[cq.Shape, int]:
     height = float(route["height_mm"])
     rx_at, ry_at = _profile_functions(route)
     t = min(1.0, max(0.0, float(z) / height))
     rx = float(rx_at(t))
     ry = float(ry_at(t))
     effective_radius = math.sqrt(max(1e-9, rx * ry))
-    actual_size = _safe_curved_line_size(effective_radius, text_value, size)
+    actual_size = _safe_spherical_line_size(
+        effective_radius,
+        text_value,
+        size,
+    )
+    drx_dz = _numeric_derivative(rx_at, t) / height
+    dry_dz = _numeric_derivative(ry_at, t) / height
+    widths, centres = _glyph_centres(text_value, actual_size)
+    band, effective_depth = _surface_band(
+        pristine,
+        requested_depth=requested_depth,
+        mode=mode,
+    )
 
-    widths = [_glyph_width(glyph, actual_size) for glyph in text_value]
-    spacing = 0.12 * actual_size
-    advances = [
-        width_value + (spacing if index < len(widths) - 1 else 0.0)
-        for index, width_value in enumerate(widths)
-    ]
-    total_width = sum(advances)
-    centers: list[float] = []
-    cursor = -0.5 * total_width
-    for width_value, advance in zip(widths, advances):
-        centers.append(cursor + 0.5 * width_value)
-        cursor += advance
+    center_theta = -0.5 * math.pi + float(u_offset) / max(effective_radius, 1e-6)
+    applied = 0
 
-    projected_glyphs: list[tuple[str, cq.Shape]] = []
-    for glyph, arc_center in zip(text_value, centers):
+    for glyph_index, (glyph, arc_center, glyph_width) in enumerate(
+        zip(text_value, centres, widths)
+    ):
         if glyph.isspace():
             continue
-        projected = _project_line(
-            shape=base,
-            rx=rx,
-            ry=ry,
-            z=z,
-            text_value=glyph,
-            size=actual_size,
-            u_offset=float(u_offset) + float(arc_center),
+
+        theta = center_theta + float(arc_center) / max(effective_radius, 1e-6)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+        point = np.array([rx * cos_t, ry * sin_t, float(z)], dtype=float)
+
+        tangent_u = np.array([-rx * sin_t, ry * cos_t, 0.0], dtype=float)
+        tangent_u /= np.linalg.norm(tangent_u)
+        tangent_v = np.array([drx_dz * cos_t, dry_dz * sin_t, 1.0], dtype=float)
+        tangent_v /= np.linalg.norm(tangent_v)
+        normal = np.cross(tangent_u, tangent_v)
+        normal /= np.linalg.norm(normal)
+        if float(np.dot(normal, np.array([cos_t, sin_t, 0.0]))) < 0.0:
+            normal = -normal
+
+        half_diagonal = 0.5 * math.sqrt(
+            float(glyph_width) ** 2 + float(actual_size) ** 2
         )
-        projected_glyphs.append((glyph, projected))
-
-    if not projected_glyphs:
-        raise RuntimeError("Spherical native text produced no projected glyphs.")
-    return tuple(projected_glyphs)
-
-
-def _apply_spherical_line(
-    base: cq.Shape,
-    *,
-    route: dict[str, Any],
-    text_value: str,
-    size: float,
-    depth: float,
-    mode: str,
-    z: float,
-    u_offset: float,
-) -> tuple[cq.Shape, int]:
-    glyphs = _spherical_projected_glyphs(
-        base=base,
-        route=route,
-        text_value=text_value,
-        size=size,
-        z=z,
-        u_offset=u_offset,
-    )
-    current = base
-    applied = 0
-    for glyph_index, (glyph, projected) in enumerate(glyphs):
-        before = float(current.Volume())
-        try:
-            current = _apply_relief(
-                current,
-                projected,
-                depth=depth,
-                mode=mode,
+        conservative_radius = max(
+            half_diagonal + 1e-3,
+            min(effective_radius, 0.5 * height),
+        )
+        sagitta = conservative_radius - math.sqrt(
+            max(
+                0.0,
+                conservative_radius**2 - half_diagonal**2,
             )
+        )
+        inward_span = sagitta + effective_depth + 0.80
+        total_span = inward_span + effective_depth + 1.20
+        plane = cq.Plane(
+            origin=tuple(float(value) for value in point - normal * inward_span),
+            xDir=tuple(float(value) for value in tangent_u),
+            normal=tuple(float(value) for value in normal),
+        )
+
+        try:
+            values = cq.Workplane(plane).text(
+                glyph,
+                actual_size,
+                total_span,
+                combine=False,
+                font=_SPHERICAL_FONT,
+                kind=_SPHERICAL_FONT_KIND,
+                halign="center",
+                valign="center",
+            ).vals()
         except Exception as error:
             raise RuntimeError(
-                f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
-                "failed curved-surface relief."
+                f"Spherical native glyph construction failed for {glyph!r}."
             ) from error
-        after = float(current.Volume())
-        delta = after - before if mode == "emboss" else before - after
+
+        prisms = tuple(value for value in values if isinstance(value, cq.Shape))
+        if not prisms:
+            raise RuntimeError(f"Spherical native glyph {glyph!r} produced no CAD prism.")
+
+        before_glyph = float(current.Volume())
+        for prism_index, prism in enumerate(prisms):
+            try:
+                clipped = prism.intersect(band, tol=0.01).clean()
+            except Exception as error:
+                raise RuntimeError(
+                    f"Spherical native {mode} clipping failed at glyph "
+                    f"{glyph_index} {glyph!r}, prism {prism_index}."
+                ) from error
+            if not clipped.isValid() or float(clipped.Volume()) <= 1e-7:
+                raise RuntimeError(
+                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
+                    "did not intersect the curved surface band."
+                )
+
+            try:
+                raw = (
+                    current.fuse(clipped, tol=0.01)
+                    if mode == "emboss"
+                    else current.cut(clipped, tol=0.01)
+                ).clean()
+            except Exception as error:
+                raise RuntimeError(
+                    f"Spherical native {mode} Boolean failed at glyph "
+                    f"{glyph_index} {glyph!r}, prism {prism_index}."
+                ) from error
+            solids = tuple(raw.Solids())
+            if len(solids) != 1:
+                raise RuntimeError(
+                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
+                    f"produced {len(solids)} CAD solids."
+                )
+            current = solids[0].clean()
+
+        after_glyph = float(current.Volume())
+        delta = (
+            after_glyph - before_glyph
+            if mode == "emboss"
+            else before_glyph - after_glyph
+        )
         if delta <= 1e-7:
             raise RuntimeError(
                 f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
                 "produced no measurable relief."
             )
         applied += 1
+
     return current, applied
 
 
@@ -461,7 +446,11 @@ def _single_tessellated_component(mesh):
     components = tuple(mesh.split(only_watertight=False))
     if len(components) <= 1:
         return mesh
-    ordered = sorted(components, key=lambda item: abs(float(item.volume)), reverse=True)
+    ordered = sorted(
+        components,
+        key=lambda item: abs(float(item.volume)),
+        reverse=True,
+    )
     primary = ordered[0]
     primary_volume = max(abs(float(primary.volume)), 1.0)
     meaningful_limit = max(1e-3, primary_volume * 1e-8)
@@ -486,16 +475,27 @@ def _apply_text_block(
         volume = float(shape.Volume())
         return shape, volume, volume, 0, 0, 0
 
+    profile = str(route.get("profile", ""))
+    if profile != "spherical":
+        raise RuntimeError(
+            "The generic radial text decorator now owns only spherical text; "
+            "ovoid text must use the dedicated ovoid adapter."
+        )
+
     height = float(route["height_mm"])
     rx_at, ry_at = _profile_functions(route)
     minimum_feature = float(program.manufacturing.minimum_feature_mm)
-    profile = str(route.get("profile", ""))
-
     first_feature, _ = entries[0]
     multiline = len(entries) > 1
-    slot_height = max(minimum_feature, float(first_feature.size.height_ratio) * height)
+    slot_height = max(
+        minimum_feature,
+        float(first_feature.size.height_ratio) * height,
+    )
     gap = 0.22 * slot_height if multiline else 0.0
-    total_block_height = len(entries) * slot_height + max(len(entries) - 1, 0) * gap
+    total_block_height = (
+        len(entries) * slot_height
+        + max(len(entries) - 1, 0) * gap
+    )
     block_center = (
         0.50 * height
         if multiline and str(first_feature.anchor.region) == "front"
@@ -503,10 +503,14 @@ def _apply_text_block(
     )
     block_top = block_center + 0.5 * total_block_height
 
+    pristine = shape
     base_volume = float(shape.Volume())
     current = shape
     expected_glyph_count = sum(
-        1 for _feature, literal in entries for glyph in str(literal) if not glyph.isspace()
+        1
+        for _feature, literal in entries
+        for glyph in str(literal)
+        if not glyph.isspace()
     )
     applied_glyph_count = 0
 
@@ -516,62 +520,53 @@ def _apply_text_block(
             requested_size = slot_height
         else:
             z = float(feature.anchor.vertical) * height
-            requested_size = max(minimum_feature, float(feature.size.height_ratio) * height)
+            requested_size = max(
+                minimum_feature,
+                float(feature.size.height_ratio) * height,
+            )
 
-        half_size = 0.55 * requested_size
+        half_size = 0.55 * min(requested_size, _SPHERICAL_MAX_TEXT_MM)
         safe_edge = max(half_size, 0.14 * height)
         z = min(height - safe_edge, max(safe_edge, z))
         t = min(1.0, max(0.0, z / height))
-        rx = float(rx_at(t))
-        ry = float(ry_at(t))
-        effective_radius = math.sqrt(max(1e-9, rx * ry))
+        local_rx = float(rx_at(t))
+        local_ry = float(ry_at(t))
+        effective_radius = math.sqrt(max(1e-9, local_rx * local_ry))
+
         if multiline and str(first_feature.anchor.region) == "front":
             u_offset = 0.0
         else:
             horizontal = float(
-                first_feature.anchor.horizontal if multiline else feature.anchor.horizontal
+                first_feature.anchor.horizontal
+                if multiline
+                else feature.anchor.horizontal
             )
             u_offset = 0.25 * horizontal * (2.0 * math.pi * effective_radius)
 
-        mode = "deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss"
-        relief_depth = max(0.1, float(feature.size.depth_mm))
-
-        if profile == "spherical":
-            current, line_glyphs = _apply_spherical_line(
-                current,
-                route=route,
-                text_value=str(literal),
-                size=requested_size,
-                depth=relief_depth,
-                mode=mode,
-                z=z,
-                u_offset=u_offset,
-            )
-            applied_glyph_count += line_glyphs
-        else:
-            projected = _project_line(
-                shape=current,
-                rx=rx,
-                ry=ry,
-                z=z,
-                text_value=str(literal),
-                size=requested_size,
-                u_offset=u_offset,
-            )
-            current = _apply_relief(
-                current,
-                projected,
-                depth=relief_depth,
-                mode=mode,
-            )
-            applied_glyph_count += sum(1 for glyph in str(literal) if not glyph.isspace())
+        mode = (
+            "deboss"
+            if feature.surface_effect in {"recessed", "cutout"}
+            else "emboss"
+        )
+        current, line_glyphs = _apply_spherical_line(
+            current,
+            pristine=pristine,
+            route=route,
+            text_value=str(literal),
+            size=requested_size,
+            requested_depth=max(0.1, float(feature.size.depth_mm)),
+            mode=mode,
+            z=z,
+            u_offset=u_offset,
+        )
+        applied_glyph_count += line_glyphs
 
     final = current.clean()
     if not final.isValid() or len(tuple(final.Solids())) != 1:
-        raise RuntimeError("Native radial text did not preserve one valid CAD vessel solid.")
+        raise RuntimeError("Native spherical text did not preserve one valid CAD vessel solid.")
     if expected_glyph_count <= 0 or applied_glyph_count != expected_glyph_count:
         raise RuntimeError(
-            "Native radial text glyph integrity failed: "
+            "Native spherical text glyph integrity failed: "
             f"expected {expected_glyph_count}, applied {applied_glyph_count}."
         )
     return (
@@ -589,18 +584,22 @@ def decorate_radial_mesh_result_with_native_text(
     motor: dict[str, Any],
     program: DesignSemanticProgram,
 ):
-    """Apply semantic text directly to sphere/ovoid analytic CAD geometry."""
+    """Apply text to the promoted analytic spherical CAD body."""
     if not uses_native_radial_text(program):
         return mesh_result
 
+    profile = _radial_profile(program)
+    if profile != "spherical":
+        raise RuntimeError(
+            "Radial text fallback reached a non-spherical profile; "
+            "the dedicated ovoid adapter should have handled it first."
+        )
+
     route = motor.get("_analytic_radial")
     base_route = str(motor.get("_capability_route", ""))
-    profile = _radial_profile(program)
-    expected_base = _SPHERICAL_BASE_ROUTE if profile == "spherical" else _OVOID_BASE_ROUTE
-    final_route = _SPHERICAL_TEXT_ROUTE if profile == "spherical" else _OVOID_TEXT_ROUTE
-    if not isinstance(route, dict) or base_route != expected_base:
+    if not isinstance(route, dict) or base_route != _SPHERICAL_BASE_ROUTE:
         raise RuntimeError(
-            "Radial text requires the promoted analytic sphere/ovoid body route; "
+            "Spherical text requires the promoted analytic spherical body route; "
             "legacy volumetric fallback is not accepted."
         )
 
@@ -617,7 +616,12 @@ def decorate_radial_mesh_result_with_native_text(
 
     stl_path = Path(str(mesh_result.stl_path))
     stl_path.parent.mkdir(parents=True, exist_ok=True)
-    cq.exporters.export(final_shape, str(stl_path), tolerance=0.06, angularTolerance=0.07)
+    cq.exporters.export(
+        final_shape,
+        str(stl_path),
+        tolerance=0.06,
+        angularTolerance=0.07,
+    )
     mesh = _single_tessellated_component(_load_welded_stl(stl_path))
     mesh.export(str(stl_path))
     components = tuple(mesh.split(only_watertight=False))
@@ -627,18 +631,22 @@ def decorate_radial_mesh_result_with_native_text(
     checks["native_radial_text_one_component"] = len(components) == 1
     checks["native_radial_text_mesh_compact"] = 0 < int(len(mesh.vertices)) < 100_000
     checks["native_radial_text_glyph_integrity"] = (
-        expected_glyph_count > 0 and applied_glyph_count == expected_glyph_count
+        expected_glyph_count > 0
+        and applied_glyph_count == expected_glyph_count
     )
 
     elapsed = perf_counter() - started
     stage_seconds = dict(getattr(mesh_result, "stage_seconds", {}) or {})
-    stage_seconds["native_radial_cad_text"] = elapsed
+    stage_seconds["native_spherical_cad_text"] = elapsed
 
-    motor["_base_capability_route"] = expected_base
-    motor["_capability_route"] = final_route
+    motor["_base_capability_route"] = _SPHERICAL_BASE_ROUTE
+    motor["_capability_route"] = _SPHERICAL_TEXT_ROUTE
     motor["_native_radial_text"] = {
         "adapter_version": NATIVE_RADIAL_TEXT_ADAPTER_VERSION,
-        "profile": profile,
+        "profile": "spherical",
+        "method": "surface_band_clipped_tangent_glyphs",
+        "font": _SPHERICAL_FONT,
+        "font_kind": _SPHERICAL_FONT_KIND,
         "line_count": line_count,
         "expected_glyph_count": expected_glyph_count,
         "applied_glyph_count": applied_glyph_count,
@@ -656,7 +664,9 @@ def decorate_radial_mesh_result_with_native_text(
         volume_mm3=float(abs(mesh.volume)),
         watertight=bool(mesh.is_watertight),
         winding_consistent=bool(mesh.is_winding_consistent),
-        flat_base_vertex_count=int(np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= 0.08)),
+        flat_base_vertex_count=int(
+            np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= 0.08)
+        ),
         semantic_checks=checks,
         stage_seconds=stage_seconds,
         generation_seconds=float(mesh_result.generation_seconds) + elapsed,
