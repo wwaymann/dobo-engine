@@ -22,7 +22,7 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 
 
-FOUNDATIONAL_CAD_ADAPTER_VERSION = "FPCAD.1-cylinder-triangular"
+FOUNDATIONAL_CAD_ADAPTER_VERSION = "FPCAD.2-safe-triangular-deboss"
 _CYLINDER_ROUTE = "analytic_cad_cylindrical_text"
 _TRIANGLE_ROUTE = "analytic_cad_triangular_primitive"
 _PREVIOUS_GENERATE = None
@@ -227,12 +227,27 @@ def _triangle_text(shape: cq.Shape, route: dict[str, Any]) -> cq.Shape:
     multiline = len(entries) > 1
     gap = 0.22 * slot if multiline else 0.0
     block_top = 0.5 * height + 0.5 * (len(entries) * slot + max(0, len(entries) - 1) * gap)
+    # A through-wall deboss can detach the enclosed counters of glyphs such as
+    # A, B, D, O, P, Q and R, leaving several CAD solids. Free-prompt semantic
+    # interpreters may request a depth greater than the wall even though the
+    # canonical fixture uses 1.2 mm. Preserve a continuous backing layer and
+    # keep the visible recess within the range already proven by DOBO.
+    wall = float(route["wall_mm"])
+    maximum_deboss_depth = max(0.1, min(1.5, 0.55 * wall))
+
     current = shape
     for index, entry in enumerate(entries):
         size = slot if multiline else max(float(route.get("minimum_feature_mm", 1.0)), float(entry["height_ratio"]) * height)
         v_offset = block_top - 0.5 * slot - index * (slot + gap) if multiline else float(entry["vertical"]) * height
         u_offset = 0.0 if multiline else 0.25 * float(entry["horizontal"]) * width
-        current = builder.apply(base_shape=current, surface=surface, text_value=str(entry["literal"]), size=size, depth=max(0.1, float(entry["depth_mm"])), mode=str(entry["mode"]), font="Arial", kind="regular", u_offset=u_offset, v_offset=v_offset)
+        mode = str(entry["mode"])
+        requested_depth = max(0.1, float(entry["depth_mm"]))
+        applied_depth = (
+            min(requested_depth, maximum_deboss_depth)
+            if mode == "deboss"
+            else requested_depth
+        )
+        current = builder.apply(base_shape=current, surface=surface, text_value=str(entry["literal"]), size=size, depth=applied_depth, mode=mode, font="Arial", kind="regular", u_offset=u_offset, v_offset=v_offset)
     return current.clean()
 
 
