@@ -78,7 +78,7 @@ def run() -> dict:
         ),
         "cylinder_multiline": _cylinder(
             "cylinder_multiline",
-            "Crea una maceta cilindro con texto en sobrerrelieve sobre la cara frontal, centrado y distribuido exactamente en tres líneas: PLANTA / UNA / IDEA. Mantén las tres líneas separadas.",
+            "Crea una maceta cilindro con texto en sobrerrelieve sobre la cara frontal, centrado y distribuido exactamente en tres líneas: línea 1: PLANTA; línea 2: UNA; línea 3: IDEA.",
             effect="raised",
             concept="planta",
         ),
@@ -95,7 +95,7 @@ def run() -> dict:
         ),
         "triangle_multiline": _triangle(
             "triangle_multiline",
-            "Crea una maceta prisma triangular con texto en sobrerrelieve sobre la cara frontal, centrado y distribuido exactamente en tres líneas: PLANTA / UNA / IDEA. Mantén las tres líneas separadas.",
+            "Crea una maceta prisma triangular con texto en sobrerrelieve sobre la cara frontal, centrado y distribuido exactamente en tres líneas: línea 1: PLANTA; línea 2: UNA; línea 3: IDEA.",
             effect="raised",
             concept="planta",
         ),
