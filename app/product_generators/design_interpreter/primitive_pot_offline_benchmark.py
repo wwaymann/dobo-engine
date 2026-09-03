@@ -18,7 +18,7 @@ CASES = (
     dict(id="02_rectangular", label="Prisma rectangular", family="organic", tags=["rectangular_prism"], expected="rectangular_prism", height=105.0, width=145.0, depth=95.0, opening="polygonal"),
     dict(id="03_cylinder", label="Cilindro", family="cylindrical", tags=["cylindrical"], expected="cylindrical", height=115.0, width=110.0, depth=110.0, opening="circular"),
     dict(id="04_cone", label="Tronco de cono", family="tapered", tags=["tapered_revolution"], expected="tapered_revolution", height=120.0, width=120.0, depth=120.0, opening="circular"),
-    dict(id="05_sphere", label="Esfera", family="spherical", tags=["spherical"], expected="spherical_mass", height=112.0, width=122.0, depth=122.0, opening="circular"),
+    dict(id="05_sphere", label="Esfera", family="spherical", tags=["spherical"], expected="spherical", height=112.0, width=122.0, depth=122.0, opening="circular"),
     dict(id="06_ovoid", label="Ovoide", family="organic", tags=["ovoid"], expected="ovoid", height=125.0, width=112.0, depth=106.0, opening="elliptical"),
     dict(id="07_triangular", label="Prisma triangular", family="hexagonal", tags=["triangular_prism"], expected="triangular_prism", height=112.0, width=120.0, depth=120.0, opening="polygonal"),
 )
