@@ -41,6 +41,16 @@ PRIMITIVES = {
     "ovoid": dict(family="organic", tags=["ovoid"], height=125.0, width=112.0, depth=106.0, opening="elliptical"),
     "triangular": dict(family="hexagonal", tags=["triangular_prism"], height=112.0, width=120.0, depth=120.0, opening="polygonal"),
     "prisma triangular": dict(family="hexagonal", tags=["triangular_prism"], height=112.0, width=120.0, depth=120.0, opening="polygonal"),
+    "anfora ahusada": dict(family="tapered", tags=["amphora_tapered"], height=135.0, width=120.0, depth=120.0, opening="circular"),
+    "urna globular": dict(family="tapered", tags=["urn_bellied"], height=120.0, width=125.0, depth=125.0, opening="circular"),
+    "barril": dict(family="tapered", tags=["barrel"], height=115.0, width=125.0, depth=125.0, opening="circular"),
+    "cuello estrecho": dict(family="tapered", tags=["narrow_neck"], height=135.0, width=120.0, depth=120.0, opening="circular"),
+    "borde ensanchado": dict(family="tapered", tags=["flared_rim"], height=120.0, width=125.0, depth=125.0, opening="circular"),
+    "tronco invertido": dict(family="tapered", tags=["inverted_taper"], height=120.0, width=120.0, depth=120.0, opening="circular"),
+    "reloj de arena": dict(family="tapered", tags=["hourglass"], height=130.0, width=120.0, depth=120.0, opening="circular"),
+    "ahusada alta": dict(family="tapered", tags=["tall_taper"], height=150.0, width=105.0, depth=105.0, opening="circular"),
+    "ovoide alta": dict(family="tapered", tags=["oval_tall"], height=145.0, width=115.0, depth=115.0, opening="circular"),
+    "urna pedestal": dict(family="tapered", tags=["pedestal_urn"], height=145.0, width=120.0, depth=120.0, opening="circular"),
 }
 
 
@@ -122,7 +132,7 @@ def generate(prompt: str, mode: str = "auto") -> dict:
             raise ValueError("El modo offline reconoce por ahora las familias básicas del laboratorio.")
         model = os.environ.get("DOBO_OPENAI_MODEL")
         if not model:
-            raise RuntimeError("Para prompts libres define DOBO_OPENAI_MODEL y OPENAI_API_KEY. Las familias básicas funcionan sin OpenAI.")
+            raise RuntimeError("Para prompts libres define DOBO_OPENAI_MODEL y OPENAI_API_KEY. Las familias básicas y los perfiles catalogados funcionan sin OpenAI.")
         source = "openai-prompt"
         client = OpenAIResponsesSemanticClient(model=model)
         pipeline = DoboStructuralPipeline(prompt_client=client)
@@ -191,9 +201,9 @@ button{border:0;border-radius:11px;padding:11px 13px;font-weight:750;cursor:poin
 <body>
 <header><div class="brand">DOBO <b>LAB</b></div><div class="sub">Banco de prueba del motor consolidado · integration-consolidation-core</div><div class="status" id="engineStatus">Motor listo</div></header>
 <main>
-<aside class="left"><label>Instrucción humana</label><textarea id="prompt" placeholder="Ej: Crea una maceta esférica hueca con abertura superior...">Crea una maceta cúbica</textarea><button class="run" id="run">Generar con Motor DOBO</button><div class="examples"><span class="chip">Cubo</span><span class="chip">Prisma rectangular</span><span class="chip">Cilindro</span><span class="chip">Cono</span><span class="chip">Esfera</span><span class="chip">Ovoide</span><span class="chip">Prisma triangular</span></div>
+<aside class="left"><label>Instrucción humana</label><textarea id="prompt" placeholder="Ej: Crea una maceta esférica hueca con abertura superior...">Crea una maceta cúbica</textarea><button class="run" id="run">Generar con Motor DOBO</button><div class="examples"><span class="chip">Cubo</span><span class="chip">Prisma rectangular</span><span class="chip">Cilindro</span><span class="chip">Cono</span><span class="chip">Esfera</span><span class="chip">Ovoide</span><span class="chip">Prisma triangular</span><span class="chip">Ánfora ahusada</span><span class="chip">Urna globular</span><span class="chip">Barril</span><span class="chip">Cuello estrecho</span><span class="chip">Borde ensanchado</span><span class="chip">Tronco invertido</span><span class="chip">Reloj de arena</span><span class="chip">Ahusada alta</span><span class="chip">Ovoide alta</span><span class="chip">Urna pedestal</span></div>
 <div class="section"><h3>Qué estamos comprobando</h3><div class="cap"><span><i class="dot"></i>Interpretación</span><b id="cSemantic">—</b></div><div class="cap"><span><i class="dot"></i>Geometría</span><b id="cGeometry">—</b></div><div class="cap"><span><i class="dot"></i>Cavidad</span><b id="cCavity">—</b></div><div class="cap"><span><i class="dot"></i>Drenaje</span><b id="cDrain">—</b></div><div class="cap"><span><i class="dot"></i>Fabricación</span><b id="cMfg">—</b></div></div>
-<div class="section"><h3>Modo</h3><div class="muted">Las 7 familias básicas se ejecutan offline. Los prompts libres usan OpenAI solo para interpretar, si hay API configurada. El modelo físico siempre lo construye DOBO.</div></div></aside>
+<div class="section"><h3>Modo</h3><div class="muted">Las 7 familias básicas y 10 perfiles de revolución se ejecutan offline. Los prompts libres usan OpenAI solo para interpretar, si hay API configurada. El modelo físico siempre lo construye DOBO.</div></div></aside>
 <section class="stage"><div class="toolbar"><button id="home">Encuadrar</button><button id="wire">Wireframe</button><button id="rotate">Auto-rotar</button></div><canvas id="viewer"></canvas><div class="placeholder" id="placeholder"><div><strong>Modelo 3D en vivo</strong>Ejecuta una instrucción para inspeccionar la geometría real.</div></div><div class="renders"><h3 style="margin:0 0 9px">Renders del modelo generado</h3><div class="renderrow"><div class="shot"><img id="shot1"><span>Frontal</span></div><div class="shot"><img id="shot2"><span>3/4</span></div><div class="shot"><img id="shot3"><span>Superior</span></div></div></div></section>
 <section class="right"><div id="summary" class="card"><div class="muted">Resultado</div><div class="big">Sin prueba</div><div class="muted">Aquí aparecerá exactamente lo que el motor consiguió generar.</div></div><div id="error" class="card error" style="display:none"></div><div class="card"><h3>Validación física</h3><div class="checks" id="checks"><span>Watertight</span><b>—</b><span>Winding consistente</span><b>—</b><span>Componentes</span><b>—</b><span>Intentos</span><b>—</b></div></div><div class="card"><h3>Artefactos reales</h3><div class="links" id="links"><a>STL</a><a>3MF</a><a>Motor JSON</a><a>Manifest</a></div></div><div class="card"><div class="tabs"><button class="active" data-tab="semantic">Semántica</button><button data-tab="motor">Motor</button></div><pre id="json">Todavía no hay datos.</pre></div></section>
 </main>
@@ -280,7 +290,7 @@ def main():
     print("DOBO Capability Lab")
     print("Branch: integration-consolidation-core")
     print("URL:", url)
-    print("Las familias básicas funcionan offline; prompts libres requieren OPENAI_API_KEY + DOBO_OPENAI_MODEL.")
+    print("Las familias básicas y los perfiles catalogados funcionan offline; prompts libres requieren OPENAI_API_KEY + DOBO_OPENAI_MODEL.")
     if os.environ.get("DOBO_LAB_NO_BROWSER") != "1":
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
