@@ -21,8 +21,11 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 
 
-PROFILED_CAD_ADAPTER_VERSION = "PCAD.1-revolved-profile-catalog"
+PROFILED_CAD_ADAPTER_VERSION = "PCAD.2-smooth-dense-profile"
 _PROFILED_ROUTE = "analytic_cad_profiled_revolution"
+_PROFILE_SAMPLES_PER_SPAN = 10
+_STL_TOLERANCE_MM = 0.02
+_STL_ANGULAR_TOLERANCE_RAD = 0.045
 _PREVIOUS_GENERATE = None
 _PREVIOUS_EXPAND = None
 
@@ -149,9 +152,77 @@ def _expand_with_profiled_cad(cls, motor: dict[str, Any], program):
         "bottom_mm": bottom,
         "drain_required": drain_radius > 0.0,
         "drain_diameter_mm": 2.0 * drain_radius,
-        "normalized_profile": [list(point) for point in PROFILE_CATALOG[variant]],
+        "control_profile": [list(point) for point in PROFILE_CATALOG[variant]],
+        "normalized_profile": [
+            list(point) for point in _smooth_profile(PROFILE_CATALOG[variant])
+        ],
+        "profile_samples_per_span": _PROFILE_SAMPLES_PER_SPAN,
     }
     return result
+
+
+def _smooth_profile(
+    profile: tuple[tuple[float, float], ...],
+    *,
+    samples_per_span: int = _PROFILE_SAMPLES_PER_SPAN,
+) -> tuple[tuple[float, float], ...]:
+    """Densify a sparse vessel silhouette with a shape-preserving cubic curve.
+
+    The catalog points remain the intentional design landmarks (foot, belly,
+    shoulder, neck and rim).  PCHIP-style tangents add enough intermediate
+    vertices to make those transitions visibly fluid without overshooting the
+    radius range of either adjacent span.
+    """
+    if len(profile) < 2:
+        raise ValueError("A profiled planter needs at least two control points.")
+    samples = max(2, int(samples_per_span))
+    z = [float(point[0]) for point in profile]
+    radius = [float(point[1]) for point in profile]
+    if any(z[index] <= z[index - 1] for index in range(1, len(z))):
+        raise ValueError("Profile heights must be strictly increasing.")
+
+    spacing = [z[index + 1] - z[index] for index in range(len(z) - 1)]
+    slopes = [
+        (radius[index + 1] - radius[index]) / spacing[index]
+        for index in range(len(spacing))
+    ]
+    tangents = [0.0] * len(profile)
+    tangents[0] = slopes[0]
+    tangents[-1] = slopes[-1]
+    for index in range(1, len(profile) - 1):
+        before = slopes[index - 1]
+        after = slopes[index]
+        if before * after <= 0.0:
+            tangents[index] = 0.0
+            continue
+        weight_before = 2.0 * spacing[index] + spacing[index - 1]
+        weight_after = spacing[index] + 2.0 * spacing[index - 1]
+        tangents[index] = (weight_before + weight_after) / (
+            weight_before / before + weight_after / after
+        )
+
+    dense: list[tuple[float, float]] = []
+    for index in range(len(profile) - 1):
+        span = spacing[index]
+        low = min(radius[index], radius[index + 1])
+        high = max(radius[index], radius[index + 1])
+        for step in range(samples):
+            t = step / samples
+            t2 = t * t
+            t3 = t2 * t
+            h00 = 2.0 * t3 - 3.0 * t2 + 1.0
+            h10 = t3 - 2.0 * t2 + t
+            h01 = -2.0 * t3 + 3.0 * t2
+            h11 = t3 - t2
+            value = (
+                h00 * radius[index]
+                + h10 * span * tangents[index]
+                + h01 * radius[index + 1]
+                + h11 * span * tangents[index + 1]
+            )
+            dense.append((z[index] + t * span, min(high, max(low, value))))
+    dense.append((z[-1], radius[-1]))
+    return tuple(dense)
 
 
 def _radius_at(
@@ -276,8 +347,8 @@ def _generate_profiled(motor: dict[str, Any]) -> OrganicVesselResult:
     cq.exporters.export(
         shape,
         str(stl_path),
-        tolerance=0.035,
-        angularTolerance=0.08,
+        tolerance=_STL_TOLERANCE_MM,
+        angularTolerance=_STL_ANGULAR_TOLERANCE_RAD,
     )
     mesh = _load_mesh(stl_path)
 
