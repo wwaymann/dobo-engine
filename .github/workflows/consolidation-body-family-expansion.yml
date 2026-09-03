@@ -15,8 +15,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install boundary dependency
-        run: python -m pip install numpy
+      - name: Install boundary dependencies
+        run: python -m pip install numpy cadquery
       - name: Validate five reusable base body families
         run: |
           PYTHONPATH=app python - <<'PY'
