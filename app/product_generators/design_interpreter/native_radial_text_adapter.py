@@ -15,6 +15,12 @@ pieces are fused only after they have been locally clipped by a glyph. This
 avoids a fragile whole-surface fuse while still giving every emboss/deboss tool
 a physical overlap across the curved vessel skin.
 
+For multiline text, typography is laid out as one coherent block before mapping
+the lines to the sphere: every line shares one capped type size, one common front
+centre and a fixed line advance. This prevents large semantic height ratios from
+spreading the three lines into high-curvature zones where the words cease to read
+as a single horizontal block.
+
 The CAD result is authoritative: it must contain exactly one valid solid before
 export. OCC tessellation can nevertheless leave seam slivers or split a relief
 patch at a coarse STL tolerance, especially for multiline spherical text. Export
@@ -51,7 +57,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.8-connected-tessellation-retry"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.9-spherical-multiline-block-layout"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -59,6 +65,9 @@ _OVOID_TEXT_ROUTE = "analytic_cad_ovoid_text"
 _SPHERICAL_FONT = "DejaVu Sans"
 _SPHERICAL_FONT_KIND = "bold"
 _SPHERICAL_MAX_TEXT_MM = 30.0
+_SPHERICAL_MULTILINE_MAX_TEXT_MM = 22.0
+_SPHERICAL_MULTILINE_GAP_RATIO = 0.30
+_SPHERICAL_MULTILINE_FRONT_CENTER = 0.55
 
 
 def _radial_profile(program: DesignSemanticProgram) -> str | None:
@@ -216,6 +225,66 @@ def _safe_spherical_line_size(
         _SPHERICAL_MAX_TEXT_MM,
         usable_arc / estimated_per_size,
     )
+
+
+def _multiline_block_metrics(
+    entries,
+    *,
+    route: dict[str, Any],
+    minimum_feature: float,
+) -> tuple[float, float, tuple[float, ...]]:
+    """Lay out multiline text as one centred typographic block.
+
+    The semantic feature height may scale to 40+ mm on a 300 mm sphere while the
+    actual spherical text size is capped at 30 mm. Using the semantic height for
+    line spacing therefore pushes the first/last line into much steeper surface
+    zones. We instead choose one shared size from the longest line at the block
+    centre, then derive all vertical positions from that physical type size.
+    """
+    height = float(route["height_mm"])
+    rx_at, ry_at = _profile_functions(route)
+    first_feature, _ = entries[0]
+    requested = max(
+        float(minimum_feature),
+        float(first_feature.size.height_ratio) * height,
+    )
+    front_block = str(first_feature.anchor.region) == "front"
+    center_ratio = (
+        _SPHERICAL_MULTILINE_FRONT_CENTER
+        if front_block
+        else float(first_feature.anchor.vertical)
+    )
+    center_ratio = min(0.72, max(0.28, center_ratio))
+    center_z = center_ratio * height
+    center_t = center_z / height
+    center_radius = math.sqrt(
+        max(
+            1e-9,
+            float(rx_at(center_t)) * float(ry_at(center_t)),
+        )
+    )
+    longest = max((str(literal) for _feature, literal in entries), key=len)
+    shared_size = _safe_spherical_line_size(
+        center_radius,
+        longest,
+        requested,
+    )
+    shared_size = max(
+        float(minimum_feature),
+        min(shared_size, _SPHERICAL_MULTILINE_MAX_TEXT_MM),
+    )
+    line_advance = shared_size * (1.0 + _SPHERICAL_MULTILINE_GAP_RATIO)
+    midpoint = 0.5 * (len(entries) - 1)
+    line_z = tuple(
+        center_z + (midpoint - index) * line_advance
+        for index in range(len(entries))
+    )
+    safe_edge = max(0.60 * shared_size, 0.16 * height)
+    line_z = tuple(
+        min(height - safe_edge, max(safe_edge, value))
+        for value in line_z
+    )
+    return shared_size, center_z, line_z
 
 
 def _outer_revolution_face(shape: cq.Shape) -> cq.Face:
@@ -509,15 +578,16 @@ def _apply_text_block(
     minimum_feature = float(program.manufacturing.minimum_feature_mm)
     first_feature, _ = entries[0]
     multiline = len(entries) > 1
-    slot_height = max(minimum_feature, float(first_feature.size.height_ratio) * height)
-    gap = 0.22 * slot_height if multiline else 0.0
-    total_block_height = len(entries) * slot_height + max(len(entries) - 1, 0) * gap
-    block_center = (
-        0.50 * height
-        if multiline and str(first_feature.anchor.region) == "front"
-        else float(first_feature.anchor.vertical) * height
-    )
-    block_top = block_center + 0.5 * total_block_height
+
+    if multiline:
+        shared_size, _block_center_z, line_z = _multiline_block_metrics(
+            entries,
+            route=route,
+            minimum_feature=minimum_feature,
+        )
+    else:
+        shared_size = 0.0
+        line_z = ()
 
     pristine = shape
     base_volume = float(shape.Volume())
@@ -530,15 +600,15 @@ def _apply_text_block(
 
     for index, (feature, literal) in enumerate(entries):
         if multiline:
-            z = block_top - 0.5 * slot_height - index * (slot_height + gap)
-            requested_size = slot_height
+            z = float(line_z[index])
+            requested_size = shared_size
         else:
             z = float(feature.anchor.vertical) * height
             requested_size = max(minimum_feature, float(feature.size.height_ratio) * height)
+            half_size = 0.55 * min(requested_size, _SPHERICAL_MAX_TEXT_MM)
+            safe_edge = max(half_size, 0.14 * height)
+            z = min(height - safe_edge, max(safe_edge, z))
 
-        half_size = 0.55 * min(requested_size, _SPHERICAL_MAX_TEXT_MM)
-        safe_edge = max(half_size, 0.14 * height)
-        z = min(height - safe_edge, max(safe_edge, z))
         t = min(1.0, max(0.0, z / height))
         local_rx = float(rx_at(t))
         local_ry = float(ry_at(t))
@@ -650,6 +720,7 @@ def decorate_radial_mesh_result_with_native_text(
         "adapter_version": NATIVE_RADIAL_TEXT_ADAPTER_VERSION,
         "profile": "spherical",
         "method": "surface_band_clipped_tangent_glyphs",
+        "layout": "coherent_multiline_block" if line_count > 1 else "single_line",
         "font": _SPHERICAL_FONT,
         "font_kind": _SPHERICAL_FONT_KIND,
         "line_count": line_count,
