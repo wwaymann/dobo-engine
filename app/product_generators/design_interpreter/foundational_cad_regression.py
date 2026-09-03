@@ -12,7 +12,7 @@ from .structural_pipeline import DoboStructuralPipeline
 OUTPUT = Path("outputs-ci/foundational-cad")
 
 
-def _text(effect: str, concept: str = "walter") -> dict:
+def _text(effect: str, concept: str = "walter", depth: float = 1.2) -> dict:
     return _feature(
         "front_text",
         concept,
@@ -23,7 +23,7 @@ def _text(effect: str, concept: str = "walter") -> dict:
         vertical=0.52,
         width=0.55,
         height=0.14,
-        depth=1.2,
+        depth=depth,
     )
 
 
@@ -45,8 +45,8 @@ def _cylinder(case_id: str, prompt: str, *, effect: str | None = None, concept: 
     )
 
 
-def _triangle(case_id: str, prompt: str, *, effect: str | None = None, concept: str = "walter"):
-    features = [] if effect is None else [_text(effect, concept)]
+def _triangle(case_id: str, prompt: str, *, effect: str | None = None, concept: str = "walter", depth: float = 1.2):
+    features = [] if effect is None else [_text(effect, concept, depth)]
     return _program(
         case_id,
         prompt,
@@ -92,6 +92,12 @@ def run() -> dict:
             "triangle_deboss",
             "Crea una maceta prisma triangular con el texto WALTER en bajorrelieve sobre la cara frontal.",
             effect="recessed",
+        ),
+        "triangle_deep_deboss": _triangle(
+            "triangle_deep_deboss",
+            "Crea una maceta prisma triangular con el texto WALTER en bajorrelieve profundo sobre la cara frontal.",
+            effect="recessed",
+            depth=12.0,
         ),
         "triangle_multiline": _triangle(
             "triangle_multiline",
