@@ -28,7 +28,7 @@ jobs:
           }
           for family in sorted(expected):
               body = SimpleNamespace(family=family, style_tags=(), width_mm=120.0, depth_mm=100.0, height_mm=110.0)
-              program = SimpleNamespace(body=body)
+              program = SimpleNamespace(body=body, features=(), relations=())
               motor = {
                   'fields': [{'id':'legacy_body'}],
                   'composition': {'field_ids':['legacy_body'], 'blend_mm':2.0},
