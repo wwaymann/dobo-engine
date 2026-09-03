@@ -224,7 +224,7 @@ _BASIC_PROMPTS = {
     "crea una maceta ovoide": "Crea una maceta ovoide",
     "crea una maceta prisma triangular": "Crea una maceta prisma triangular",
     "crea una maceta triangular": "Crea una maceta triangular",
-    "crea una maceta anfora ahusada": "Crea una maceta ánfora ahusada",
+    "crea una maceta anfora ahusada": "Crea una maceta anfora ahusada",
     "crea una maceta urna globular": "Crea una maceta urna globular",
     "crea una maceta barril": "Crea una maceta barril",
     "crea una maceta cuello estrecho": "Crea una maceta cuello estrecho",
