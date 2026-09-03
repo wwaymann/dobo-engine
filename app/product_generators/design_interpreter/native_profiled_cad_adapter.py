@@ -328,7 +328,10 @@ def _load_mesh(path: str | Path) -> trimesh.Trimesh:
         mesh.process(validate=True)
     if not isinstance(mesh, trimesh.Trimesh):
         raise RuntimeError("Profiled CAD route did not export a triangle mesh.")
-    mesh.merge_vertices()
+    # OCC can emit seam coordinates that differ below five decimal places.
+    # Welding at 1e-5 mm preserves the authored surface while preventing one
+    # valid CAD solid from being misclassified as several STL components.
+    mesh.merge_vertices(digits_vertex=5)
     mesh.remove_unreferenced_vertices()
     return mesh
 
