@@ -7,10 +7,10 @@ OpenAI only for semantic interpretation. The physical object is always generated
 by the DOBO geometry pipeline.
 
 The live lab keeps its temporary repair bridge for capabilities that are still
-being observed there, but promoted cube/rectangular-prism/cone/sphere/ovoid
-bodies must exercise the same native CAD routes as the consolidated core
-regressions. This prevents the lab from accidentally showing old implicit
-approximations after a capability has already been promoted.
+being observed there, but all seven promoted primitive bodies must exercise the
+same native CAD routes as the consolidated core regressions. This prevents the
+lab from accidentally showing old implicit/voxel approximations after a
+capability has already been promoted.
 """
 
 import unicodedata
@@ -24,7 +24,7 @@ from dobo_capability_repairs import install
 from dobo_retry_repairs import install_retry_repairs
 
 
-LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.6-radial-primitive-guard"
+LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.7-foundational-primitive-guard"
 
 # Capture the promoted/core body-family implementation before the lab repair
 # bridge replaces _fields_for. Native primitive CAD routing reconstructs its
@@ -42,6 +42,8 @@ def _live_fields_for(cls, profile: str, program):
     if profile in {
         "cuboid",
         "rectangular_prism",
+        "cylindrical",
+        "triangular_prism",
         "tapered_revolution",
         "spherical",
         "ovoid",
@@ -67,20 +69,26 @@ from product_generators.design_interpreter.native_tapered_cad_adapter import (
 from product_generators.design_interpreter.native_radial_cad_adapter import (
     install_native_radial_cad_adapter,
 )
+from product_generators.design_interpreter.native_foundational_cad_adapter import (
+    install_native_foundational_cad_adapter,
+)
 
 install_native_cad_primitive_adapter()
 install_native_angular_text_reconnection()
 install_native_tapered_cad_adapter()
 install_native_radial_cad_adapter()
+# Install foundational last: its wrapper preserves the previous chain while
+# intercepting cylinder/triangular-prism before they can reach voxel fallback.
+install_native_foundational_cad_adapter()
 
 
 def _assert_promoted_retry_chain() -> None:
     """Refuse to serve the Lab if the final promoted CAD router was overwritten."""
     retry = DoboDesignPipeline._generate_with_retry.__func__
-    if not getattr(retry, "_dobo_native_radial_cad_adapter", False):
+    if not getattr(retry, "_dobo_foundational_cad_adapter", False):
         raise RuntimeError(
-            "DOBO Lab startup lost the promoted radial CAD router; refusing "
-            "to serve legacy sphere/ovoid geometry."
+            "DOBO Lab startup lost the promoted foundational CAD router; refusing "
+            "to serve legacy cylinder/triangular-prism voxel geometry."
         )
 
 
@@ -219,11 +227,20 @@ _PROMOTED_ROUTE_FOR = {
     "crea una maceta cubica": "analytic_cad_angular_primitive",
     "crea una maceta prisma rectangular": "analytic_cad_angular_primitive",
     "crea una maceta rectangular": "analytic_cad_angular_primitive",
+    "crea una maceta cilindro": "analytic_cad_cylindrical_text",
+    "crea una maceta cilindrica": "analytic_cad_cylindrical_text",
+    "crea una maceta prisma triangular": "analytic_cad_triangular_primitive",
+    "crea una maceta triangular": "analytic_cad_triangular_primitive",
     "crea una maceta cono": "analytic_cad_tapered_primitive",
     "crea una maceta conica": "analytic_cad_tapered_primitive",
     "crea una maceta esfera": "analytic_cad_spherical_primitive",
     "crea una maceta esferica": "analytic_cad_spherical_primitive",
     "crea una maceta ovoide": "analytic_cad_ovoid_primitive",
+}
+
+_FOUNDATIONAL_ROUTE_BY_PROFILE = {
+    "cylindrical": "analytic_cad_cylindrical_text",
+    "triangular_prism": "analytic_cad_triangular_primitive",
 }
 
 _original_generate = lab.generate
@@ -257,6 +274,11 @@ def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
     expected_route = _PROMOTED_ROUTE_FOR.get(normalized_prompt)
     motor = result.get("motor")
     route = motor.get("_capability_route") if isinstance(motor, dict) else None
+    morphology = motor.get("morphogenesis", {}) if isinstance(motor, dict) else {}
+    profile = str(morphology.get("profile", "")) if isinstance(morphology, dict) else ""
+    # Cylinder and triangular-prism free prompts (including text) must remain on
+    # their promoted exact CAD routes, not merely the exact no-text button cases.
+    expected_route = _FOUNDATIONAL_ROUTE_BY_PROFILE.get(profile, expected_route)
     trace = result.setdefault("trace", {})
     trace["live_lab_version"] = LIVE_CAPABILITY_LAB_VERSION
     trace["capability_route"] = route
@@ -271,12 +293,14 @@ def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
         )
 
     if expected_route in {
+        "analytic_cad_cylindrical_text",
+        "analytic_cad_triangular_primitive",
         "analytic_cad_tapered_primitive",
         "analytic_cad_spherical_primitive",
         "analytic_cad_ovoid_primitive",
     }:
         vertices = int(trace.get("vertices") or 0)
-        ceiling = 30_000 if "radial" not in expected_route else 30_000
+        ceiling = 30_000
         if vertices <= 0 or vertices >= ceiling:
             raise RuntimeError(
                 "DOBO Lab rejected non-native promoted mesh complexity: "
