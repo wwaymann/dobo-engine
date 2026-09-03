@@ -4,10 +4,14 @@ from __future__ import annotations
 
 Sphere and ovoid bodies stay on their smooth analytic CAD routes when semantic
 text is requested. Text is removed from the volumetric hierarchy before body
-generation, then applied directly to the proven revolved CAD surface. Spherical
-text uses per-glyph local tangent frames so every requested glyph is required to
-participate physically in the final Boolean result. This prevents partial words
-from passing merely because the total volume changed.
+generation, then applied directly to the proven revolved CAD surface.
+
+Spherical text is projected one glyph at a time onto the actual curved receiving
+face. Each projected glyph is offset and Booleaned independently, so every glyph
+must both conform to the sphere and create measurable physical relief. This
+avoids the planar tangent-glyph failure mode where a large glyph can be tangent
+only near its centre, leaving strokes floating, partially embedded, or unable to
+intersect the spherical wall at all.
 """
 
 from dataclasses import replace
@@ -15,7 +19,7 @@ import math
 from pathlib import Path
 import re
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any
 import unicodedata
 
 import cadquery as cq
@@ -36,7 +40,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.4-spherical-tangent-glyph-integrity"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.5-per-glyph-curved-projection"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -248,10 +252,10 @@ def _project_line(
 
 
 def _offset_tool(projected: cq.Shape, *, depth: float, mode: str, sign: float) -> cq.Shape:
-    """Create a relief tool that crosses the receiving surface robustly."""
+    """Create a relief tool that straddles the curved receiving surface."""
     try:
         primary_depth = min(float(depth), 1.50) if mode == "emboss" else float(depth)
-        anchor_depth = min(0.16, max(0.06, 0.10 * primary_depth))
+        anchor_depth = min(0.22, max(0.08, 0.14 * primary_depth))
         primary = offset(projected, float(sign) * primary_depth, cap=True)
         anchor = offset(projected, -float(sign) * anchor_depth, cap=True)
         tool = primary.fuse(anchor, tol=0.01).clean()
@@ -278,8 +282,8 @@ def _boolean_candidate(
             solids = tuple(tool.Solids())
             if not solids:
                 return None
-            for glyph in solids:
-                joined = current.fuse(glyph, tol=0.01).clean()
+            for glyph_solid in solids:
+                joined = current.fuse(glyph_solid, tol=0.01).clean()
                 parts = tuple(joined.Solids())
                 if len(parts) != 1:
                     return None
@@ -324,14 +328,6 @@ def _apply_relief(
     return final
 
 
-def _numeric_derivative(function: Callable[[float], float], value: float, *, step: float = 1e-4) -> float:
-    low = max(0.0, float(value) - step)
-    high = min(1.0, float(value) + step)
-    if high <= low:
-        return 0.0
-    return (float(function(high)) - float(function(low))) / (high - low)
-
-
 def _glyph_width(glyph: str, size: float) -> float:
     if glyph.isspace():
         return 0.35 * float(size)
@@ -356,40 +352,30 @@ def _glyph_width(glyph: str, size: float) -> float:
     return max(0.20 * float(size), float(xmax - xmin))
 
 
-def _safe_tangent_line_size(radius: float, text_value: str, requested: float) -> float:
+def _safe_curved_line_size(radius: float, text_value: str, requested: float) -> float:
     glyph_count = max(1, len(text_value.strip()))
     usable_arc = math.pi * float(radius) * 0.72
     estimated_per_size = max(1.0, glyph_count * 0.72) * 1.18
     return min(float(requested), usable_arc / estimated_per_size)
 
 
-def _spherical_glyph_groups(
+def _spherical_projected_glyphs(
     *,
+    base: cq.Shape,
     route: dict[str, Any],
     text_value: str,
     size: float,
-    depth: float,
-    mode: str,
     z: float,
     u_offset: float,
-) -> tuple[tuple[str, tuple[cq.Shape, ...]], ...]:
-    """Build each spherical glyph in its own local tangent frame.
-
-    A whole-word projected compound can contain glyph faces whose effective OCC
-    orientation/intersection differs enough that only part of the word survives.
-    Local tangent tools make the intersection explicit for every glyph and allow
-    a physical per-glyph integrity assertion after each Boolean.
-    """
+) -> tuple[tuple[str, cq.Shape], ...]:
+    """Project every spherical glyph independently onto the same pristine skin."""
     height = float(route["height_mm"])
-    wall = float(route["wall_mm"])
     rx_at, ry_at = _profile_functions(route)
     t = min(1.0, max(0.0, float(z) / height))
     rx = float(rx_at(t))
     ry = float(ry_at(t))
     effective_radius = math.sqrt(max(1e-9, rx * ry))
-    actual_size = _safe_tangent_line_size(effective_radius, text_value, size)
-    drx_dz = _numeric_derivative(rx_at, t) / height
-    dry_dz = _numeric_derivative(ry_at, t) / height
+    actual_size = _safe_curved_line_size(effective_radius, text_value, size)
 
     widths = [_glyph_width(glyph, actual_size) for glyph in text_value]
     spacing = 0.12 * actual_size
@@ -404,68 +390,24 @@ def _spherical_glyph_groups(
         centers.append(cursor + 0.5 * width_value)
         cursor += advance
 
-    center_theta = -0.5 * math.pi + float(u_offset) / max(effective_radius, 1e-6)
-    anchor_cap = max(0.35, min(1.40, 0.40 * wall))
-    anchor = min(
-        anchor_cap,
-        max(0.35, 0.65 * float(depth), 0.045 * actual_size),
-    )
-    groups: list[tuple[str, tuple[cq.Shape, ...]]] = []
-
+    projected_glyphs: list[tuple[str, cq.Shape]] = []
     for glyph, arc_center in zip(text_value, centers):
         if glyph.isspace():
             continue
-        theta = center_theta + float(arc_center) / max(effective_radius, 1e-6)
-        cos_t = math.cos(theta)
-        sin_t = math.sin(theta)
-        point = np.array([rx * cos_t, ry * sin_t, float(z)], dtype=float)
-
-        tangent_u = np.array([-rx * sin_t, ry * cos_t, 0.0], dtype=float)
-        tangent_u /= np.linalg.norm(tangent_u)
-        tangent_v = np.array([drx_dz * cos_t, dry_dz * sin_t, 1.0], dtype=float)
-        tangent_v /= np.linalg.norm(tangent_v)
-        normal = np.cross(tangent_u, tangent_v)
-        normal /= np.linalg.norm(normal)
-        if float(np.dot(normal, np.array([cos_t, sin_t, 0.0]))) < 0.0:
-            normal = -normal
-
-        if mode == "emboss":
-            origin = point - normal * anchor
-            thickness = min(float(depth), 1.50) + anchor
-        elif mode == "deboss":
-            origin = point + normal * anchor
-            thickness = -(float(depth) + anchor)
-        else:
-            raise ValueError(f"Unsupported spherical text mode: {mode!r}")
-
-        plane = cq.Plane(
-            origin=tuple(float(value) for value in origin),
-            xDir=tuple(float(value) for value in tangent_u),
-            normal=tuple(float(value) for value in normal),
+        projected = _project_line(
+            shape=base,
+            rx=rx,
+            ry=ry,
+            z=z,
+            text_value=glyph,
+            size=actual_size,
+            u_offset=float(u_offset) + float(arc_center),
         )
-        try:
-            values = cq.Workplane(plane).text(
-                glyph,
-                actual_size,
-                thickness,
-                combine=False,
-                font="DejaVu Sans",
-                kind="regular",
-                halign="center",
-                valign="center",
-            ).vals()
-        except Exception as error:
-            raise RuntimeError(
-                f"Spherical native glyph construction failed for {glyph!r}."
-            ) from error
-        glyph_shapes = tuple(value for value in values if isinstance(value, cq.Shape))
-        if not glyph_shapes:
-            raise RuntimeError(f"Spherical native glyph {glyph!r} produced no CAD tool.")
-        groups.append((glyph, glyph_shapes))
+        projected_glyphs.append((glyph, projected))
 
-    if not groups:
-        raise RuntimeError("Spherical native text produced no glyph tools.")
-    return tuple(groups)
+    if not projected_glyphs:
+        raise RuntimeError("Spherical native text produced no projected glyphs.")
+    return tuple(projected_glyphs)
 
 
 def _apply_spherical_line(
@@ -479,52 +421,38 @@ def _apply_spherical_line(
     z: float,
     u_offset: float,
 ) -> tuple[cq.Shape, int]:
-    groups = _spherical_glyph_groups(
+    glyphs = _spherical_projected_glyphs(
+        base=base,
         route=route,
         text_value=text_value,
         size=size,
-        depth=depth,
-        mode=mode,
         z=z,
         u_offset=u_offset,
     )
     current = base
     applied = 0
-    for glyph_index, (glyph, shapes) in enumerate(groups):
-        before_glyph = float(current.Volume())
-        for shape_index, tool in enumerate(shapes):
-            try:
-                raw = (
-                    current.fuse(tool, tol=0.01)
-                    if mode == "emboss"
-                    else current.cut(tool, tol=0.01)
-                ).clean()
-            except Exception as error:
-                raise RuntimeError(
-                    f"Spherical native {mode} Boolean failed at glyph {glyph_index} "
-                    f"{glyph!r}, shape {shape_index}."
-                ) from error
-            solids = tuple(raw.Solids())
-            if len(solids) != 1:
-                raise RuntimeError(
-                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
-                    f"produced {len(solids)} CAD solids."
-                )
-            current = solids[0].clean()
-
-        after_glyph = float(current.Volume())
-        delta = (
-            after_glyph - before_glyph
-            if mode == "emboss"
-            else before_glyph - after_glyph
-        )
+    for glyph_index, (glyph, projected) in enumerate(glyphs):
+        before = float(current.Volume())
+        try:
+            current = _apply_relief(
+                current,
+                projected,
+                depth=depth,
+                mode=mode,
+            )
+        except Exception as error:
+            raise RuntimeError(
+                f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
+                "failed curved-surface relief."
+            ) from error
+        after = float(current.Volume())
+        delta = after - before if mode == "emboss" else before - after
         if delta <= 1e-7:
             raise RuntimeError(
                 f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
                 "produced no measurable relief."
             )
         applied += 1
-
     return current, applied
 
 
@@ -621,9 +549,6 @@ def _apply_text_block(
             )
             applied_glyph_count += line_glyphs
         else:
-            # Compatibility path retained for any non-spherical caller. The
-            # promoted ovoid route is normally handled by its dedicated tangent
-            # adapter before reaching this decorator.
             projected = _project_line(
                 shape=current,
                 rx=rx,
@@ -692,7 +617,7 @@ def decorate_radial_mesh_result_with_native_text(
 
     stl_path = Path(str(mesh_result.stl_path))
     stl_path.parent.mkdir(parents=True, exist_ok=True)
-    cq.exporters.export(final_shape, str(stl_path), tolerance=0.08, angularTolerance=0.08)
+    cq.exporters.export(final_shape, str(stl_path), tolerance=0.06, angularTolerance=0.07)
     mesh = _single_tessellated_component(_load_welded_stl(stl_path))
     mesh.export(str(stl_path))
     components = tuple(mesh.split(only_watertight=False))
