@@ -12,8 +12,8 @@ def run(output_root):
     root=Path(output_root).resolve(); root.mkdir(parents=True,exist_ok=True); records=[]
     for case in d2_visual_matrix():
         try:
-            r=DoboStructuralPipeline().generate_from_semantic(case.program,output_root=root/"generated"/case.id); m=_mesh(r.stl_path)
-            records.append({"id":case.id,"label":case.label,"goal":case.visual_goal,"profile":r.trace.body_profile,"expected_profile":case.expected_profile,"status":"PASS" if r.trace.body_profile==case.expected_profile and m.is_watertight else "FAIL","stl":r.stl_path,"three_mf":r.three_mf_path,"watertight":bool(m.is_watertight),"components":len(tuple(m.split(only_watertight=False)))})
+            r=DoboStructuralPipeline().generate_from_semantic(case.program,output_root=root/"generated"/case.id); m=_mesh(r.stl_path); motor=json.loads(Path(r.motor_path).read_text(encoding="utf-8")); profile=str(motor.get("morphogenesis",{}).get("profile",""))
+            records.append({"id":case.id,"label":case.label,"goal":case.visual_goal,"profile":profile,"expected_profile":case.expected_profile,"status":"PASS" if profile==case.expected_profile and m.is_watertight and len(tuple(m.split(only_watertight=False)))==1 else "FAIL","stl":r.stl_path,"three_mf":r.three_mf_path,"watertight":bool(m.is_watertight),"components":len(tuple(m.split(only_watertight=False)))})
         except Exception as exc: records.append({"id":case.id,"label":case.label,"status":"FAIL","failure":f"{type(exc).__name__}: {exc}"})
     passed=sum(x["status"]=="PASS" for x in records); payload={"benchmark_version":BENCHMARK_VERSION,"summary":{"PASS":passed,"FAIL":len(records)-passed},"records":records}
     manifest=root/"d2_consolidation_manifest.json"; manifest.write_text(json.dumps(payload,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
