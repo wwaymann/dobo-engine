@@ -19,6 +19,10 @@ def _case(
     profile: str,
     effect: str,
     concept: str = "walter",
+    height_mm: float = 112.0,
+    width_mm: float = 122.0,
+    depth_mm: float = 122.0,
+    opening_ratio: float = 0.58,
 ):
     feature = _feature(
         "front_text",
@@ -37,12 +41,12 @@ def _case(
             case_id,
             prompt,
             family="spherical",
-            height=112.0,
-            width=122.0,
-            depth=122.0,
+            height=height_mm,
+            width=width_mm,
+            depth=depth_mm,
             opening_shape="circular",
-            opening_width=0.58,
-            opening_depth=0.58,
+            opening_width=opening_ratio,
+            opening_depth=opening_ratio,
             style_tags=["spherical"],
             features=[feature],
             relations=[],
@@ -64,12 +68,28 @@ def _case(
 
 
 def run() -> dict:
+    sphere_walter_prompt = (
+        "Crea una maceta esfera con el texto WALTER en sobrerrelieve sobre la cara frontal."
+    )
     cases = {
         "sphere_emboss": _case(
             "sphere_walter_emboss",
-            "Crea una maceta esfera con el texto WALTER en sobrerrelieve sobre la cara frontal.",
+            sphere_walter_prompt,
             profile="spherical",
             effect="raised",
+        ),
+        # Mirrors the larger free-prompt geometry that visually exposed the old
+        # whole-word projection bug: the mesh passed topology checks while WALT
+        # disappeared and only ER survived. This case must preserve all 6 glyphs.
+        "sphere_emboss_live_scale": _case(
+            "sphere_walter_emboss_live_scale",
+            sphere_walter_prompt,
+            profile="spherical",
+            effect="raised",
+            height_mm=200.0,
+            width_mm=200.0,
+            depth_mm=200.0,
+            opening_ratio=0.72,
         ),
         "sphere_deboss": _case(
             "sphere_walter_deboss",
@@ -131,7 +151,13 @@ def run() -> dict:
         text_route = motor.get("_native_radial_text", {})
         checks = dict(result.mesh_result.semantic_checks or {})
         delta = float(text_route.get("volume_delta_mm3", 0.0))
-        expected_lines = 3 if name.endswith("multiline") else 1
+        expected_lines = 3 if "multiline" in name else 1
+        expected_glyphs = 13 if "multiline" in name else 6
+        spherical_glyph_integrity = (
+            bool(checks.get("native_radial_text_glyph_integrity"))
+            and int(text_route.get("expected_glyph_count", 0)) == expected_glyphs
+            and int(text_route.get("applied_glyph_count", 0)) == expected_glyphs
+        )
 
         assertions = {
             "route": motor.get("_capability_route") == final_route,
@@ -152,6 +178,12 @@ def run() -> dict:
             "mesh_compact": bool(checks.get("native_radial_text_mesh_compact")),
             "not_legacy_dense": 0 < int(result.mesh_result.vertex_count) < 100_000,
             "relief_direction": delta < 0.0 if "deboss" in name else delta > 0.0,
+            # The dedicated ovoid adapter already validates every tangent tool
+            # during each Boolean. The new explicit glyph-count contract is for
+            # the spherical route where the visual partial-word gap was found.
+            "glyph_integrity": (
+                spherical_glyph_integrity if expected_profile == "spherical" else True
+            ),
         }
         if not all(assertions.values()):
             failed = [key for key, value in assertions.items() if not value]
@@ -166,6 +198,8 @@ def run() -> dict:
             "generation_seconds": result.mesh_result.generation_seconds,
             "volume_delta_mm3": delta,
             "line_count": text_route.get("line_count"),
+            "expected_glyph_count": text_route.get("expected_glyph_count"),
+            "applied_glyph_count": text_route.get("applied_glyph_count"),
             "assertions": assertions,
             "stl": result.stl_path,
         }
