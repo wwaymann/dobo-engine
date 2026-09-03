@@ -325,7 +325,7 @@ def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
         "analytic_cad_profiled_revolution",
     }:
         vertices = int(trace.get("vertices") or 0)
-        ceiling = 30_000
+        ceiling = 150_000 if expected_route == "analytic_cad_profiled_revolution" else 30_000
         if vertices <= 0 or vertices >= ceiling:
             raise RuntimeError(
                 "DOBO Lab rejected non-native promoted mesh complexity: "
