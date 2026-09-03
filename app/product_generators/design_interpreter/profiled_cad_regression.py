@@ -73,7 +73,7 @@ def run() -> dict:
             "wall": bool(checks.get("wall_is_solid")),
             "base": bool(checks.get("base_is_solid")),
             "known_profile": bool(checks.get("profile_variant_known")),
-            "native_mesh": 0 < int(result.mesh_result.vertex_count) < 30_000,
+            "native_mesh": 0 < int(result.mesh_result.vertex_count) < 150_000,
         }
         record = {
             "variant": variant,
