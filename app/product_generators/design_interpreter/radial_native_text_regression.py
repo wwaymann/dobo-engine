@@ -71,6 +71,11 @@ def run() -> dict:
     sphere_walter_prompt = (
         "Crea una maceta esfera con el texto WALTER en sobrerrelieve sobre la cara frontal."
     )
+    sphere_multiline_prompt = (
+        "Crea una maceta esfera con texto en sobrerrelieve sobre la cara frontal, "
+        "centrado y distribuido exactamente en tres líneas: PLANTA / UNA / IDEA. "
+        "Mantén las tres líneas separadas."
+    )
     cases = {
         "sphere_emboss": _case(
             "sphere_walter_emboss",
@@ -78,9 +83,8 @@ def run() -> dict:
             profile="spherical",
             effect="raised",
         ),
-        # Mirrors the larger free-prompt geometry that visually exposed the old
-        # whole-word projection bug: the mesh passed topology checks while WALT
-        # disappeared and only ER survived. This case must preserve all 6 glyphs.
+        # Mirrors the 200 mm free-prompt geometry that first exposed partial
+        # glyph survival on a curved body.
         "sphere_emboss_live_scale": _case(
             "sphere_walter_emboss_live_scale",
             sphere_walter_prompt,
@@ -91,6 +95,19 @@ def run() -> dict:
             depth_mm=200.0,
             opening_ratio=0.72,
         ),
+        # Mirrors the later 300 mm Lab result shown during visual validation.
+        # The previous projected-face route produced visibly incomplete strokes
+        # even while topology and glyph-count checks reported PASS.
+        "sphere_emboss_300": _case(
+            "sphere_walter_emboss_300",
+            sphere_walter_prompt,
+            profile="spherical",
+            effect="raised",
+            height_mm=300.0,
+            width_mm=300.0,
+            depth_mm=300.0,
+            opening_ratio=0.72,
+        ),
         "sphere_deboss": _case(
             "sphere_walter_deboss",
             "Crea una maceta esfera con el texto WALTER en bajorrelieve sobre la cara frontal.",
@@ -99,10 +116,23 @@ def run() -> dict:
         ),
         "sphere_multiline": _case(
             "sphere_multiline_emboss",
-            "Crea una maceta esfera con texto en sobrerrelieve sobre la cara frontal, centrado y distribuido exactamente en tres líneas: PLANTA / UNA / IDEA. Mantén las tres líneas separadas.",
+            sphere_multiline_prompt,
             profile="spherical",
             effect="raised",
             concept="planta",
+        ),
+        # Specifically guards the large-body version of the former
+        # `glyph 0 'P' produced no measurable relief` failure.
+        "sphere_multiline_300": _case(
+            "sphere_multiline_emboss_300",
+            sphere_multiline_prompt,
+            profile="spherical",
+            effect="raised",
+            concept="planta",
+            height_mm=300.0,
+            width_mm=300.0,
+            depth_mm=300.0,
+            opening_ratio=0.72,
         ),
         "ovoid_emboss": _case(
             "ovoid_walter_emboss",
@@ -178,11 +208,13 @@ def run() -> dict:
             "mesh_compact": bool(checks.get("native_radial_text_mesh_compact")),
             "not_legacy_dense": 0 < int(result.mesh_result.vertex_count) < 100_000,
             "relief_direction": delta < 0.0 if "deboss" in name else delta > 0.0,
-            # The dedicated ovoid adapter already validates every tangent tool
-            # during each Boolean. The new explicit glyph-count contract is for
-            # the spherical route where the visual partial-word gap was found.
             "glyph_integrity": (
                 spherical_glyph_integrity if expected_profile == "spherical" else True
+            ),
+            "spherical_surface_band": (
+                text_route.get("method") == "surface_band_clipped_tangent_glyphs"
+                if expected_profile == "spherical"
+                else True
             ),
         }
         if not all(assertions.values()):
@@ -198,6 +230,7 @@ def run() -> dict:
             "generation_seconds": result.mesh_result.generation_seconds,
             "volume_delta_mm3": delta,
             "line_count": text_route.get("line_count"),
+            "method": text_route.get("method"),
             "expected_glyph_count": text_route.get("expected_glyph_count"),
             "applied_glyph_count": text_route.get("applied_glyph_count"),
             "assertions": assertions,
