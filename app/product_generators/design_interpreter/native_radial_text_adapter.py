@@ -9,10 +9,11 @@ CAD relief against the proven curved surface.
 A projected OCC text face proved insufficient for production quality: individual
 strokes could offset in inconsistent directions, and large tangent glyphs could
 intersect the sphere only near their centres. The spherical route therefore uses
-one local tangent prism per glyph, but clips that prism through a narrow analytic
-surface band generated from the pristine outer REVOLUTION face. The resulting
-emboss/deboss geometry follows the curved vessel surface, while every glyph must
-produce measurable relief before the result can pass.
+one local tangent prism per glyph and clips it against paired analytic surface
+bands generated from the pristine outer REVOLUTION face. The outward/inward band
+pieces are fused only after they have been locally clipped by a glyph. This
+avoids a fragile whole-surface fuse while still giving every emboss/deboss tool
+a physical overlap across the curved vessel skin.
 
 The promoted ovoid keeps its dedicated adapter. This module retains the shared
 radial helpers used by that adapter and owns the spherical text decorator.
@@ -44,7 +45,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.6-spherical-shell-clipped-glyphs"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.7-paired-surface-band-glyphs"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -243,35 +244,45 @@ def _outward_offset_sign(face: cq.Face) -> float:
     return 1.0 if positive_extent > negative_extent else -1.0
 
 
-def _surface_band(
+def _surface_band_parts(
     pristine: cq.Shape,
     *,
     requested_depth: float,
     mode: str,
-) -> tuple[cq.Shape, float]:
-    """Build a narrow curved relief band around the pristine outer sphere skin."""
+) -> tuple[cq.Shape, cq.Shape, float]:
+    """Build paired curved band solids without fusing the complete sphere skin.
+
+    Fusing two full offset skins can create a numerically invalid global solid in
+    OCC even though each one is individually valid. Keeping them separate is
+    both cheaper and more reliable. They are fused only after a glyph prism has
+    clipped them down to a small local patch.
+    """
     face = _outer_revolution_face(pristine)
     outward_sign = _outward_offset_sign(face)
     if mode == "emboss":
         depth = min(max(float(requested_depth), 1.60), 1.80)
         primary_distance = outward_sign * depth
-        anchor_distance = -outward_sign * 0.14
+        anchor_distance = -outward_sign * 0.18
     elif mode == "deboss":
         depth = min(max(float(requested_depth), 1.00), 1.60)
         primary_distance = -outward_sign * depth
-        anchor_distance = outward_sign * 0.14
+        anchor_distance = outward_sign * 0.18
     else:
         raise ValueError(f"Unsupported spherical text mode: {mode!r}")
 
     try:
         primary = offset(face, primary_distance, cap=True)
         anchor = offset(face, anchor_distance, cap=True)
-        band = primary.fuse(anchor, tol=0.01).clean()
     except Exception as error:
-        raise RuntimeError(f"Spherical native {mode} surface band failed.") from error
-    if not band.isValid() or not tuple(band.Solids()):
-        raise RuntimeError(f"Spherical native {mode} surface band is invalid.")
-    return band, depth
+        raise RuntimeError(f"Spherical native {mode} surface bands failed.") from error
+    if (
+        not primary.isValid()
+        or not anchor.isValid()
+        or not tuple(primary.Solids())
+        or not tuple(anchor.Solids())
+    ):
+        raise RuntimeError(f"Spherical native {mode} surface band part is invalid.")
+    return primary, anchor, depth
 
 
 def _glyph_centres(
@@ -302,10 +313,10 @@ def _apply_spherical_line(
     route: dict[str, Any],
     text_value: str,
     size: float,
-    requested_depth: float,
     mode: str,
     z: float,
     u_offset: float,
+    surface_band_parts: tuple[cq.Shape, cq.Shape, float],
 ) -> tuple[cq.Shape, int]:
     height = float(route["height_mm"])
     rx_at, ry_at = _profile_functions(route)
@@ -321,11 +332,7 @@ def _apply_spherical_line(
     drx_dz = _numeric_derivative(rx_at, t) / height
     dry_dz = _numeric_derivative(ry_at, t) / height
     widths, centres = _glyph_centres(text_value, actual_size)
-    band, effective_depth = _surface_band(
-        pristine,
-        requested_depth=requested_depth,
-        mode=mode,
-    )
+    primary_band, anchor_band, effective_depth = surface_band_parts
 
     center_theta = -0.5 * math.pi + float(u_offset) / max(effective_radius, 1e-6)
     applied = 0
@@ -394,23 +401,48 @@ def _apply_spherical_line(
         before_glyph = float(current.Volume())
         for prism_index, prism in enumerate(prisms):
             try:
-                clipped = prism.intersect(band, tol=0.01).clean()
+                clipped_primary = prism.intersect(primary_band, tol=0.01).clean()
+                clipped_anchor = prism.intersect(anchor_band, tol=0.01).clean()
             except Exception as error:
                 raise RuntimeError(
                     f"Spherical native {mode} clipping failed at glyph "
                     f"{glyph_index} {glyph!r}, prism {prism_index}."
                 ) from error
-            if not clipped.isValid() or float(clipped.Volume()) <= 1e-7:
+
+            if (
+                not clipped_primary.isValid()
+                or float(clipped_primary.Volume()) <= 1e-7
+            ):
                 raise RuntimeError(
                     f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
-                    "did not intersect the curved surface band."
+                    "did not intersect the primary curved surface band."
+                )
+
+            try:
+                if (
+                    clipped_anchor.isValid()
+                    and float(clipped_anchor.Volume()) > 1e-7
+                ):
+                    tool = clipped_primary.fuse(clipped_anchor, tol=0.01).clean()
+                else:
+                    tool = clipped_primary
+            except Exception as error:
+                raise RuntimeError(
+                    f"Spherical native {mode} local band fusion failed at glyph "
+                    f"{glyph_index} {glyph!r}, prism {prism_index}."
+                ) from error
+
+            if not tool.isValid() or float(tool.Volume()) <= 1e-7:
+                raise RuntimeError(
+                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
+                    "produced an invalid local relief tool."
                 )
 
             try:
                 raw = (
-                    current.fuse(clipped, tol=0.01)
+                    current.fuse(tool, tol=0.01)
                     if mode == "emboss"
-                    else current.cut(clipped, tol=0.01)
+                    else current.cut(tool, tol=0.01)
                 ).clean()
             except Exception as error:
                 raise RuntimeError(
@@ -513,6 +545,7 @@ def _apply_text_block(
         if not glyph.isspace()
     )
     applied_glyph_count = 0
+    band_cache: dict[tuple[str, float], tuple[cq.Shape, cq.Shape, float]] = {}
 
     for index, (feature, literal) in enumerate(entries):
         if multiline:
@@ -548,16 +581,25 @@ def _apply_text_block(
             if feature.surface_effect in {"recessed", "cutout"}
             else "emboss"
         )
+        requested_depth = max(0.1, float(feature.size.depth_mm))
+        cache_key = (mode, round(requested_depth, 6))
+        if cache_key not in band_cache:
+            band_cache[cache_key] = _surface_band_parts(
+                pristine,
+                requested_depth=requested_depth,
+                mode=mode,
+            )
+
         current, line_glyphs = _apply_spherical_line(
             current,
             pristine=pristine,
             route=route,
             text_value=str(literal),
             size=requested_size,
-            requested_depth=max(0.1, float(feature.size.depth_mm)),
             mode=mode,
             z=z,
             u_offset=u_offset,
+            surface_band_parts=band_cache[cache_key],
         )
         applied_glyph_count += line_glyphs
 
