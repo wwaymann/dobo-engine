@@ -4,9 +4,10 @@ from __future__ import annotations
 
 Sphere and ovoid bodies stay on their smooth analytic CAD routes when semantic
 text is requested. Text is removed from the volumetric hierarchy before body
-generation, then projected directly onto the proven revolved CAD surface. This
-prevents the legacy implicit/voxel fallback from deforming the body or creating
-six-figure meshes.
+generation, then applied directly to the proven revolved CAD surface. Spherical
+text uses per-glyph local tangent frames so every requested glyph is required to
+participate physically in the final Boolean result. This prevents partial words
+from passing merely because the total volume changed.
 """
 
 from dataclasses import replace
@@ -35,7 +36,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.3-tessellation-cleanup"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.4-spherical-tangent-glyph-integrity"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -247,14 +248,7 @@ def _project_line(
 
 
 def _offset_tool(projected: cq.Shape, *, depth: float, mode: str, sign: float) -> cq.Shape:
-    """Create a relief tool that crosses the receiving surface robustly.
-
-    A projected face is exactly coincident with the vessel skin. On BSpline and
-    spherical faces a one-sided deboss tool can remain merely tangent after OCC
-    tolerance resolution, producing zero subtraction. Both emboss and deboss
-    therefore straddle the skin by a small anchor depth. Trying both signs in
-    the Boolean stage then determines the actual inward/outward face direction.
-    """
+    """Create a relief tool that crosses the receiving surface robustly."""
     try:
         primary_depth = min(float(depth), 1.50) if mode == "emboss" else float(depth)
         anchor_depth = min(0.16, max(0.06, 0.10 * primary_depth))
@@ -330,14 +324,212 @@ def _apply_relief(
     return final
 
 
-def _single_tessellated_component(mesh):
-    """Remove only negligible STL slivers produced by OCC curved-face cuts.
+def _numeric_derivative(function: Callable[[float], float], value: float, *, step: float = 1e-4) -> float:
+    low = max(0.0, float(value) - step)
+    high = min(1.0, float(value) + step)
+    if high <= low:
+        return 0.0
+    return (float(function(high)) - float(function(low))) / (high - low)
 
-    The CAD result has already been proven to contain exactly one solid. OCC can
-    nevertheless emit a handful of zero-area or near-zero-volume triangles at
-    deboss Boolean seams. They are not product geometry. Reject any meaningful
-    secondary shell, but discard these numerical residues before validation.
+
+def _glyph_width(glyph: str, size: float) -> float:
+    if glyph.isspace():
+        return 0.35 * float(size)
+    try:
+        values = cq.Workplane("XY").text(
+            glyph,
+            float(size),
+            0.20,
+            combine=False,
+            font="DejaVu Sans",
+            kind="regular",
+            halign="center",
+            valign="center",
+        ).vals()
+    except Exception:
+        return 0.58 * float(size)
+    boxes = [value.BoundingBox() for value in values if isinstance(value, cq.Shape)]
+    if not boxes:
+        return 0.58 * float(size)
+    xmin = min(box.xmin for box in boxes)
+    xmax = max(box.xmax for box in boxes)
+    return max(0.20 * float(size), float(xmax - xmin))
+
+
+def _safe_tangent_line_size(radius: float, text_value: str, requested: float) -> float:
+    glyph_count = max(1, len(text_value.strip()))
+    usable_arc = math.pi * float(radius) * 0.72
+    estimated_per_size = max(1.0, glyph_count * 0.72) * 1.18
+    return min(float(requested), usable_arc / estimated_per_size)
+
+
+def _spherical_glyph_groups(
+    *,
+    route: dict[str, Any],
+    text_value: str,
+    size: float,
+    depth: float,
+    mode: str,
+    z: float,
+    u_offset: float,
+) -> tuple[tuple[str, tuple[cq.Shape, ...]], ...]:
+    """Build each spherical glyph in its own local tangent frame.
+
+    A whole-word projected compound can contain glyph faces whose effective OCC
+    orientation/intersection differs enough that only part of the word survives.
+    Local tangent tools make the intersection explicit for every glyph and allow
+    a physical per-glyph integrity assertion after each Boolean.
     """
+    height = float(route["height_mm"])
+    wall = float(route["wall_mm"])
+    rx_at, ry_at = _profile_functions(route)
+    t = min(1.0, max(0.0, float(z) / height))
+    rx = float(rx_at(t))
+    ry = float(ry_at(t))
+    effective_radius = math.sqrt(max(1e-9, rx * ry))
+    actual_size = _safe_tangent_line_size(effective_radius, text_value, size)
+    drx_dz = _numeric_derivative(rx_at, t) / height
+    dry_dz = _numeric_derivative(ry_at, t) / height
+
+    widths = [_glyph_width(glyph, actual_size) for glyph in text_value]
+    spacing = 0.12 * actual_size
+    advances = [
+        width_value + (spacing if index < len(widths) - 1 else 0.0)
+        for index, width_value in enumerate(widths)
+    ]
+    total_width = sum(advances)
+    centers: list[float] = []
+    cursor = -0.5 * total_width
+    for width_value, advance in zip(widths, advances):
+        centers.append(cursor + 0.5 * width_value)
+        cursor += advance
+
+    center_theta = -0.5 * math.pi + float(u_offset) / max(effective_radius, 1e-6)
+    anchor_cap = max(0.35, min(1.40, 0.40 * wall))
+    anchor = min(
+        anchor_cap,
+        max(0.35, 0.65 * float(depth), 0.045 * actual_size),
+    )
+    groups: list[tuple[str, tuple[cq.Shape, ...]]] = []
+
+    for glyph, arc_center in zip(text_value, centers):
+        if glyph.isspace():
+            continue
+        theta = center_theta + float(arc_center) / max(effective_radius, 1e-6)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+        point = np.array([rx * cos_t, ry * sin_t, float(z)], dtype=float)
+
+        tangent_u = np.array([-rx * sin_t, ry * cos_t, 0.0], dtype=float)
+        tangent_u /= np.linalg.norm(tangent_u)
+        tangent_v = np.array([drx_dz * cos_t, dry_dz * sin_t, 1.0], dtype=float)
+        tangent_v /= np.linalg.norm(tangent_v)
+        normal = np.cross(tangent_u, tangent_v)
+        normal /= np.linalg.norm(normal)
+        if float(np.dot(normal, np.array([cos_t, sin_t, 0.0]))) < 0.0:
+            normal = -normal
+
+        if mode == "emboss":
+            origin = point - normal * anchor
+            thickness = min(float(depth), 1.50) + anchor
+        elif mode == "deboss":
+            origin = point + normal * anchor
+            thickness = -(float(depth) + anchor)
+        else:
+            raise ValueError(f"Unsupported spherical text mode: {mode!r}")
+
+        plane = cq.Plane(
+            origin=tuple(float(value) for value in origin),
+            xDir=tuple(float(value) for value in tangent_u),
+            normal=tuple(float(value) for value in normal),
+        )
+        try:
+            values = cq.Workplane(plane).text(
+                glyph,
+                actual_size,
+                thickness,
+                combine=False,
+                font="DejaVu Sans",
+                kind="regular",
+                halign="center",
+                valign="center",
+            ).vals()
+        except Exception as error:
+            raise RuntimeError(
+                f"Spherical native glyph construction failed for {glyph!r}."
+            ) from error
+        glyph_shapes = tuple(value for value in values if isinstance(value, cq.Shape))
+        if not glyph_shapes:
+            raise RuntimeError(f"Spherical native glyph {glyph!r} produced no CAD tool.")
+        groups.append((glyph, glyph_shapes))
+
+    if not groups:
+        raise RuntimeError("Spherical native text produced no glyph tools.")
+    return tuple(groups)
+
+
+def _apply_spherical_line(
+    base: cq.Shape,
+    *,
+    route: dict[str, Any],
+    text_value: str,
+    size: float,
+    depth: float,
+    mode: str,
+    z: float,
+    u_offset: float,
+) -> tuple[cq.Shape, int]:
+    groups = _spherical_glyph_groups(
+        route=route,
+        text_value=text_value,
+        size=size,
+        depth=depth,
+        mode=mode,
+        z=z,
+        u_offset=u_offset,
+    )
+    current = base
+    applied = 0
+    for glyph_index, (glyph, shapes) in enumerate(groups):
+        before_glyph = float(current.Volume())
+        for shape_index, tool in enumerate(shapes):
+            try:
+                raw = (
+                    current.fuse(tool, tol=0.01)
+                    if mode == "emboss"
+                    else current.cut(tool, tol=0.01)
+                ).clean()
+            except Exception as error:
+                raise RuntimeError(
+                    f"Spherical native {mode} Boolean failed at glyph {glyph_index} "
+                    f"{glyph!r}, shape {shape_index}."
+                ) from error
+            solids = tuple(raw.Solids())
+            if len(solids) != 1:
+                raise RuntimeError(
+                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
+                    f"produced {len(solids)} CAD solids."
+                )
+            current = solids[0].clean()
+
+        after_glyph = float(current.Volume())
+        delta = (
+            after_glyph - before_glyph
+            if mode == "emboss"
+            else before_glyph - after_glyph
+        )
+        if delta <= 1e-7:
+            raise RuntimeError(
+                f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
+                "produced no measurable relief."
+            )
+        applied += 1
+
+    return current, applied
+
+
+def _single_tessellated_component(mesh):
+    """Remove only negligible STL slivers produced by OCC curved-face cuts."""
     components = tuple(mesh.split(only_watertight=False))
     if len(components) <= 1:
         return mesh
@@ -360,18 +552,16 @@ def _apply_text_block(
     shape: cq.Shape,
     route: dict[str, Any],
     program: DesignSemanticProgram,
-) -> tuple[cq.Shape, float, float, int]:
+) -> tuple[cq.Shape, float, float, int, int, int]:
     entries = tuple(_radial_line_contract(program))
     if not entries:
         volume = float(shape.Volume())
-        return shape, volume, volume, 0
+        return shape, volume, volume, 0, 0, 0
 
     height = float(route["height_mm"])
-    width = float(route["width_mm"])
-    depth_y = float(route["depth_mm"])
-    aspect_y = depth_y / width
-    rx_at, _ = _profile_functions(route)
+    rx_at, ry_at = _profile_functions(route)
     minimum_feature = float(program.manufacturing.minimum_feature_mm)
+    profile = str(route.get("profile", ""))
 
     first_feature, _ = entries[0]
     multiline = len(entries) > 1
@@ -387,6 +577,11 @@ def _apply_text_block(
 
     base_volume = float(shape.Volume())
     current = shape
+    expected_glyph_count = sum(
+        1 for _feature, literal in entries for glyph in str(literal) if not glyph.isspace()
+    )
+    applied_glyph_count = 0
+
     for index, (feature, literal) in enumerate(entries):
         if multiline:
             z = block_top - 0.5 * slot_height - index * (slot_height + gap)
@@ -400,7 +595,7 @@ def _apply_text_block(
         z = min(height - safe_edge, max(safe_edge, z))
         t = min(1.0, max(0.0, z / height))
         rx = float(rx_at(t))
-        ry = rx * aspect_y
+        ry = float(ry_at(t))
         effective_radius = math.sqrt(max(1e-9, rx * ry))
         if multiline and str(first_feature.anchor.region) == "front":
             u_offset = 0.0
@@ -410,27 +605,58 @@ def _apply_text_block(
             )
             u_offset = 0.25 * horizontal * (2.0 * math.pi * effective_radius)
 
-        projected = _project_line(
-            shape=current,
-            rx=rx,
-            ry=ry,
-            z=z,
-            text_value=str(literal),
-            size=requested_size,
-            u_offset=u_offset,
-        )
         mode = "deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss"
-        current = _apply_relief(
-            current,
-            projected,
-            depth=max(0.1, float(feature.size.depth_mm)),
-            mode=mode,
-        )
+        relief_depth = max(0.1, float(feature.size.depth_mm))
+
+        if profile == "spherical":
+            current, line_glyphs = _apply_spherical_line(
+                current,
+                route=route,
+                text_value=str(literal),
+                size=requested_size,
+                depth=relief_depth,
+                mode=mode,
+                z=z,
+                u_offset=u_offset,
+            )
+            applied_glyph_count += line_glyphs
+        else:
+            # Compatibility path retained for any non-spherical caller. The
+            # promoted ovoid route is normally handled by its dedicated tangent
+            # adapter before reaching this decorator.
+            projected = _project_line(
+                shape=current,
+                rx=rx,
+                ry=ry,
+                z=z,
+                text_value=str(literal),
+                size=requested_size,
+                u_offset=u_offset,
+            )
+            current = _apply_relief(
+                current,
+                projected,
+                depth=relief_depth,
+                mode=mode,
+            )
+            applied_glyph_count += sum(1 for glyph in str(literal) if not glyph.isspace())
 
     final = current.clean()
     if not final.isValid() or len(tuple(final.Solids())) != 1:
         raise RuntimeError("Native radial text did not preserve one valid CAD vessel solid.")
-    return final, base_volume, float(final.Volume()), len(entries)
+    if expected_glyph_count <= 0 or applied_glyph_count != expected_glyph_count:
+        raise RuntimeError(
+            "Native radial text glyph integrity failed: "
+            f"expected {expected_glyph_count}, applied {applied_glyph_count}."
+        )
+    return (
+        final,
+        base_volume,
+        float(final.Volume()),
+        len(entries),
+        expected_glyph_count,
+        applied_glyph_count,
+    )
 
 
 def decorate_radial_mesh_result_with_native_text(
@@ -455,18 +681,19 @@ def decorate_radial_mesh_result_with_native_text(
 
     started = perf_counter()
     shape, _rx_at, _ry_at = _build_radial_shape(route)
-    final_shape, base_volume, final_volume, line_count = _apply_text_block(
-        shape,
-        route,
-        program,
-    )
+    (
+        final_shape,
+        base_volume,
+        final_volume,
+        line_count,
+        expected_glyph_count,
+        applied_glyph_count,
+    ) = _apply_text_block(shape, route, program)
 
     stl_path = Path(str(mesh_result.stl_path))
     stl_path.parent.mkdir(parents=True, exist_ok=True)
     cq.exporters.export(final_shape, str(stl_path), tolerance=0.08, angularTolerance=0.08)
     mesh = _single_tessellated_component(_load_welded_stl(stl_path))
-    # Persist the physically validated, single-component tessellation rather
-    # than leaving numerical sliver triangles in the user-facing STL artifact.
     mesh.export(str(stl_path))
     components = tuple(mesh.split(only_watertight=False))
 
@@ -474,6 +701,9 @@ def decorate_radial_mesh_result_with_native_text(
     checks["native_radial_text_volume_changed"] = abs(final_volume - base_volume) > 1e-7
     checks["native_radial_text_one_component"] = len(components) == 1
     checks["native_radial_text_mesh_compact"] = 0 < int(len(mesh.vertices)) < 100_000
+    checks["native_radial_text_glyph_integrity"] = (
+        expected_glyph_count > 0 and applied_glyph_count == expected_glyph_count
+    )
 
     elapsed = perf_counter() - started
     stage_seconds = dict(getattr(mesh_result, "stage_seconds", {}) or {})
@@ -485,6 +715,8 @@ def decorate_radial_mesh_result_with_native_text(
         "adapter_version": NATIVE_RADIAL_TEXT_ADAPTER_VERSION,
         "profile": profile,
         "line_count": line_count,
+        "expected_glyph_count": expected_glyph_count,
+        "applied_glyph_count": applied_glyph_count,
         "base_volume_mm3": base_volume,
         "final_volume_mm3": final_volume,
         "volume_delta_mm3": final_volume - base_volume,
