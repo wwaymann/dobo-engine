@@ -24,7 +24,7 @@ from dobo_capability_repairs import install
 from dobo_retry_repairs import install_retry_repairs
 
 
-LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.8-profiled-offline-catalog"
+LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.9-profiled-native-text"
 
 # Capture the promoted/core body-family implementation before the lab repair
 # bridge replaces _fields_for. Native primitive CAD routing reconstructs its
@@ -303,6 +303,13 @@ def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
     # Cylinder and triangular-prism free prompts (including text) must remain on
     # their promoted exact CAD routes, not merely the exact no-text button cases.
     expected_route = _FOUNDATIONAL_ROUTE_BY_PROFILE.get(profile, expected_route)
+    if profile == "profiled_revolution":
+        profiled_text = motor.get("_native_profiled_text", {}) if isinstance(motor, dict) else {}
+        expected_route = (
+            "analytic_cad_profiled_text"
+            if isinstance(profiled_text, dict) and int(profiled_text.get("line_count", 0)) > 0
+            else "analytic_cad_profiled_revolution"
+        )
     trace = result.setdefault("trace", {})
     trace["live_lab_version"] = LIVE_CAPABILITY_LAB_VERSION
     trace["capability_route"] = route
@@ -323,9 +330,17 @@ def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
         "analytic_cad_spherical_primitive",
         "analytic_cad_ovoid_primitive",
         "analytic_cad_profiled_revolution",
+        "analytic_cad_profiled_text",
     }:
         vertices = int(trace.get("vertices") or 0)
-        ceiling = 150_000 if expected_route == "analytic_cad_profiled_revolution" else 30_000
+        ceiling = (
+            150_000
+            if expected_route in {
+                "analytic_cad_profiled_revolution",
+                "analytic_cad_profiled_text",
+            }
+            else 30_000
+        )
         if vertices <= 0 or vertices >= ceiling:
             raise RuntimeError(
                 "DOBO Lab rejected non-native promoted mesh complexity: "
