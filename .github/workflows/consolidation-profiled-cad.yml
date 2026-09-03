@@ -1,0 +1,52 @@
+name: Consolidation Profiled CAD
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - integration-consolidation-core
+    paths:
+      - "app/product_generators/design_interpreter/native_profiled_cad_adapter.py"
+      - "app/product_generators/design_interpreter/profiled_cad_regression.py"
+      - "app/product_generators/design_interpreter/structural_pipeline.py"
+      - "app/product_generators/design_interpreter/body_family_expansion.py"
+      - ".github/workflows/consolidation-profiled-cad.yml"
+  pull_request:
+    paths:
+      - "app/product_generators/design_interpreter/native_profiled_cad_adapter.py"
+      - "app/product_generators/design_interpreter/profiled_cad_regression.py"
+      - "app/product_generators/design_interpreter/structural_pipeline.py"
+      - "app/product_generators/design_interpreter/body_family_expansion.py"
+      - ".github/workflows/consolidation-profiled-cad.yml"
+
+jobs:
+  profiled-cad-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CAD dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow
+
+      - name: Validate ten profiled pot bodies
+        run: python -m product_generators.design_interpreter.profiled_cad_regression
+
+      - name: Upload CAD evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-profiled-cad-evidence
+          path: outputs-ci/profiled-cad
+          if-no-files-found: warn
+          retention-days: 30
