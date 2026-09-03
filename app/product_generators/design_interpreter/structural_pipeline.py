@@ -16,6 +16,10 @@ from .intelligent_surfaces import (
 )
 from .native_foundational_cad_adapter import install_native_foundational_cad_adapter
 from .native_profiled_cad_adapter import install_native_profiled_cad_adapter
+from .native_profiled_text_adapter import (
+    decorate_profiled_mesh_result_with_native_text,
+    uses_native_profiled_text,
+)
 from .native_ovoid_text_adapter import (
     decorate_ovoid_mesh_result_with_native_text,
     uses_native_ovoid_text,
@@ -50,7 +54,7 @@ install_native_radial_cad_adapter()
 install_native_foundational_cad_adapter()
 install_native_profiled_cad_adapter()
 
-STRUCTURAL_PIPELINE_VERSION = "8.9-profiled-cad-routing"
+STRUCTURAL_PIPELINE_VERSION = "8.10-profiled-native-text"
 STRUCTURAL_FUSION_VERSION = "7C.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
@@ -211,7 +215,10 @@ class DoboStructuralPipeline:
         # their CAD bodies; glyphs are applied only after body/cavity/drain pass.
         GeneralBodyFamilyExpander.apply(motor, repair.program)
         native_cylindrical_text = uses_native_cylindrical_text(repair.program)
-        native_tapered_text = uses_native_tapered_text(repair.program)
+        native_profiled_text = uses_native_profiled_text(repair.program)
+        native_tapered_text = (
+            uses_native_tapered_text(repair.program) and not native_profiled_text
+        )
         native_radial_text = uses_native_radial_text(repair.program)
         native_ovoid_text = uses_native_ovoid_text(repair.program)
         native_foundational_text = bool(
@@ -221,11 +228,17 @@ class DoboStructuralPipeline:
         )
         native_cad_text = (
             native_cylindrical_text
+            or native_profiled_text
             or native_tapered_text
             or native_radial_text
             or native_foundational_text
         )
-        if native_cylindrical_text or native_tapered_text or native_radial_text:
+        if (
+            native_cylindrical_text
+            or native_profiled_text
+            or native_tapered_text
+            or native_radial_text
+        ):
             strip_text_from_motor(motor, repair.program)
 
         if compilation.report.complex_profile != "surface_only":
@@ -299,7 +312,13 @@ class DoboStructuralPipeline:
         # text route is allowed to deform the planter body through voxel fallback.
         # Foundational cylinder/triangle text is already applied inside its CAD
         # route, so no second decoration pass is needed here.
-        if native_cylindrical_text:
+        if native_profiled_text:
+            mesh_result = decorate_profiled_mesh_result_with_native_text(
+                mesh_result,
+                selected_motor,
+                repair.program,
+            )
+        elif native_cylindrical_text:
             mesh_result = decorate_mesh_result_with_native_text(
                 mesh_result,
                 selected_motor,
@@ -389,6 +408,7 @@ class DoboStructuralPipeline:
                         "color_zones": surface_report.color_zones,
                         "painted_triangles": three_mf.painted_triangle_count,
                         "native_cad_text": native_cad_text,
+                        "native_profiled_text": native_profiled_text,
                         "native_foundational_text": native_foundational_text,
                         "native_tapered_text": native_tapered_text,
                         "native_radial_text": native_radial_text,
