@@ -10,6 +10,8 @@ on:
       - "app/product_generators/design_interpreter/profiled_cad_regression.py"
       - "app/product_generators/design_interpreter/structural_pipeline.py"
       - "app/product_generators/design_interpreter/body_family_expansion.py"
+      - "tools/dobo_capability_lab.py"
+      - "tools/dobo_capability_lab_live.py"
       - ".github/workflows/consolidation-profiled-cad.yml"
   pull_request:
     paths:
@@ -17,6 +19,8 @@ on:
       - "app/product_generators/design_interpreter/profiled_cad_regression.py"
       - "app/product_generators/design_interpreter/structural_pipeline.py"
       - "app/product_generators/design_interpreter/body_family_expansion.py"
+      - "tools/dobo_capability_lab.py"
+      - "tools/dobo_capability_lab_live.py"
       - ".github/workflows/consolidation-profiled-cad.yml"
 
 jobs:
@@ -41,6 +45,42 @@ jobs:
 
       - name: Validate ten profiled pot bodies
         run: python -m product_generators.design_interpreter.profiled_cad_regression
+
+      - name: Validate profiled bodies through offline Lab
+        env:
+          PYTHONPATH: app:tools
+          DOBO_LAB_NO_BROWSER: "1"
+        run: |
+          python - <<'PY'
+          import dobo_capability_lab_live as lab
+
+          prompts = [
+              "Crea una maceta ánfora ahusada",
+              "Crea una maceta urna globular",
+              "Crea una maceta barril",
+              "Crea una maceta cuello estrecho",
+              "Crea una maceta borde ensanchado",
+              "Crea una maceta tronco invertido",
+              "Crea una maceta reloj de arena",
+              "Crea una maceta ahusada alta",
+              "Crea una maceta ovoide alta",
+              "Crea una maceta urna pedestal",
+          ]
+          variants = []
+          for prompt in prompts:
+              result = lab.generate(prompt, mode="offline")
+              motor = result["motor"]
+              assert result["source"] == "offline-semantic", prompt
+              assert motor["_capability_route"] == "analytic_cad_profiled_revolution", prompt
+              assert result["validation"]["watertight"] is True, prompt
+              assert result["validation"]["winding_consistent"] is True, prompt
+              assert result["validation"]["component_count"] == 1, prompt
+              assert result["vessel"]["opening"] is True, prompt
+              assert result["vessel"]["drain"] is True, prompt
+              variants.append(motor["morphogenesis"]["profile_variant"])
+          assert len(set(variants)) == 10, variants
+          print({"case_count": len(prompts), "pass": len(prompts), "variants": variants})
+          PY
 
       - name: Upload CAD evidence
         if: always()
