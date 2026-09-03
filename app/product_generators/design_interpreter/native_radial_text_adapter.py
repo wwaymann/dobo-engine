@@ -15,6 +15,12 @@ pieces are fused only after they have been locally clipped by a glyph. This
 avoids a fragile whole-surface fuse while still giving every emboss/deboss tool
 a physical overlap across the curved vessel skin.
 
+The CAD result is authoritative: it must contain exactly one valid solid before
+export. OCC tessellation can nevertheless leave seam slivers or split a relief
+patch at a coarse STL tolerance, especially for multiline spherical text. Export
+therefore retries with progressively finer tessellation before classifying a
+secondary STL component as a real geometry failure.
+
 The promoted ovoid keeps its dedicated adapter. This module retains the shared
 radial helpers used by that adapter and owns the spherical text decorator.
 """
@@ -45,7 +51,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.7-paired-surface-band-glyphs"
+NATIVE_RADIAL_TEXT_ADAPTER_VERSION = "NRT.8-connected-tessellation-retry"
 _SPHERICAL_BASE_ROUTE = "analytic_cad_spherical_primitive"
 _OVOID_BASE_ROUTE = "analytic_cad_ovoid_primitive"
 _SPHERICAL_TEXT_ROUTE = "analytic_cad_spherical_text"
@@ -250,13 +256,7 @@ def _surface_band_parts(
     requested_depth: float,
     mode: str,
 ) -> tuple[cq.Shape, cq.Shape, float]:
-    """Build paired curved band solids without fusing the complete sphere skin.
-
-    Fusing two full offset skins can create a numerically invalid global solid in
-    OCC even though each one is individually valid. Keeping them separate is
-    both cheaper and more reliable. They are fused only after a glyph prism has
-    clipped them down to a small local patch.
-    """
+    """Build paired curved band solids without fusing the complete sphere skin."""
     face = _outer_revolution_face(pristine)
     outward_sign = _outward_offset_sign(face)
     if mode == "emboss":
@@ -324,11 +324,7 @@ def _apply_spherical_line(
     rx = float(rx_at(t))
     ry = float(ry_at(t))
     effective_radius = math.sqrt(max(1e-9, rx * ry))
-    actual_size = _safe_spherical_line_size(
-        effective_radius,
-        text_value,
-        size,
-    )
+    actual_size = _safe_spherical_line_size(effective_radius, text_value, size)
     drx_dz = _numeric_derivative(rx_at, t) / height
     dry_dz = _numeric_derivative(ry_at, t) / height
     widths, centres = _glyph_centres(text_value, actual_size)
@@ -357,18 +353,10 @@ def _apply_spherical_line(
         if float(np.dot(normal, np.array([cos_t, sin_t, 0.0]))) < 0.0:
             normal = -normal
 
-        half_diagonal = 0.5 * math.sqrt(
-            float(glyph_width) ** 2 + float(actual_size) ** 2
-        )
-        conservative_radius = max(
-            half_diagonal + 1e-3,
-            min(effective_radius, 0.5 * height),
-        )
+        half_diagonal = 0.5 * math.sqrt(float(glyph_width) ** 2 + float(actual_size) ** 2)
+        conservative_radius = max(half_diagonal + 1e-3, min(effective_radius, 0.5 * height))
         sagitta = conservative_radius - math.sqrt(
-            max(
-                0.0,
-                conservative_radius**2 - half_diagonal**2,
-            )
+            max(0.0, conservative_radius**2 - half_diagonal**2)
         )
         inward_span = sagitta + effective_depth + 0.80
         total_span = inward_span + effective_depth + 1.20
@@ -390,9 +378,7 @@ def _apply_spherical_line(
                 valign="center",
             ).vals()
         except Exception as error:
-            raise RuntimeError(
-                f"Spherical native glyph construction failed for {glyph!r}."
-            ) from error
+            raise RuntimeError(f"Spherical native glyph construction failed for {glyph!r}.") from error
 
         prisms = tuple(value for value in values if isinstance(value, cq.Shape))
         if not prisms:
@@ -405,37 +391,27 @@ def _apply_spherical_line(
                 clipped_anchor = prism.intersect(anchor_band, tol=0.01).clean()
             except Exception as error:
                 raise RuntimeError(
-                    f"Spherical native {mode} clipping failed at glyph "
-                    f"{glyph_index} {glyph!r}, prism {prism_index}."
+                    f"Spherical native {mode} clipping failed at glyph {glyph_index} {glyph!r}, prism {prism_index}."
                 ) from error
 
-            if (
-                not clipped_primary.isValid()
-                or float(clipped_primary.Volume()) <= 1e-7
-            ):
+            if not clipped_primary.isValid() or float(clipped_primary.Volume()) <= 1e-7:
                 raise RuntimeError(
-                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
-                    "did not intersect the primary curved surface band."
+                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} did not intersect the primary curved surface band."
                 )
 
             try:
-                if (
-                    clipped_anchor.isValid()
-                    and float(clipped_anchor.Volume()) > 1e-7
-                ):
+                if clipped_anchor.isValid() and float(clipped_anchor.Volume()) > 1e-7:
                     tool = clipped_primary.fuse(clipped_anchor, tol=0.01).clean()
                 else:
                     tool = clipped_primary
             except Exception as error:
                 raise RuntimeError(
-                    f"Spherical native {mode} local band fusion failed at glyph "
-                    f"{glyph_index} {glyph!r}, prism {prism_index}."
+                    f"Spherical native {mode} local band fusion failed at glyph {glyph_index} {glyph!r}, prism {prism_index}."
                 ) from error
 
             if not tool.isValid() or float(tool.Volume()) <= 1e-7:
                 raise RuntimeError(
-                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
-                    "produced an invalid local relief tool."
+                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} produced an invalid local relief tool."
                 )
 
             try:
@@ -446,27 +422,20 @@ def _apply_spherical_line(
                 ).clean()
             except Exception as error:
                 raise RuntimeError(
-                    f"Spherical native {mode} Boolean failed at glyph "
-                    f"{glyph_index} {glyph!r}, prism {prism_index}."
+                    f"Spherical native {mode} Boolean failed at glyph {glyph_index} {glyph!r}, prism {prism_index}."
                 ) from error
             solids = tuple(raw.Solids())
             if len(solids) != 1:
                 raise RuntimeError(
-                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
-                    f"produced {len(solids)} CAD solids."
+                    f"Spherical native {mode} glyph {glyph_index} {glyph!r} produced {len(solids)} CAD solids."
                 )
             current = solids[0].clean()
 
         after_glyph = float(current.Volume())
-        delta = (
-            after_glyph - before_glyph
-            if mode == "emboss"
-            else before_glyph - after_glyph
-        )
+        delta = after_glyph - before_glyph if mode == "emboss" else before_glyph - after_glyph
         if delta <= 1e-7:
             raise RuntimeError(
-                f"Spherical native {mode} glyph {glyph_index} {glyph!r} "
-                "produced no measurable relief."
+                f"Spherical native {mode} glyph {glyph_index} {glyph!r} produced no measurable relief."
             )
         applied += 1
 
@@ -478,23 +447,45 @@ def _single_tessellated_component(mesh):
     components = tuple(mesh.split(only_watertight=False))
     if len(components) <= 1:
         return mesh
-    ordered = sorted(
-        components,
-        key=lambda item: abs(float(item.volume)),
-        reverse=True,
-    )
+    ordered = sorted(components, key=lambda item: abs(float(item.volume)), reverse=True)
     primary = ordered[0]
     primary_volume = max(abs(float(primary.volume)), 1.0)
     meaningful_limit = max(1e-3, primary_volume * 1e-8)
     for residue in ordered[1:]:
         if len(residue.faces) > 16 or abs(float(residue.volume)) > meaningful_limit:
-            raise RuntimeError(
-                "Native radial text STL contains a meaningful disconnected component."
-            )
+            raise RuntimeError("Native radial text STL contains a meaningful disconnected component.")
     cleaned = primary.copy()
     cleaned.merge_vertices()
     cleaned.remove_unreferenced_vertices()
     return cleaned
+
+
+def _export_connected_spherical_text(final_shape: cq.Shape, stl_path: Path):
+    """Export a one-solid CAD result and retry only STL tessellation if needed."""
+    profiles = (
+        (0.06, 0.07),
+        (0.04, 0.05),
+        (0.025, 0.035),
+    )
+    last_error: RuntimeError | None = None
+    for tolerance, angular_tolerance in profiles:
+        cq.exporters.export(
+            final_shape,
+            str(stl_path),
+            tolerance=tolerance,
+            angularTolerance=angular_tolerance,
+        )
+        mesh = _load_welded_stl(stl_path)
+        try:
+            connected = _single_tessellated_component(mesh)
+        except RuntimeError as error:
+            last_error = error
+            continue
+        connected.export(str(stl_path))
+        return connected, tolerance, angular_tolerance
+    raise RuntimeError(
+        "Native radial text STL remained disconnected after fine tessellation retries."
+    ) from last_error
 
 
 def _apply_text_block(
@@ -510,8 +501,7 @@ def _apply_text_block(
     profile = str(route.get("profile", ""))
     if profile != "spherical":
         raise RuntimeError(
-            "The generic radial text decorator now owns only spherical text; "
-            "ovoid text must use the dedicated ovoid adapter."
+            "The generic radial text decorator now owns only spherical text; ovoid text must use the dedicated ovoid adapter."
         )
 
     height = float(route["height_mm"])
@@ -519,15 +509,9 @@ def _apply_text_block(
     minimum_feature = float(program.manufacturing.minimum_feature_mm)
     first_feature, _ = entries[0]
     multiline = len(entries) > 1
-    slot_height = max(
-        minimum_feature,
-        float(first_feature.size.height_ratio) * height,
-    )
+    slot_height = max(minimum_feature, float(first_feature.size.height_ratio) * height)
     gap = 0.22 * slot_height if multiline else 0.0
-    total_block_height = (
-        len(entries) * slot_height
-        + max(len(entries) - 1, 0) * gap
-    )
+    total_block_height = len(entries) * slot_height + max(len(entries) - 1, 0) * gap
     block_center = (
         0.50 * height
         if multiline and str(first_feature.anchor.region) == "front"
@@ -539,10 +523,7 @@ def _apply_text_block(
     base_volume = float(shape.Volume())
     current = shape
     expected_glyph_count = sum(
-        1
-        for _feature, literal in entries
-        for glyph in str(literal)
-        if not glyph.isspace()
+        1 for _feature, literal in entries for glyph in str(literal) if not glyph.isspace()
     )
     applied_glyph_count = 0
     band_cache: dict[tuple[str, float], tuple[cq.Shape, cq.Shape, float]] = {}
@@ -553,10 +534,7 @@ def _apply_text_block(
             requested_size = slot_height
         else:
             z = float(feature.anchor.vertical) * height
-            requested_size = max(
-                minimum_feature,
-                float(feature.size.height_ratio) * height,
-            )
+            requested_size = max(minimum_feature, float(feature.size.height_ratio) * height)
 
         half_size = 0.55 * min(requested_size, _SPHERICAL_MAX_TEXT_MM)
         safe_edge = max(half_size, 0.14 * height)
@@ -569,18 +547,10 @@ def _apply_text_block(
         if multiline and str(first_feature.anchor.region) == "front":
             u_offset = 0.0
         else:
-            horizontal = float(
-                first_feature.anchor.horizontal
-                if multiline
-                else feature.anchor.horizontal
-            )
+            horizontal = float(first_feature.anchor.horizontal if multiline else feature.anchor.horizontal)
             u_offset = 0.25 * horizontal * (2.0 * math.pi * effective_radius)
 
-        mode = (
-            "deboss"
-            if feature.surface_effect in {"recessed", "cutout"}
-            else "emboss"
-        )
+        mode = "deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss"
         requested_depth = max(0.1, float(feature.size.depth_mm))
         cache_key = (mode, round(requested_depth, 6))
         if cache_key not in band_cache:
@@ -633,16 +603,14 @@ def decorate_radial_mesh_result_with_native_text(
     profile = _radial_profile(program)
     if profile != "spherical":
         raise RuntimeError(
-            "Radial text fallback reached a non-spherical profile; "
-            "the dedicated ovoid adapter should have handled it first."
+            "Radial text fallback reached a non-spherical profile; the dedicated ovoid adapter should have handled it first."
         )
 
     route = motor.get("_analytic_radial")
     base_route = str(motor.get("_capability_route", ""))
     if not isinstance(route, dict) or base_route != _SPHERICAL_BASE_ROUTE:
         raise RuntimeError(
-            "Spherical text requires the promoted analytic spherical body route; "
-            "legacy volumetric fallback is not accepted."
+            "Spherical text requires the promoted analytic spherical body route; legacy volumetric fallback is not accepted."
         )
 
     started = perf_counter()
@@ -658,14 +626,10 @@ def decorate_radial_mesh_result_with_native_text(
 
     stl_path = Path(str(mesh_result.stl_path))
     stl_path.parent.mkdir(parents=True, exist_ok=True)
-    cq.exporters.export(
+    mesh, export_tolerance, export_angular_tolerance = _export_connected_spherical_text(
         final_shape,
-        str(stl_path),
-        tolerance=0.06,
-        angularTolerance=0.07,
+        stl_path,
     )
-    mesh = _single_tessellated_component(_load_welded_stl(stl_path))
-    mesh.export(str(stl_path))
     components = tuple(mesh.split(only_watertight=False))
 
     checks = dict(getattr(mesh_result, "semantic_checks", {}) or {})
@@ -673,8 +637,7 @@ def decorate_radial_mesh_result_with_native_text(
     checks["native_radial_text_one_component"] = len(components) == 1
     checks["native_radial_text_mesh_compact"] = 0 < int(len(mesh.vertices)) < 100_000
     checks["native_radial_text_glyph_integrity"] = (
-        expected_glyph_count > 0
-        and applied_glyph_count == expected_glyph_count
+        expected_glyph_count > 0 and applied_glyph_count == expected_glyph_count
     )
 
     elapsed = perf_counter() - started
@@ -695,6 +658,8 @@ def decorate_radial_mesh_result_with_native_text(
         "base_volume_mm3": base_volume,
         "final_volume_mm3": final_volume,
         "volume_delta_mm3": final_volume - base_volume,
+        "export_tolerance_mm": export_tolerance,
+        "export_angular_tolerance": export_angular_tolerance,
     }
 
     decorated = replace(
@@ -706,9 +671,7 @@ def decorate_radial_mesh_result_with_native_text(
         volume_mm3=float(abs(mesh.volume)),
         watertight=bool(mesh.is_watertight),
         winding_consistent=bool(mesh.is_winding_consistent),
-        flat_base_vertex_count=int(
-            np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= 0.08)
-        ),
+        flat_base_vertex_count=int(np.count_nonzero(np.abs(mesh.vertices[:, 2]) <= 0.08)),
         semantic_checks=checks,
         stage_seconds=stage_seconds,
         generation_seconds=float(mesh_result.generation_seconds) + elapsed,
