@@ -9,6 +9,7 @@ on:
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_retry_repairs.py'
       - 'app/product_generators/design_interpreter/body_family_expansion.py'
+      - 'app/product_generators/design_interpreter/native_foundational_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
       - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
@@ -22,6 +23,7 @@ on:
       - 'tools/dobo_capability_repairs.py'
       - 'tools/dobo_retry_repairs.py'
       - 'app/product_generators/design_interpreter/body_family_expansion.py'
+      - 'app/product_generators/design_interpreter/native_foundational_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
       - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
@@ -92,7 +94,7 @@ jobs:
               raise RuntimeError(f'Live Lab UI integrity contract failed: {failed}')
           PY
 
-      - name: POST cone sphere and ovoid through browser API
+      - name: POST promoted primitives through browser API
         run: |
           mkdir -p outputs-ci/capability-lab-http-primitives
           python - <<'PY'
@@ -102,6 +104,18 @@ jobs:
           import urllib.request
 
           cases = {
+              'cylinder': {
+                  'prompt': 'Crea una maceta cilindro',
+                  'morphology': 'cylindrical',
+                  'route': 'analytic_cad_cylindrical_text',
+                  'vertex_ceiling': 20000,
+              },
+              'triangular_prism': {
+                  'prompt': 'Crea una maceta prisma triangular',
+                  'morphology': 'triangular_prism',
+                  'route': 'analytic_cad_triangular_primitive',
+                  'vertex_ceiling': 20000,
+              },
               'cone': {
                   'prompt': 'Crea una maceta cono',
                   'morphology': 'tapered_revolution',
@@ -165,7 +179,7 @@ jobs:
                   audit['morphology'] == case['morphology'],
                   audit['capability_route'] == case['route'],
                   audit['trace_route'] == case['route'],
-                  audit['live_lab_version'] == 'LABLIVE.6-radial-primitive-guard',
+                  audit['live_lab_version'] == 'LABLIVE.7-foundational-primitive-guard',
                   bool(audit['watertight']),
                   bool(audit['winding_consistent']),
                   int(audit['component_count'] or 0) == 1,
