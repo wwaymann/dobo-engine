@@ -24,7 +24,7 @@ from dobo_capability_repairs import install
 from dobo_retry_repairs import install_retry_repairs
 
 
-LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.7-foundational-primitive-guard"
+LIVE_CAPABILITY_LAB_VERSION = "LABLIVE.8-profiled-offline-catalog"
 
 # Capture the promoted/core body-family implementation before the lab repair
 # bridge replaces _fields_for. Native primitive CAD routing reconstructs its
@@ -72,23 +72,27 @@ from product_generators.design_interpreter.native_radial_cad_adapter import (
 from product_generators.design_interpreter.native_foundational_cad_adapter import (
     install_native_foundational_cad_adapter,
 )
+from product_generators.design_interpreter.native_profiled_cad_adapter import (
+    install_native_profiled_cad_adapter,
+)
 
 install_native_cad_primitive_adapter()
 install_native_angular_text_reconnection()
 install_native_tapered_cad_adapter()
 install_native_radial_cad_adapter()
-# Install foundational last: its wrapper preserves the previous chain while
-# intercepting cylinder/triangular-prism before they can reach voxel fallback.
+# Foundational preserves the primitive chain; profiled is installed after the
+# temporary Lab bridge so the catalog uses the same native CAD route as CI.
 install_native_foundational_cad_adapter()
+install_native_profiled_cad_adapter()
 
 
 def _assert_promoted_retry_chain() -> None:
     """Refuse to serve the Lab if the final promoted CAD router was overwritten."""
     retry = DoboDesignPipeline._generate_with_retry.__func__
-    if not getattr(retry, "_dobo_foundational_cad_adapter", False):
+    if not getattr(retry, "_dobo_profiled_cad_adapter", False):
         raise RuntimeError(
-            "DOBO Lab startup lost the promoted foundational CAD router; refusing "
-            "to serve legacy cylinder/triangular-prism voxel geometry."
+            "DOBO Lab startup lost the promoted profiled CAD router; refusing "
+            "to serve legacy or non-native planter geometry."
         )
 
 
@@ -220,6 +224,16 @@ _BASIC_PROMPTS = {
     "crea una maceta ovoide": "Crea una maceta ovoide",
     "crea una maceta prisma triangular": "Crea una maceta prisma triangular",
     "crea una maceta triangular": "Crea una maceta triangular",
+    "crea una maceta anfora ahusada": "Crea una maceta ánfora ahusada",
+    "crea una maceta urna globular": "Crea una maceta urna globular",
+    "crea una maceta barril": "Crea una maceta barril",
+    "crea una maceta cuello estrecho": "Crea una maceta cuello estrecho",
+    "crea una maceta borde ensanchado": "Crea una maceta borde ensanchado",
+    "crea una maceta tronco invertido": "Crea una maceta tronco invertido",
+    "crea una maceta reloj de arena": "Crea una maceta reloj de arena",
+    "crea una maceta ahusada alta": "Crea una maceta ahusada alta",
+    "crea una maceta ovoide alta": "Crea una maceta ovoide alta",
+    "crea una maceta urna pedestal": "Crea una maceta urna pedestal",
 }
 
 _PROMOTED_ROUTE_FOR = {
@@ -236,6 +250,16 @@ _PROMOTED_ROUTE_FOR = {
     "crea una maceta esfera": "analytic_cad_spherical_primitive",
     "crea una maceta esferica": "analytic_cad_spherical_primitive",
     "crea una maceta ovoide": "analytic_cad_ovoid_primitive",
+    "crea una maceta anfora ahusada": "analytic_cad_profiled_revolution",
+    "crea una maceta urna globular": "analytic_cad_profiled_revolution",
+    "crea una maceta barril": "analytic_cad_profiled_revolution",
+    "crea una maceta cuello estrecho": "analytic_cad_profiled_revolution",
+    "crea una maceta borde ensanchado": "analytic_cad_profiled_revolution",
+    "crea una maceta tronco invertido": "analytic_cad_profiled_revolution",
+    "crea una maceta reloj de arena": "analytic_cad_profiled_revolution",
+    "crea una maceta ahusada alta": "analytic_cad_profiled_revolution",
+    "crea una maceta ovoide alta": "analytic_cad_profiled_revolution",
+    "crea una maceta urna pedestal": "analytic_cad_profiled_revolution",
 }
 
 _FOUNDATIONAL_ROUTE_BY_PROFILE = {
@@ -298,6 +322,7 @@ def _guard_promoted_result(normalized_prompt: str, result: dict) -> None:
         "analytic_cad_tapered_primitive",
         "analytic_cad_spherical_primitive",
         "analytic_cad_ovoid_primitive",
+        "analytic_cad_profiled_revolution",
     }:
         vertices = int(trace.get("vertices") or 0)
         ceiling = 30_000
