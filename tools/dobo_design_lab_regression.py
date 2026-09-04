@@ -64,7 +64,11 @@ def run() -> dict:
         "three_font_families": len(FONT_FAMILIES) == 3,
         "multiline_ui": 'id="lineCounts"' in HTML and 'id="lineInputs"' in HTML,
         "shape_family_modal": 'id="shapeModal"' in HTML,
-        "three_mf_preview": "ThreeMFLoader" in HTML and "load3MF(d.artifacts.three_mf)" in HTML,
+        "multicolor_preview": (
+            "loadColoredParts" in HTML
+            and "region_stls" in HTML
+            and "ThreeMFLoader" in HTML
+        ),
     }
 
     font_records = []
@@ -204,6 +208,14 @@ def run() -> dict:
                 "native_text": bool(text),
                 "compound_multicolor": bool(multicolor.get("compound_object")),
                 "three_materials": tuple(multicolor.get("filament_slots", [])) == (1, 2, 3),
+                "preview_parts": (
+                    len(multicolor.get("preview_parts", [])) == 3
+                    and all(
+                        Path(str(part.get("path", ""))).is_file()
+                        for part in multicolor.get("preview_parts", [])
+                        if isinstance(part, dict)
+                    )
+                ),
                 "saucer": bool(result.get("artifacts", {}).get("saucer")),
                 "effective_size_recorded": bool(effective),
             }
@@ -253,7 +265,7 @@ def run() -> dict:
 
     interface_status = "PASS" if all(interface_assertions.values()) else "FAIL"
     summary = {
-        "schema": "dobo.design_lab_regression.2",
+        "schema": "dobo.design_lab_regression.3",
         "version": DESIGN_LAB_VERSION,
         "catalog_count": len(DESIGN_CATALOG),
         "shape_families": family_counts,
