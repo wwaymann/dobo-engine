@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.12-deep-relief-font-layout"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.13-placement-aware-text-zones"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -391,26 +391,22 @@ def _apply_text_block(
     multiline = len(entries) > 1
 
     text_zone = route.get("text_zone", {})
-    zone_center = (
-        float(text_zone.get("center_z_ratio", 0.52))
-        if isinstance(text_zone, dict)
-        else 0.52
-    )
+    text_zones = route.get("text_zones", {})
+
+    def _zone_for_vertical(authored: float) -> dict[str, Any] | None:
+        if isinstance(text_zones, dict):
+            key = "upper" if authored >= 0.62 else "lower" if authored <= 0.42 else "center"
+            candidate = text_zones.get(key)
+            if isinstance(candidate, dict):
+                return candidate
+        return text_zone if isinstance(text_zone, dict) else None
 
     def _resolved_vertical(feature) -> float:
         authored = float(feature.anchor.vertical)
-        # 0.52 is DOBO's canonical/default front-text anchor. When the author
-        # has not deliberately moved it, bind the text to the stable surface
-        # zone detected from the actual profile. Explicit user placement stays
-        # untouched.
-        if (
-            use_text_zone
-            and str(feature.anchor.region) == "front"
-            and abs(authored - 0.52) <= 0.035
-            and isinstance(text_zone, dict)
-            and text_zone.get("id") == "front_primary"
-        ):
-            return zone_center
+        if use_text_zone and str(feature.anchor.region) == "front":
+            selected_zone = _zone_for_vertical(authored)
+            if isinstance(selected_zone, dict):
+                return float(selected_zone.get("center_z_ratio", authored))
         return authored
 
     requested_slot_height = max(
@@ -489,17 +485,12 @@ def decorate_profiled_mesh_result_with_native_text(
             base, route, program
         )
     except RuntimeError as primary_error:
-        text_zone = route.get("text_zone", {})
-        default_front = all(
+        text_zones = route.get("text_zones", {})
+        all_front = all(
             str(feature.anchor.region) == "front"
-            and abs(float(feature.anchor.vertical) - 0.52) <= 0.035
             for feature, _literal in _line_contract(program)
         )
-        if (
-            not default_front
-            or not isinstance(text_zone, dict)
-            or text_zone.get("id") != "front_primary"
-        ):
+        if not all_front or not isinstance(text_zones, dict) or not text_zones:
             raise
         final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
             base,
@@ -624,6 +615,11 @@ def decorate_profiled_mesh_result_with_native_text(
         "mesh_normalization": mesh_normalization,
         "multiline_slot_fraction": multiline_slot_fraction,
         "text_zone_id": route.get("text_zone", {}).get("id") if isinstance(route.get("text_zone"), dict) else None,
+        "available_text_zones": (
+            sorted(route.get("text_zones", {}).keys())
+            if isinstance(route.get("text_zones"), dict)
+            else []
+        ),
         "text_zone_center_z_ratio": (
             route.get("text_zone", {}).get("center_z_ratio")
             if isinstance(route.get("text_zone"), dict)
