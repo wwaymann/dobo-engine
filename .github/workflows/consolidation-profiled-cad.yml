@@ -61,7 +61,7 @@ jobs:
       - name: Install CAD dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow
+          python -m pip install jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow matplotlib
 
       - name: Validate complete profiled pot catalog
         run: python -m product_generators.design_interpreter.profiled_cad_regression
