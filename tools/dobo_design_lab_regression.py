@@ -61,7 +61,7 @@ def run() -> dict:
         "full_catalog_visible_through_families": len(DESIGN_CATALOG) == 30,
         "shape_family_count": len(SHAPE_FAMILIES) >= 6,
         "families_have_choices": all(count >= 3 for count in family_counts.values()),
-        "three_font_families": len(FONT_FAMILIES) == 3,
+        "font_families": len(FONT_FAMILIES) >= 4,
         "multiline_ui": 'id="lineCounts"' in HTML and 'id="lineInputs"' in HTML,
         "shape_family_modal": 'id="shapeModal"' in HTML,
         "multicolor_preview": (
