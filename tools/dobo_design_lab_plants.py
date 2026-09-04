@@ -45,7 +45,7 @@ let saucerSupportTop=0;
 const PLANT_SCALE={small:.72,medium:1.0,large:1.34};
 const C={leaf:0x356b3f,leaf2:0x4b8050,leaf3:0x254c32,stem:0x76563a};
 
-const COMMONS_FILE=name=>'https://commons.wikimedia.org/wiki/Special:Redirect/file/'+encodeURIComponent(name);
+const COMMONS_FILE=name=>'https://commons.wikimedia.org/wiki/Special:Redirect/file/'+encodeURIComponent(name)+'?width=1400';
 const PHOTO_ASSETS={
  ficus:{
   file:'Ficus lyrata indoor house second floor Transparent - July 2026.png',
@@ -67,7 +67,7 @@ const PHOTO_ASSETS={
 const photoTextureCache=new Map();
 let plantLoadToken=0;
 
-function disposeMaterial(m){if(!m)return;['map','bumpMap','roughnessMap','alphaMap','normalMap'].forEach(k=>m[k]?.dispose?.());m.dispose?.()}
+function disposeMaterial(m){if(!m)return;['map','bumpMap','roughnessMap','alphaMap','normalMap'].forEach(k=>{const t=m[k];if(t&&!t.userData?.sharedPhoto)t.dispose?.()});m.dispose?.()}
 function disposeVisual(o){if(!o)return;o.traverse?.(n=>{n.geometry?.dispose?.();if(n.material){(Array.isArray(n.material)?n.material:[n.material]).forEach(disposeMaterial)}});scene.remove(o)}
 
 function seededRandom(seed){let s=seed>>>0;return()=>{s=(1664525*s+1013904223)>>>0;return s/4294967296}}
@@ -125,7 +125,7 @@ async function photoTexture(asset){
  if(photoTextureCache.has(key))return photoTextureCache.get(key);
  const promise=loadRemoteImage(COMMONS_FILE(asset.file)).then(img=>{
   const texture=asset.mode==='green_key'?greenKeyPhoto(img):textureFromImage(img);
-  texture.userData={source:asset.source,file:asset.file};
+  texture.userData={source:asset.source,file:asset.file,sharedPhoto:true};
   return texture;
  });
  photoTextureCache.set(key,promise);
@@ -234,7 +234,7 @@ function buildPhotoLayers(group,texture,u,id){
   {scale:.88,x:.060*u,z:-.055*u,baseYaw:.25,follow:.58,opacity:.82},
  ];
  layers.slice(0,asset.layers||3).forEach((L,i)=>{
-  const card=photoCard(texture,H*L.scale,{x:L.x,y:H*L.scale*.5,z:L.z,baseYaw:L.baseYaw,follow:L.follow,opacity:L.opacity,alphaTest:asset.mode==='green_key'?.08:.035,roughness:.70});
+  const card=photoCard(texture,H*L.scale,{x:L.x,y:H*L.scale*.5,z:L.z,baseYaw:L.baseYaw,follow:L.follow,opacity:L.opacity,alphaTest:asset.mode==='green_key' ? 0.08 : 0.035,roughness:.70});
   card.renderOrder=10+i;group.add(card);
  });
 }
