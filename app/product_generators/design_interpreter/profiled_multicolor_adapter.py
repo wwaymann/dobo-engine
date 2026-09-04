@@ -304,7 +304,7 @@ def export_profiled_compound_multicolor(
         isinstance(native_text, dict)
         and native_text.get("placement_mode") == "detected_text_zone_fallback"
     )
-    final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
+    final, base_volume, final_volume, line_count, glyph_count, effective_sizes = _apply_text_block(
         base,
         route,
         program,
@@ -421,6 +421,7 @@ def export_profiled_compound_multicolor(
         "colors": list(colors),
         "text_lines": line_count,
         "text_glyphs": glyph_count,
+        "effective_line_heights_mm": [round(float(value), 4) for value in effective_sizes],
         "multiline_slot_fraction": multiline_slot_fraction,
         "placement_mode": (
             "detected_text_zone_fallback" if use_text_zone else "authored_or_default"
