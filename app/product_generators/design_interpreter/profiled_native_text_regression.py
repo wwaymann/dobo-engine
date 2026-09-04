@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .native_profiled_cad_adapter import PROFILE_CATALOG
+from .native_profiled_cad_adapter import PROFILE_CATALOG, _PROFILE_VERTEX_BUDGET
 from .phase_5_design_matrix import _feature, _program
 from .profiled_cad_regression import _semantic
 from .structural_pipeline import DoboStructuralPipeline
@@ -100,7 +100,7 @@ def run() -> dict:
                 "text_one_component": bool(checks.get("native_profiled_text_one_component")),
                 "glyph_integrity": bool(checks.get("native_profiled_text_glyph_integrity")),
                 "relief_direction": delta > 0.0 if effect == "raised" else delta < 0.0,
-                "native_mesh": 0 < int(result.mesh_result.vertex_count) < 150_000,
+                "native_mesh": 0 < int(result.mesh_result.vertex_count) < _PROFILE_VERTEX_BUDGET,
             }
             failed = [key for key, value in assertions.items() if not value]
             records.append({
@@ -130,7 +130,7 @@ def run() -> dict:
             })
 
     summary = {
-        "schema": "dobo.profiled_native_text_regression.1",
+        "schema": "dobo.profiled_native_text_regression.2",
         "case_count": len(records),
         "pass": sum(record["status"] == "PASS" for record in records),
         "fail": sum(record["status"] != "PASS" for record in records),
