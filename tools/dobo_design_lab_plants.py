@@ -40,21 +40,41 @@ PLANT_CONTROLS = r'''
 PLANT_JS = r'''
 // DOBO visual presentation layer. CAD arrives Z-up; the Lab scene is Y-up.
 const plantState={plant:'ficus',size:'medium',substrate:'soil'};
-let visualPlantGroup=null,substrateGroup=null;
+let visualPlantGroup=null,substrateGroup=null,saucerModel=null;
+let saucerSupportTop=0;
 const PLANT_SCALE={small:.72,medium:1.0,large:1.34};
 const C={leaf:0x356b3f,leaf2:0x4b8050,leaf3:0x254c32,stem:0x76563a};
 
 function disposeVisual(o){if(!o)return;o.traverse?.(n=>{n.geometry?.dispose?.();if(n.material){(Array.isArray(n.material)?n.material:[n.material]).forEach(m=>m.dispose?.())}});scene.remove(o)}
 
-function normalizePotForViewer(){
+function normalizePotForViewer(supportTop=0){
  if(!model)return;
  // Manufacturing geometry is untouched: this transform exists only in Three.js.
  model.rotation.set(-Math.PI/2,0,0);
+ // When a real CAD saucer exists, lift the pot onto the generated support pads.
+ model.position.set(0,Math.max(0,Number(supportTop)||0),0);
  model.updateMatrixWorld(true);
  // Base Lab floor is XZ, therefore Y is the visual vertical axis.
- floor.position.set(0,-2,0);
+ floor.position.set(0,saucerModel?-.35:-2,0);
  floor.updateMatrixWorld(true);
- fit();
+}
+
+function loadSaucerForViewer(d){
+ disposeVisual(saucerModel);saucerModel=null;saucerSupportTop=0;
+ const info=d?.preview?.saucer;
+ if(!info?.url)return Promise.resolve(false);
+ return new Promise((ok,bad)=>new STLLoader().load(info.url,g=>{
+  g.computeVertexNormals();
+  const material=new THREE.MeshStandardMaterial({color:new THREE.Color(d.selection.body_color),roughness:.68,metalness:.01,side:THREE.DoubleSide});
+  saucerModel=new THREE.Mesh(g,material);
+  saucerModel.rotation.set(-Math.PI/2,0,0);
+  saucerModel.position.set(0,0,0);
+  saucerModel.castShadow=true;saucerModel.receiveShadow=true;
+  saucerModel.name='DOBO_CAD_SAUCER';
+  saucerModel.userData={visual_only:false,exportable:true,role:'saucer',source:'CAD_STL'};
+  saucerSupportTop=Math.max(0,Number(info.support_top_mm)||0);
+  scene.add(saucerModel);saucerModel.updateMatrixWorld(true);ok(true);
+ },undefined,bad));
 }
 
 function leafShape(w,h,notch=0){const s=new THREE.Shape();s.moveTo(0,-h*.5);s.bezierCurveTo(w*.62,-h*.34,w*.62,h*.22,0,h*.5);if(notch){s.bezierCurveTo(-w*.10,h*.36,-w*.13,h*.18,-w*.18,h*.08);s.bezierCurveTo(-w*.43,h*.26,-w*.62,-h*.08,0,-h*.5)}else{s.bezierCurveTo(-w*.62,h*.22,-w*.62,-h*.34,0,-h*.5)}return s}
@@ -70,10 +90,15 @@ function makePothos(u){const g=new THREE.Group();[-.25,-.08,.10,.25].forEach((x,
 function substrateColor(){return plantState.substrate==='white_stone'?0xe9e5dd:plantState.substrate==='volcanic'?0x433b38:0x4b3527}
 function makeSubstrate(center,size,rimY){
  const g=new THREE.Group();
- // Profiled pots use a 0.58 opening ratio. Inset further so the fill never covers the rim.
- const openingDiameter=Math.min(size.x,size.z)*.58;
- const radius=Math.max(2,openingDiameter*.46);
- const y=rimY-Math.max(.8,Math.min(size.y*.018,2.2));
+ // Derive the visible mouth from the selected profile instead of the generic 0.58 body contract.
+ // This fixes the undersized floating brown circle seen on low/wide profiles.
+ const shapeItem=byId(state.shape);
+ const profile=shapeItem?.profile||[];
+ const topRadiusRatio=profile.length?Number(profile[profile.length-1][1])||.80:.80;
+ const openingDiameter=Math.min(size.x,size.z)*topRadiusRatio;
+ const wallInset=Math.max(2.0,openingDiameter*.025);
+ const radius=Math.max(2,openingDiameter*.5-wallInset);
+ const y=rimY-Math.max(.9,Math.min(size.y*.012,1.6));
  const mat=new THREE.MeshStandardMaterial({color:substrateColor(),roughness:1,side:THREE.DoubleSide});
  const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,64),mat);disc.rotation.x=-Math.PI/2;disc.position.set(center.x,y,center.z);disc.userData={visual_only:true,exportable:false,role:'substrate'};g.add(disc);
  if(plantState.substrate!=='soil'){
@@ -90,15 +115,25 @@ function updatePlantVisual(){
  disposeVisual(visualPlantGroup);disposeVisual(substrateGroup);visualPlantGroup=null;substrateGroup=null;
  substrateGroup=makeSubstrate(center,size,rimY);scene.add(substrateGroup);
  const makers={ficus:makeFicus,monstera:makeMonstera,sansevieria:makeSansevieria,pothos:makePothos};visualPlantGroup=makers[plantState.plant](unit);visualPlantGroup.position.set(center.x,rimY-Math.max(.25,size.y*.006),center.z);visualPlantGroup.name='DOBO_VISUAL_ONLY_PLANT_2_5D';visualPlantGroup.userData={visual_only:true,exportable:false,render_mode:'2.5D',plant:plantState.plant,size:plantState.size};scene.add(visualPlantGroup);
- // Fit after all presentation objects exist, but frame from the pot + plant rather than the huge floor.
- const viewBox=new THREE.Box3().setFromObject(model).union(new THREE.Box3().setFromObject(visualPlantGroup));const vs=viewBox.getSize(new THREE.Vector3()),vc=viewBox.getCenter(new THREE.Vector3()),m=Math.max(vs.x,vs.y,vs.z);controls.target.copy(vc);camera.position.set(vc.x+1.45*m,vc.y+.72*m,vc.z+1.65*m);controls.update();
+ // Fit from the complete sellable composition: pot + plant + actual CAD saucer.
+ const viewBox=new THREE.Box3().setFromObject(model).union(new THREE.Box3().setFromObject(visualPlantGroup));
+ if(saucerModel)viewBox.union(new THREE.Box3().setFromObject(saucerModel));
+ const vs=viewBox.getSize(new THREE.Vector3()),vc=viewBox.getCenter(new THREE.Vector3()),m=Math.max(vs.x,vs.y,vs.z);controls.target.copy(vc);camera.position.set(vc.x+1.45*m,vc.y+.72*m,vc.z+1.65*m);controls.update();
 }
 
 function bindPlantUI(){document.querySelectorAll('#plantChoices [data-plant]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#plantChoices [data-plant]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.plant=el.dataset.plant;updatePlantVisual()});document.querySelectorAll('#plantSizes [data-size]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#plantSizes [data-size]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.size=el.dataset.size;updatePlantVisual()});document.querySelectorAll('#substrates [data-substrate]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#substrates [data-substrate]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.substrate=el.dataset.substrate;updatePlantVisual()})}
 bindPlantUI();
 
 const doboOriginalLoadPreview=loadPreview;
-loadPreview=async function(d){await doboOriginalLoadPreview(d);normalizePotForViewer();updatePlantVisual()};
+loadPreview=async function(d){
+ await doboOriginalLoadPreview(d);
+ try{
+  await loadSaucerForViewer(d);
+ }catch(e){console.warn('saucer preview fallback',e);disposeVisual(saucerModel);saucerModel=null;saucerSupportTop=0}
+ normalizePotForViewer(saucerSupportTop);
+ updatePlantVisual();
+ if(saucerModel)$('#previewMode').textContent+=' · plato CAD';
+};
 '''
 
 def _inject(html: str) -> str:
@@ -108,7 +143,7 @@ def _inject(html: str) -> str:
     return html
 
 base.HTML = _inject(base.HTML)
-base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-2.5d-yup-v3"
+base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-2.5d-saucer-v4"
 
 if __name__ == "__main__":
     base.main()
