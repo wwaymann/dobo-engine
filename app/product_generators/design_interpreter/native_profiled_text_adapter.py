@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.11-adaptive-text-zone-fallback"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.12-deep-relief-font-layout"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -149,9 +149,9 @@ def _surface_band(
         # highly sloped wall section and split the vessel.  Cap the engraving
         # depth to a conservative fraction of the actual wall while retaining
         # a clearly printable recessed mark.
-        safe_depth = max(0.35, min(0.45, 0.12 * wall))
-        inward = min(max(float(requested_depth), 0.35), safe_depth)
-        outward = 0.18
+        safe_depth = max(0.90, min(1.20, 0.28 * wall))
+        inward = min(max(float(requested_depth), 0.90), safe_depth)
+        outward = 0.24
     else:
         raise ValueError(f"Unsupported profiled text mode: {mode!r}")
     expanded = _offset_profile_solid(route, outward)
@@ -162,7 +162,13 @@ def _surface_band(
     return band, inward, outward
 
 
-def _glyph_width(glyph: str, size: float) -> float:
+def _glyph_width(
+    glyph: str,
+    size: float,
+    *,
+    font: str = _FONT,
+    kind: str = _FONT_KIND,
+) -> float:
     if glyph.isspace():
         return 0.35 * float(size)
     try:
@@ -171,8 +177,8 @@ def _glyph_width(glyph: str, size: float) -> float:
             float(size),
             0.20,
             combine=False,
-            font=_FONT,
-            kind=_FONT_KIND,
+            font=font,
+            kind=kind,
             halign="center",
             valign="center",
         ).vals()
@@ -184,8 +190,17 @@ def _glyph_width(glyph: str, size: float) -> float:
     return max(0.20 * float(size), max(box.xmax for box in boxes) - min(box.xmin for box in boxes))
 
 
-def _glyph_centres(text_value: str, size: float) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    widths = tuple(_glyph_width(glyph, size) for glyph in text_value)
+def _glyph_centres(
+    text_value: str,
+    size: float,
+    *,
+    font: str = _FONT,
+    kind: str = _FONT_KIND,
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    widths = tuple(
+        _glyph_width(glyph, size, font=font, kind=kind)
+        for glyph in text_value
+    )
     spacing = 0.10 * float(size)
     advances = tuple(
         width + (spacing if index < len(widths) - 1 else 0.0)
@@ -219,8 +234,62 @@ def _apply_line(
     u_offset: float,
 ) -> tuple[cq.Shape, int]:
     local_radius = _radius_mm(route, z)
-    actual_size = _safe_text_size(local_radius, text_value, size, minimum_feature)
-    widths, centres = _glyph_centres(text_value, actual_size)
+    text_style = route.get("text_style", {})
+    font = (
+        str(text_style.get("font", _FONT))
+        if isinstance(text_style, dict)
+        else _FONT
+    )
+    kind = (
+        str(text_style.get("kind", _FONT_KIND))
+        if isinstance(text_style, dict)
+        else _FONT_KIND
+    )
+    layout = (
+        str(text_style.get("layout", "front"))
+        if isinstance(text_style, dict)
+        else "front"
+    )
+    rendered_text = str(text_value)
+    if layout == "wrap":
+        # Repeat the same literal until the authored phrase occupies most of
+        # the circumference. The user asks for a continuous all-around message,
+        # not for a stretched word with artificial letter spacing.
+        probe_size = max(minimum_feature, float(size))
+        circumference = 2.0 * math.pi * max(local_radius, 1e-6)
+        for _repeat in range(3):
+            widths_probe, _centres_probe = _glyph_centres(
+                rendered_text,
+                probe_size,
+                font=font,
+                kind=kind,
+            )
+            estimated = sum(widths_probe) + max(0, len(widths_probe) - 1) * 0.10 * probe_size
+            if estimated >= 0.78 * circumference:
+                break
+            rendered_text = rendered_text + "   " + str(text_value)
+
+    if layout == "wrap":
+        glyph_count = max(1, len(rendered_text.strip()))
+        usable_arc = 2.0 * math.pi * local_radius * 0.88
+        per_size = max(1.0, glyph_count * 0.72) * 1.10
+        actual_size = max(
+            float(minimum_feature),
+            min(float(size), usable_arc / per_size),
+        )
+    else:
+        actual_size = _safe_text_size(
+            local_radius,
+            rendered_text,
+            size,
+            minimum_feature,
+        )
+    widths, centres = _glyph_centres(
+        rendered_text,
+        actual_size,
+        font=font,
+        kind=kind,
+    )
     band, inward, outward = _surface_band(
         route, mode=mode, requested_depth=requested_depth
     )
@@ -229,7 +298,7 @@ def _apply_line(
     applied = 0
 
     for glyph_index, (glyph, glyph_width, arc_center) in enumerate(
-        zip(text_value, widths, centres)
+        zip(rendered_text, widths, centres)
     ):
         if glyph.isspace():
             continue
@@ -258,8 +327,8 @@ def _apply_line(
                     actual_size,
                     total_span,
                     combine=False,
-                    font=_FONT,
-                    kind=_FONT_KIND,
+                    font=font,
+                    kind=kind,
                     halign="center",
                     valign="center",
                 ).vals()
@@ -554,6 +623,26 @@ def decorate_profiled_mesh_result_with_native_text(
             else None
         ),
         "placement_mode": placement_mode,
+        "font_style": (
+            route.get("text_style", {}).get("font_style")
+            if isinstance(route.get("text_style"), dict)
+            else None
+        ),
+        "font": (
+            route.get("text_style", {}).get("font")
+            if isinstance(route.get("text_style"), dict)
+            else _FONT
+        ),
+        "font_kind": (
+            route.get("text_style", {}).get("kind")
+            if isinstance(route.get("text_style"), dict)
+            else _FONT_KIND
+        ),
+        "text_layout": (
+            route.get("text_style", {}).get("layout")
+            if isinstance(route.get("text_style"), dict)
+            else "front"
+        ),
     }
 
     decorated = replace(
