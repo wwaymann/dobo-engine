@@ -266,13 +266,21 @@ def _apply_line(
         else "front"
     )
     rendered_text = str(text_value)
+    wrap_probe_width = 0.0
+    wrap_target_arc = 0.0
     if layout == "wrap":
-        # Repeat the same literal until the authored phrase occupies most of
-        # the circumference. The user asks for a continuous all-around message,
-        # not for a stretched word with artificial letter spacing.
+        # Repeat the authored phrase until its measured font geometry spans the
+        # circumference, then scale that exact measured run to the target arc.
+        # This is deliberately based on real glyph widths, not character count.
         probe_size = max(minimum_feature, float(size))
         circumference = 2.0 * math.pi * max(local_radius, 1e-6)
-        for _repeat in range(8):
+        target_fraction = (
+            float(text_style.get("wrap_target_fraction", 0.99))
+            if isinstance(text_style, dict)
+            else 0.99
+        )
+        wrap_target_arc = target_fraction * circumference
+        for _repeat in range(10):
             widths_probe, _centres_probe = _glyph_centres(
                 rendered_text,
                 probe_size,
@@ -280,28 +288,23 @@ def _apply_line(
                 kind=kind,
                 font_path=font_path,
             )
-            estimated = sum(widths_probe) + max(0, len(widths_probe) - 1) * 0.10 * probe_size
-            target_fraction = (
-                float(text_style.get("wrap_target_fraction", 0.96))
-                if isinstance(text_style, dict)
-                else 0.96
+            wrap_probe_width = (
+                sum(widths_probe)
+                + max(0, len(widths_probe) - 1) * 0.10 * probe_size
             )
-            if estimated >= target_fraction * circumference:
+            if wrap_probe_width >= wrap_target_arc:
                 break
             rendered_text = rendered_text + "   " + str(text_value)
 
     if layout == "wrap":
-        glyph_count = max(1, len(rendered_text.strip()))
-        target_fraction = (
-            float(text_style.get("wrap_target_fraction", 0.96))
-            if isinstance(text_style, dict)
-            else 0.96
+        fit_scale = (
+            wrap_target_arc / max(wrap_probe_width, 1e-6)
+            if wrap_probe_width > 0.0
+            else 1.0
         )
-        usable_arc = 2.0 * math.pi * local_radius * target_fraction
-        per_size = max(1.0, glyph_count * 0.72) * 1.06
         actual_size = max(
             float(minimum_feature),
-            min(float(size), usable_arc / per_size),
+            min(float(size), float(size) * fit_scale),
         )
     else:
         actual_size = _safe_text_size(
