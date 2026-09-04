@@ -95,7 +95,7 @@ def _exact_prompt_text(prompt: str | None) -> str | None:
         return None
     raw = str(prompt)
     match = re.search(
-        r"(?:texto\\s+exacto|text\\s+exact)\\s*(?:=|:)?\\s*[\\\"“”]([^\\\"“”]+)[\\\"“”]",
+        r'(?:texto\s+exacto|text\s+exact)\s*(?:=|:)?\s*["“”]([^"“”]+)["“”]',
         raw,
         flags=re.IGNORECASE | re.DOTALL,
     )
