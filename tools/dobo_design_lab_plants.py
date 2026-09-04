@@ -156,33 +156,61 @@ function texturedStem(h,r){
  m.userData.visual_only=true;m.castShadow=true;return m
 }
 
+function smooth01(v){return v<=0?0:v>=1?1:v*v*(3-2*v)}
+
+function slicePhotoTexture(texture,layer){
+ const img=texture.image||{},srcW=img.width||1024,srcH=img.height||1024;
+ const scale=Math.min(1,1200/Math.max(srcW,srcH)),w=Math.max(2,Math.round(srcW*scale)),h=Math.max(2,Math.round(srcH*scale));
+ const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,w,h);
+ const data=ctx.getImageData(0,0,w,h),p=data.data;
+ for(let y=0;y<h;y++){
+  const ny=y/Math.max(1,h-1);
+  for(let x=0;x<w;x++){
+   const i=(y*w+x)*4;if(p[i+3]===0)continue;
+   const nx=x/Math.max(1,w-1),edge=Math.abs(nx-.5)*2;
+   let weight=1;
+   if(layer===0){
+    weight=(1-smooth01((ny-.44)/.20))*(.72+.28*smooth01((edge-.18)/.70));
+   }else if(layer===1){
+    const top=smooth01((ny-.16)/.24),bottom=1-smooth01((ny-.78)/.18);
+    weight=top*bottom*(.88+.12*(1-edge));
+   }else{
+    weight=smooth01((ny-.43)/.22)*(.78+.22*(1-edge));
+   }
+   p[i+3]=Math.round(p[i+3]*Math.max(0,Math.min(1,weight)));
+  }
+ }
+ ctx.putImageData(data,0,0);
+ const t=new THREE.CanvasTexture(canvas);t.colorSpace=THREE.SRGBColorSpace;
+ t.anisotropy=Math.min(12,renderer.capabilities.getMaxAnisotropy());
+ t.generateMipmaps=true;t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
+ t.userData={sharedPhoto:false,derived25d:true};
+ return t;
+}
+
 function photoCard(texture,height,opts={}){
  const img=texture.image||{},aspect=(img.width&&img.height)?img.width/img.height:(opts.aspect||.78);
  const width=height*aspect*(opts.widthScale||1);
- const mat=new THREE.MeshStandardMaterial({
-  map:texture,color:0xffffff,transparent:true,alphaTest:opts.alphaTest??.035,
-  roughness:opts.roughness??.72,metalness:0,side:THREE.DoubleSide,depthWrite:true,opacity:opts.opacity??1
+ const mat=new THREE.MeshBasicMaterial({
+  map:texture,color:0xffffff,transparent:true,alphaTest:opts.alphaTest??.045,
+  side:THREE.DoubleSide,depthWrite:false,depthTest:true,opacity:opts.opacity??1,toneMapped:false
  });
  const mesh=new THREE.Mesh(new THREE.PlaneGeometry(width,height),mat);
  mesh.position.set(opts.x||0,opts.y??height*.5,opts.z||0);
- mesh.rotation.z=opts.roll||0;
- mesh.castShadow=true;mesh.receiveShadow=false;
+ mesh.rotation.set(0,opts.baseYaw||0,opts.roll||0);
+ mesh.castShadow=false;mesh.receiveShadow=false;
+ mesh.renderOrder=opts.renderOrder??10;
  mesh.userData.visual_only=true;
- mesh.userData.billboard2_5d={baseYaw:opts.baseYaw||0,follow:opts.follow??1};
- return mesh
+ return mesh;
 }
 
 function shortestAngle(a){return Math.atan2(Math.sin(a),Math.cos(a))}
 function updatePlantBillboards(){
- if(!visualPlantGroup)return;
- const wp=new THREE.Vector3();
- visualPlantGroup.traverse(node=>{
-  const bb=node.userData?.billboard2_5d;if(!bb)return;
-  node.getWorldPosition(wp);
-  const target=Math.atan2(camera.position.x-wp.x,camera.position.z-wp.z);
-  const desired=bb.baseYaw+shortestAngle(target-bb.baseYaw)*(bb.follow??1);
-  node.rotation.y+=shortestAngle(desired-node.rotation.y)*.16;
- });
+ if(!visualPlantGroup||!visualPlantGroup.userData?.cameraFacing25d)return;
+ const wp=new THREE.Vector3();visualPlantGroup.getWorldPosition(wp);
+ const target=Math.atan2(camera.position.x-wp.x,camera.position.z-wp.z);
+ visualPlantGroup.rotation.y+=shortestAngle(target-visualPlantGroup.rotation.y)*.18;
 }
 function billboardLoop(){requestAnimationFrame(billboardLoop);updatePlantBillboards()}
 billboardLoop();
@@ -197,6 +225,17 @@ function fitPresentationView(){
  controls.target.copy(vc);camera.position.set(vc.x+1.45*m,vc.y+.72*m,vc.z+1.65*m);camera.updateProjectionMatrix();controls.update();
 }
 
+function tunePresentationLighting(){
+ scene.traverse(o=>{
+  if(o.isHemisphereLight)o.intensity=1.15;
+  if(o.isDirectionalLight){o.intensity=1.45;o.position.set(-170,240,210);o.castShadow=true}
+ });
+ renderer.toneMapping=THREE.ACESFilmicToneMapping;
+ renderer.toneMappingExposure=1.02;
+ renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+ floor.receiveShadow=true;
+}
+
 function normalizePotForViewer(supportTop=0){
  if(!model)return;
  model.rotation.set(-Math.PI/2,0,0);
@@ -204,7 +243,7 @@ function normalizePotForViewer(supportTop=0){
  model.updateMatrixWorld(true);
  floor.position.set(0,saucerModel?-.35:-2,0);
  floor.updateMatrixWorld(true);
- key.position.set(-180,260,220);key.castShadow=true;floor.receiveShadow=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+ tunePresentationLighting();
 }
 
 function loadSaucerForViewer(d){
@@ -227,29 +266,36 @@ function loadSaucerForViewer(d){
 
 function buildPhotoLayers(group,texture,u,id){
  const asset=PHOTO_ASSETS[id],H=u*asset.height;
+ group.userData.cameraFacing25d=true;
+
  if(asset.mode==='leaf_cluster'){
-  const trunk=texturedStem(H*.62,u*.018);trunk.position.y=H*.31;group.add(trunk);
+  const trunk=texturedStem(H*.60,u*.017);trunk.position.y=H*.30;group.add(trunk);
   const leaves=[
-   [-.30,.43,-.08,.62,-.52, .62], [.29,.48,.07,.68,.48,.72], [-.24,.61,.03,.66,-.31,.82],
-   [.25,.70,-.03,.72,.30,.90], [-.08,.82,.07,.69,-.12,.96], [.12,.93,-.06,.64,.20,.86], [0,1.02,.01,.72,0,1.0]
+   [-.29,.43,-.055,.62,-.52,-.10], [.28,.49,.045,.67,.46,.10], [-.23,.61,.018,.65,-.30,-.06],
+   [.24,.70,-.025,.71,.28,.07], [-.08,.82,.050,.69,-.12,-.04], [.12,.92,-.045,.63,.18,.05], [0,1.01,.005,.72,0,0]
   ];
-  leaves.forEach(([x,y,z,scale,roll,follow],i)=>{
-   const card=photoCard(texture,H*.42*scale,{x:x*u,y:y*H,z:z*u,roll,baseYaw:(i-3)*.055,follow,alphaTest:.045,roughness:.68});
+  leaves.forEach(([x,y,z,scale,roll,yaw],i)=>{
+   const card=photoCard(texture,H*.42*scale,{x:x*u,y:y*H,z:z*u,roll,baseYaw:yaw,alphaTest:.05,renderOrder:10+i});
    group.add(card);
   });
   return;
  }
- if(id==='pothos'){
-  const trunk=texturedStem(H*.46,u*.012);trunk.position.y=H*.23;trunk.rotation.z=-.08;group.add(trunk);
+
+ if(id==='ficus'){
+  const trunk=texturedStem(H*.62,u*.018);trunk.position.y=H*.31;group.add(trunk);
+ }else if(id==='pothos'){
+  const trunk=texturedStem(H*.43,u*.012);trunk.position.y=H*.215;trunk.rotation.z=-.06;group.add(trunk);
  }
+
+ const slices=[slicePhotoTexture(texture,0),slicePhotoTexture(texture,1),slicePhotoTexture(texture,2)];
  const layers=[
-  {scale:1.00,x:0,z:0,baseYaw:0,follow:1.00,opacity:1},
-  {scale:.92,x:-.055*u,z:.060*u,baseYaw:-.24,follow:.72,opacity:.88},
-  {scale:.88,x:.060*u,z:-.055*u,baseYaw:.25,follow:.58,opacity:.82},
+  {texture:slices[0],z:-.055*u,x:-.010*u,yaw:-.045,scale:.992,opacity:.98,order:10},
+  {texture:slices[1],z:0,x:0,yaw:0,scale:1.000,opacity:1,order:11},
+  {texture:slices[2],z:.060*u,x:.012*u,yaw:.048,scale:1.008,opacity:.99,order:12},
  ];
- layers.slice(0,asset.layers||3).forEach((L,i)=>{
-  const card=photoCard(texture,H*L.scale,{x:L.x,y:H*L.scale*.5,z:L.z,baseYaw:L.baseYaw,follow:L.follow,opacity:L.opacity,alphaTest:asset.mode==='green_key' ? 0.08 : 0.035,roughness:.70});
-  card.renderOrder=10+i;group.add(card);
+ layers.forEach(L=>{
+  const card=photoCard(L.texture,H*L.scale,{x:L.x,y:H*L.scale*.5,z:L.z,baseYaw:L.yaw,opacity:L.opacity,alphaTest:asset.mode==='green_key' ? .075 : .045,renderOrder:L.order});
+  group.add(card);
  });
 }
 
@@ -296,7 +342,7 @@ function makeSubstrate(center,size,rimY){
  const radius=Math.max(2,openingDiameter*.5-wallInset);
  const y=substrateSurfaceY(size,rimY);
  const tex=textureCanvas(plantState.substrate,2048);
- const mat=new THREE.MeshStandardMaterial({color:substrateColor(),map:tex.map,bumpMap:tex.bumpMap,bumpScale:plantState.substrate==='soil'?1.15:1.8,roughness:plantState.substrate==='white_stone' ? 0.82 : 0.98,metalness:0,side:THREE.DoubleSide});
+ const mat=new THREE.MeshStandardMaterial({color:substrateColor(),map:tex.map,bumpMap:tex.bumpMap,bumpScale:plantState.substrate==='soil'?0.85:1.45,roughness:plantState.substrate==='white_stone' ? 0.90 : 1.0,metalness:0,side:THREE.DoubleSide});
  const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,96),mat);disc.rotation.x=-Math.PI/2;disc.position.set(center.x,y,center.z);disc.receiveShadow=true;disc.userData={visual_only:true,exportable:false,role:'substrate',surface_y:y};g.add(disc);
  g.name='DOBO_VISUAL_ONLY_SUBSTRATE';g.userData={visual_only:true,exportable:false,substrate:plantState.substrate};return g
 }
@@ -333,7 +379,7 @@ def _inject(html: str) -> str:
     return html
 
 base.HTML = _inject(base.HTML)
-base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-photo-proxy-v7"
+base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-layered-billboard-v8"
 
 PLANT_ASSET_FILES = {
     "Ficus lyrata indoor house second floor Transparent - July 2026.png",
