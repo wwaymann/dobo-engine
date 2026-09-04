@@ -162,6 +162,18 @@ _PROFILE_FONT_STYLES: dict[str, dict[str, str]] = {
         "style": "normal",
         "label": "Técnica",
     },
+    "font_display": {
+        "family": "STIXGeneral",
+        "weight": "bold",
+        "style": "normal",
+        "label": "Display",
+    },
+    "font_elegant": {
+        "family": "STIXGeneral",
+        "weight": "normal",
+        "style": "italic",
+        "label": "Elegante",
+    },
 }
 
 
