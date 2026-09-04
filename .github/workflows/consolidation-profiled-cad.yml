@@ -7,7 +7,7 @@ on:
       - integration-consolidation-core
     paths:
       - "app/product_generators/design_interpreter/native_profiled_cad_adapter.py"
-      - "app/product_generators/design_interpreter/native_profiled_text_adapter.py"
+      - "app/product_generators/design_interpreter/native_profiled_text_adapter.py"\n      - "app/product_generators/design_interpreter/native_text_pipeline_adapter.py"
       - "app/product_generators/design_interpreter/profiled_native_text_regression.py"
       - "app/product_generators/design_interpreter/profiled_multicolor_adapter.py"
       - "app/product_generators/design_interpreter/profiled_multicolor_regression.py"
@@ -25,7 +25,7 @@ on:
   pull_request:
     paths:
       - "app/product_generators/design_interpreter/native_profiled_cad_adapter.py"
-      - "app/product_generators/design_interpreter/native_profiled_text_adapter.py"
+      - "app/product_generators/design_interpreter/native_profiled_text_adapter.py"\n      - "app/product_generators/design_interpreter/native_text_pipeline_adapter.py"
       - "app/product_generators/design_interpreter/profiled_native_text_regression.py"
       - "app/product_generators/design_interpreter/profiled_multicolor_adapter.py"
       - "app/product_generators/design_interpreter/profiled_multicolor_regression.py"
