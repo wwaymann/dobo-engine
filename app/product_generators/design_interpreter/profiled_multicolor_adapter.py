@@ -44,7 +44,7 @@ from .native_text_pipeline_adapter import _text_features
 from .semantic_contract import DesignSemanticProgram
 
 
-PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.2-raised-deboss-multiline-compound"
+PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.3-adaptive-relief-multiline-compound"
 _BOOLEAN_TOLERANCE_MM = 0.005
 _DEBOSS_VISIBLE_RECESS_MM = 0.16
 
@@ -278,8 +278,8 @@ def export_profiled_compound_multicolor(
         program, surface_program
     ):
         raise RuntimeError(
-            "Profiled compound multicolor requires raised native text plus "
-            "three validated color zones."
+            "Profiled compound multicolor requires raised or recessed native "
+            "text plus three validated color zones."
         )
     text_layer, accent_layer = layers
 
@@ -288,8 +288,17 @@ def export_profiled_compound_multicolor(
         raise RuntimeError("Profiled multicolor route is missing profiled CAD data.")
 
     base = _profiled_body(route)
+    native_text = motor.get("_native_profiled_text", {})
+    multiline_slot_fraction = (
+        float(native_text.get("multiline_slot_fraction", 0.09))
+        if isinstance(native_text, dict)
+        else 0.09
+    )
     final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
-        base, route, program
+        base,
+        route,
+        program,
+        multiline_slot_fraction=multiline_slot_fraction,
     )
     relief_mode = _text_relief_mode(program)
     removed_recess_volume = 0.0
@@ -398,6 +407,7 @@ def export_profiled_compound_multicolor(
         "colors": list(colors),
         "text_lines": line_count,
         "text_glyphs": glyph_count,
+        "multiline_slot_fraction": multiline_slot_fraction,
         "cad_text_body_volume_mm3": final_volume,
         "volume_final_mm3": assembly_volume,
         "volume_regions_mm3": region_volume,
