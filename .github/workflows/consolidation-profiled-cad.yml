@@ -18,7 +18,9 @@ on:
       - "app/product_generators/design_interpreter/structural_pipeline.py"
       - "app/product_generators/design_interpreter/body_family_expansion.py"
       - "tools/dobo_capability_lab.py"
-      - "tools/dobo_capability_lab_live.py"\n      - "tools/dobo_design_lab_regression.py"\n      - "tools/dobo_design_lab.py"
+      - "tools/dobo_capability_lab_live.py"
+      - "tools/dobo_design_lab.py"
+      - "tools/dobo_design_lab_regression.py"
       - ".github/workflows/consolidation-profiled-cad.yml"
   pull_request:
     paths:
@@ -35,6 +37,8 @@ on:
       - "app/product_generators/design_interpreter/body_family_expansion.py"
       - "tools/dobo_capability_lab.py"
       - "tools/dobo_capability_lab_live.py"
+      - "tools/dobo_design_lab.py"
+      - "tools/dobo_design_lab_regression.py"
       - ".github/workflows/consolidation-profiled-cad.yml"
 
 jobs:
