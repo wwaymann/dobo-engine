@@ -39,6 +39,10 @@ from .native_tapered_text_adapter import (
     decorate_tapered_mesh_result_with_native_text,
     uses_native_tapered_text,
 )
+from .profiled_multicolor_adapter import (
+    export_profiled_compound_multicolor,
+    uses_profiled_compound_multicolor,
+)
 from .prompt_interpreter import PromptSemanticInterpreter, SemanticModelClient
 from .proposal_repair import SemanticProposalRepairer, SemanticRepairResult
 from .semantic_contract import DesignSemanticProgram
@@ -54,7 +58,7 @@ install_native_radial_cad_adapter()
 install_native_foundational_cad_adapter()
 install_native_profiled_cad_adapter()
 
-STRUCTURAL_PIPELINE_VERSION = "8.10-profiled-native-text"
+STRUCTURAL_PIPELINE_VERSION = "8.11-profiled-compound-multicolor"
 STRUCTURAL_FUSION_VERSION = "7C.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
@@ -347,11 +351,30 @@ class DoboStructuralPipeline:
             json.dumps(selected_motor, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        three_mf = ThreeMFMeshExporter.export(
-            mesh_result.mesh,
-            output_directory / f"{motor_id}.3mf",
-            name=motor_id,
-            surface_program=surface_program,
+        profiled_compound_multicolor = uses_profiled_compound_multicolor(
+            repair.program,
+            surface_program,
+        )
+        if profiled_compound_multicolor:
+            three_mf = export_profiled_compound_multicolor(
+                motor=selected_motor,
+                program=repair.program,
+                surface_program=surface_program,
+                path=output_directory / f"{motor_id}.3mf",
+            )
+        else:
+            three_mf = ThreeMFMeshExporter.export(
+                mesh_result.mesh,
+                output_directory / f"{motor_id}.3mf",
+                name=motor_id,
+                surface_program=surface_program,
+            )
+
+        # Multicolor CAD partitioning records its physical-region contract on
+        # the selected motor, so persist motor metadata after 3MF export too.
+        motor_path.write_text(
+            json.dumps(selected_motor, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
         )
         trace = StructuralPipelineTrace(
             pipeline_version=STRUCTURAL_PIPELINE_VERSION,
@@ -409,6 +432,7 @@ class DoboStructuralPipeline:
                         "painted_triangles": three_mf.painted_triangle_count,
                         "native_cad_text": native_cad_text,
                         "native_profiled_text": native_profiled_text,
+                        "profiled_compound_multicolor": profiled_compound_multicolor,
                         "native_foundational_text": native_foundational_text,
                         "native_tapered_text": native_tapered_text,
                         "native_radial_text": native_radial_text,
