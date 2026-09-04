@@ -14,7 +14,7 @@ same analytic CAD contract used by the body/text pipeline:
 - Upper/lower accent band -> filament 3
 
 Raised and recessed text may be single-line or multiline. The three material
-regions remain non-overlapping. Recessed text keeps a 0.30 mm visible lip below the vessel surface while the
+regions remain non-overlapping. Recessed text keeps a 0.55 mm visible lip below the vessel surface while the
 colored material occupies the remaining engraving depth as a real extruded
 insert. This keeps the deboss obvious without reducing the colored text to a
 thin floor skin.
@@ -48,7 +48,7 @@ from .semantic_contract import DesignSemanticProgram
 
 PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.5-deep-deboss-full-inlay"
 _BOOLEAN_TOLERANCE_MM = 0.005
-_DEBOSS_VISIBLE_RECESS_MM = 0.30
+_DEBOSS_VISIBLE_RECESS_MM = 0.55
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,7 +219,7 @@ def _deboss_inlay_region(
 ) -> tuple[cq.Shape, float, float]:
     """Build a real colored insert through most of the deboss depth.
 
-    The outer 0.30 mm remains empty so the lettering still reads as recessed;
+    The outer 0.55 mm remains empty so the lettering still reads as recessed;
     everything deeper becomes the printable filament-2 text volume.
     """
     removed = base.cut(final, tol=_BOOLEAN_TOLERANCE_MM).clean()
