@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .native_profiled_cad_adapter import PROFILE_CATALOG, PROFILE_DEFAULT_DIMENSIONS, PROFILE_LABELS
+from .native_profiled_cad_adapter import (
+    PROFILE_CATALOG,
+    PROFILE_DEFAULT_DIMENSIONS,
+    PROFILE_LABELS,
+    _PROFILE_VERTEX_BUDGET,
+)
 from .phase_5_design_matrix import _program
 from .structural_pipeline import DoboStructuralPipeline
 
@@ -65,7 +70,7 @@ def run() -> dict:
             "saucer_winding": bool(saucer.get("winding_consistent")),
             "saucer_one_component": int(saucer.get("component_count", 0)) == 1,
             "saucer_clearance": float(saucer.get("drain_clearance_mm", 0.0)) >= 1.0,
-            "native_mesh": 0 < int(result.mesh_result.vertex_count) < 150_000,
+            "native_mesh": 0 < int(result.mesh_result.vertex_count) < _PROFILE_VERTEX_BUDGET,
         }
         record = {
             "variant": variant,
@@ -90,11 +95,12 @@ def run() -> dict:
         for record in records
     })
     summary = {
-        "schema": "dobo.profiled_cad_regression.2",
+        "schema": "dobo.profiled_cad_regression.3",
         "case_count": len(records),
         "pass": sum(record["status"] == "PASS" for record in records),
         "fail": sum(record["status"] != "PASS" for record in records),
         "distinct_volumes": distinct_volumes,
+        "vertex_budget": _PROFILE_VERTEX_BUDGET,
         "profiles": records,
     }
     minimum_distinct = max(8, int(0.75 * len(PROFILE_CATALOG)))
