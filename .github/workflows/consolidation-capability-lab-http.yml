@@ -13,6 +13,8 @@ on:
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
       - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_text_adapter.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - '.github/workflows/consolidation-capability-lab-http.yml'
   pull_request:
@@ -27,6 +29,8 @@ on:
       - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
       - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
       - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_text_adapter.py'
       - 'app/product_generators/design_interpreter/structural_pipeline.py'
       - '.github/workflows/consolidation-capability-lab-http.yml'
   workflow_dispatch:
@@ -179,7 +183,7 @@ jobs:
                   audit['morphology'] == case['morphology'],
                   audit['capability_route'] == case['route'],
                   audit['trace_route'] == case['route'],
-                  audit['live_lab_version'] == 'LABLIVE.7-foundational-primitive-guard',
+                  audit['live_lab_version'] == 'LABLIVE.9-profiled-native-text',
                   bool(audit['watertight']),
                   bool(audit['winding_consistent']),
                   int(audit['component_count'] or 0) == 1,
