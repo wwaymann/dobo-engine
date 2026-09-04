@@ -158,6 +158,51 @@ def run() -> dict:
             },
         },
         {
+            "name": "curved_urn_dobo_xl",
+            "spec": {
+                "shape": "urn",
+                "text_lines": ["DOBO"],
+                "line_count": 1,
+                "position": "center",
+                "size": "xl",
+                "relief": "raised",
+                "font": "tech",
+                "body_color": "#E5E0D6",
+                "text_color": "#232323",
+                "accent_color": "#B89D72",
+            },
+        },
+        {
+            "name": "curved_hourglass_dobo_large",
+            "spec": {
+                "shape": "hourglass",
+                "text_lines": ["DOBO"],
+                "line_count": 1,
+                "position": "center",
+                "size": "large",
+                "relief": "raised",
+                "font": "strong",
+                "body_color": "#E5E0D6",
+                "text_color": "#232323",
+                "accent_color": "#B89D72",
+            },
+        },
+        {
+            "name": "curved_trumpet_planta_large",
+            "spec": {
+                "shape": "trumpet",
+                "text_lines": ["PLANTA"],
+                "line_count": 1,
+                "position": "center",
+                "size": "large",
+                "relief": "raised",
+                "font": "display",
+                "body_color": "#E5E0D6",
+                "text_color": "#232323",
+                "accent_color": "#B89D72",
+            },
+        },
+        {
             "name": "size_small",
             "spec": {
                 "shape": "soft_taper",
@@ -265,7 +310,7 @@ def run() -> dict:
 
     interface_status = "PASS" if all(interface_assertions.values()) else "FAIL"
     summary = {
-        "schema": "dobo.design_lab_regression.3",
+        "schema": "dobo.design_lab_regression.4",
         "version": DESIGN_LAB_VERSION,
         "catalog_count": len(DESIGN_CATALOG),
         "shape_families": family_counts,
