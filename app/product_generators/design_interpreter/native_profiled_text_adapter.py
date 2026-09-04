@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.4-safe-multiline-profile-layout"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.5-compact-multiline-profile-layout"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -321,11 +321,11 @@ def _apply_text_block(
         minimum, float(first_feature.size.height_ratio) * height
     )
     # Multiline blocks cross several different meridian slopes. Limiting each
-    # line to 9% of vessel height keeps glyph prisms local to their receiving
+    # line to 8% of vessel height keeps glyph prisms local to their receiving
     # surface instead of spanning profile transitions. Single-line sizing is
     # unchanged.
     slot_height = (
-        min(requested_slot_height, 0.09 * height)
+        min(requested_slot_height, 0.08 * height)
         if multiline else requested_slot_height
     )
     gap = 0.18 * slot_height if multiline else 0.0
