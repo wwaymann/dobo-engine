@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.13-placement-aware-text-zones"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.14-real-fonts-wrap-size-metrics"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -168,19 +168,22 @@ def _glyph_width(
     *,
     font: str = _FONT,
     kind: str = _FONT_KIND,
+    font_path: str | None = None,
 ) -> float:
     if glyph.isspace():
         return 0.35 * float(size)
     try:
+        font_kwargs = {"font": font, "kind": kind}
+        if font_path:
+            font_kwargs["fontPath"] = font_path
         values = cq.Workplane("XY").text(
             glyph,
             float(size),
             0.20,
             combine=False,
-            font=font,
-            kind=kind,
             halign="center",
             valign="center",
+            **font_kwargs,
         ).vals()
     except Exception:
         return 0.62 * float(size)
@@ -196,9 +199,16 @@ def _glyph_centres(
     *,
     font: str = _FONT,
     kind: str = _FONT_KIND,
+    font_path: str | None = None,
 ) -> tuple[tuple[float, ...], tuple[float, ...]]:
     widths = tuple(
-        _glyph_width(glyph, size, font=font, kind=kind)
+        _glyph_width(
+            glyph,
+            size,
+            font=font,
+            kind=kind,
+            font_path=font_path,
+        )
         for glyph in text_value
     )
     spacing = 0.10 * float(size)
@@ -232,7 +242,7 @@ def _apply_line(
     mode: str,
     z: float,
     u_offset: float,
-) -> tuple[cq.Shape, int]:
+) -> tuple[cq.Shape, int, float]:
     local_radius = _radius_mm(route, z)
     text_style = route.get("text_style", {})
     font = (
@@ -244,6 +254,11 @@ def _apply_line(
         str(text_style.get("kind", _FONT_KIND))
         if isinstance(text_style, dict)
         else _FONT_KIND
+    )
+    font_path = (
+        str(text_style.get("font_path"))
+        if isinstance(text_style, dict) and text_style.get("font_path")
+        else None
     )
     layout = (
         str(text_style.get("layout", "front"))
@@ -263,16 +278,27 @@ def _apply_line(
                 probe_size,
                 font=font,
                 kind=kind,
+                font_path=font_path,
             )
             estimated = sum(widths_probe) + max(0, len(widths_probe) - 1) * 0.10 * probe_size
-            if estimated >= 0.78 * circumference:
+            target_fraction = (
+                float(text_style.get("wrap_target_fraction", 0.96))
+                if isinstance(text_style, dict)
+                else 0.96
+            )
+            if estimated >= target_fraction * circumference:
                 break
             rendered_text = rendered_text + "   " + str(text_value)
 
     if layout == "wrap":
         glyph_count = max(1, len(rendered_text.strip()))
-        usable_arc = 2.0 * math.pi * local_radius * 0.88
-        per_size = max(1.0, glyph_count * 0.72) * 1.10
+        target_fraction = (
+            float(text_style.get("wrap_target_fraction", 0.96))
+            if isinstance(text_style, dict)
+            else 0.96
+        )
+        usable_arc = 2.0 * math.pi * local_radius * target_fraction
+        per_size = max(1.0, glyph_count * 0.72) * 1.06
         actual_size = max(
             float(minimum_feature),
             min(float(size), usable_arc / per_size),
@@ -289,6 +315,7 @@ def _apply_line(
         actual_size,
         font=font,
         kind=kind,
+        font_path=font_path,
     )
     band, inward, outward = _surface_band(
         route, mode=mode, requested_depth=requested_depth
@@ -327,10 +354,13 @@ def _apply_line(
                     actual_size,
                     total_span,
                     combine=False,
-                    font=font,
-                    kind=kind,
                     halign="center",
                     valign="center",
+                    **({
+                        "font": font,
+                        "kind": kind,
+                        **({"fontPath": font_path} if font_path else {}),
+                    }),
                 ).vals()
                 if isinstance(value, cq.Shape)
             )
@@ -369,7 +399,7 @@ def _apply_line(
                 f"Profiled {mode} glyph {glyph_index} {glyph!r} changed no volume."
             )
         applied += 1
-    return current, applied
+    return current, applied, float(actual_size)
 
 
 def _apply_text_block(
@@ -379,11 +409,11 @@ def _apply_text_block(
     *,
     multiline_slot_fraction: float = 0.09,
     use_text_zone: bool = False,
-) -> tuple[cq.Shape, float, float, int, int]:
+) -> tuple[cq.Shape, float, float, int, int, tuple[float, ...]]:
     entries = tuple(_line_contract(program))
     if not entries:
         volume = float(shape.Volume())
-        return shape, volume, volume, 0, 0
+        return shape, volume, volume, 0, 0, ()
 
     height = float(route["height_mm"])
     minimum = float(program.manufacturing.minimum_feature_mm)
@@ -429,6 +459,7 @@ def _apply_text_block(
     base_volume = float(shape.Volume())
     current = shape
     applied_glyphs = 0
+    effective_sizes: list[float] = []
     for index, (feature, literal) in enumerate(entries):
         size = slot_height if multiline else max(
             minimum, float(feature.size.height_ratio) * height
@@ -445,7 +476,7 @@ def _apply_text_block(
         )
         u_offset = 0.0 if multiline and str(first_feature.anchor.region) == "front" else 0.25 * horizontal * (2.0 * math.pi * local_radius)
         mode = "deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss"
-        current, glyphs = _apply_line(
+        current, glyphs, effective_size = _apply_line(
             current,
             route=route,
             text_value=str(literal),
@@ -457,11 +488,19 @@ def _apply_text_block(
             u_offset=u_offset,
         )
         applied_glyphs += glyphs
+        effective_sizes.append(effective_size)
 
     final = current.clean()
     if not final.isValid() or len(tuple(final.Solids())) != 1:
         raise RuntimeError("Profiled native text did not preserve one valid vessel solid.")
-    return final, base_volume, float(final.Volume()), len(entries), applied_glyphs
+    return (
+        final,
+        base_volume,
+        float(final.Volume()),
+        len(entries),
+        applied_glyphs,
+        tuple(effective_sizes),
+    )
 
 
 def decorate_profiled_mesh_result_with_native_text(
@@ -481,7 +520,7 @@ def decorate_profiled_mesh_result_with_native_text(
     base = _profiled_body(route)
     placement_mode = "authored_or_default"
     try:
-        final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
+        final, base_volume, final_volume, line_count, glyph_count, effective_sizes = _apply_text_block(
             base, route, program
         )
     except RuntimeError as primary_error:
@@ -492,7 +531,7 @@ def decorate_profiled_mesh_result_with_native_text(
         )
         if not all_front or not isinstance(text_zones, dict) or not text_zones:
             raise
-        final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
+        final, base_volume, final_volume, line_count, glyph_count, effective_sizes = _apply_text_block(
             base,
             route,
             program,
@@ -558,11 +597,12 @@ def decorate_profiled_mesh_result_with_native_text(
         # normal route has demonstrably failed topology. This avoids shrinking
         # profiles that are already stable.
         multiline_slot_fraction = 0.08
-        final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
+        final, base_volume, final_volume, line_count, glyph_count, effective_sizes = _apply_text_block(
             base,
             route,
             program,
             multiline_slot_fraction=multiline_slot_fraction,
+            use_text_zone=(placement_mode == "detected_text_zone_fallback"),
         )
         cq.exporters.export(
             final,
@@ -641,6 +681,12 @@ def decorate_profiled_mesh_result_with_native_text(
             if isinstance(route.get("text_style"), dict)
             else _FONT_KIND
         ),
+        "font_path": (
+            route.get("text_style", {}).get("font_path")
+            if isinstance(route.get("text_style"), dict)
+            else None
+        ),
+        "effective_line_heights_mm": [round(float(value), 4) for value in effective_sizes],
         "text_layout": (
             route.get("text_style", {}).get("layout")
             if isinstance(route.get("text_style"), dict)
