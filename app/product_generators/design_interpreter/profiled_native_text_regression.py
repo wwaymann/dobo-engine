@@ -21,8 +21,7 @@ def _with_text(variant: str, *, effect: str, multiline: bool = False):
     relief = "sobrerrelieve" if effect == "raised" else "bajorrelieve"
     prompt = (
         f"Crea una maceta de perfil {label} con texto en {relief} sobre la "
-        "cara frontal, centrado y distribuido exactamente en tres líneas: "
-        "PLANTA / UNA / IDEA."
+        "cara frontal, centrado, con el texto exacto \"PLANTA\\nUNA\\nIDEA\"."
         if multiline else
         f"Crea una maceta de perfil {label} con el texto WALTER en {relief} "
         "sobre la cara frontal."
