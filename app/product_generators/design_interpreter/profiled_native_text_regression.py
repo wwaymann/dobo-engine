@@ -70,59 +70,70 @@ def run() -> dict:
     records: list[dict] = []
     for variant, effect, multiline in cases:
         name = f"{variant}_{effect}_{'multiline' if multiline else 'single'}"
-        result = pipeline.generate_from_semantic(
-            _with_text(variant, effect=effect, multiline=multiline),
-            output_root=OUTPUT / name,
-            generation_budget_seconds=180.0,
-        )
-        motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
-        text = motor.get("_native_profiled_text", {})
-        checks = dict(result.mesh_result.semantic_checks or {})
-        delta = float(text.get("volume_delta_mm3", 0.0))
-        expected_lines = 3 if multiline else 1
-        expected_glyphs = 13 if multiline else 6
-        assertions = {
-            "route": motor.get("_capability_route") == "analytic_cad_profiled_text",
-            "base_route": motor.get("_base_capability_route") == "analytic_cad_profiled_revolution",
-            "variant": text.get("variant") == variant,
-            "line_count": int(text.get("line_count", 0)) == expected_lines,
-            "glyph_count": int(text.get("applied_glyph_count", 0)) == expected_glyphs,
-            "mapping": text.get("method") == "local_radius_slope_surface_band",
-            "watertight": bool(result.mesh_result.watertight),
-            "winding_consistent": bool(result.mesh_result.winding_consistent),
-            "one_component": int(result.mesh_result.component_count) == 1,
-            "cavity": bool(checks.get("cavity_is_empty")),
-            "opening": bool(checks.get("opening_is_clear")),
-            "drain": bool(checks.get("drain_is_clear")),
-            "profile": bool(checks.get("profile_is_revolved")),
-            "text_volume_changed": bool(checks.get("native_profiled_text_volume_changed")),
-            "text_one_component": bool(checks.get("native_profiled_text_one_component")),
-            "glyph_integrity": bool(checks.get("native_profiled_text_glyph_integrity")),
-            "relief_direction": delta > 0.0 if effect == "raised" else delta < 0.0,
-            "native_mesh": 0 < int(result.mesh_result.vertex_count) < 150_000,
-        }
-        if not all(assertions.values()):
+        try:
+            result = pipeline.generate_from_semantic(
+                _with_text(variant, effect=effect, multiline=multiline),
+                output_root=OUTPUT / name,
+                generation_budget_seconds=180.0,
+            )
+            motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
+            text = motor.get("_native_profiled_text", {})
+            checks = dict(result.mesh_result.semantic_checks or {})
+            delta = float(text.get("volume_delta_mm3", 0.0))
+            expected_lines = 3 if multiline else 1
+            expected_glyphs = 13 if multiline else 6
+            assertions = {
+                "route": motor.get("_capability_route") == "analytic_cad_profiled_text",
+                "base_route": motor.get("_base_capability_route") == "analytic_cad_profiled_revolution",
+                "variant": text.get("variant") == variant,
+                "line_count": int(text.get("line_count", 0)) == expected_lines,
+                "glyph_count": int(text.get("applied_glyph_count", 0)) == expected_glyphs,
+                "mapping": text.get("method") == "local_radius_slope_surface_band",
+                "watertight": bool(result.mesh_result.watertight),
+                "winding_consistent": bool(result.mesh_result.winding_consistent),
+                "one_component": int(result.mesh_result.component_count) == 1,
+                "cavity": bool(checks.get("cavity_is_empty")),
+                "opening": bool(checks.get("opening_is_clear")),
+                "drain": bool(checks.get("drain_is_clear")),
+                "profile": bool(checks.get("profile_is_revolved")),
+                "text_volume_changed": bool(checks.get("native_profiled_text_volume_changed")),
+                "text_one_component": bool(checks.get("native_profiled_text_one_component")),
+                "glyph_integrity": bool(checks.get("native_profiled_text_glyph_integrity")),
+                "relief_direction": delta > 0.0 if effect == "raised" else delta < 0.0,
+                "native_mesh": 0 < int(result.mesh_result.vertex_count) < 150_000,
+            }
             failed = [key for key, value in assertions.items() if not value]
-            raise RuntimeError(f"{name} profiled native text regression failed: {failed}")
-        records.append({
-            "name": name,
-            "variant": variant,
-            "effect": effect,
-            "multiline": multiline,
-            "status": "PASS",
-            "vertices": result.mesh_result.vertex_count,
-            "faces": result.mesh_result.face_count,
-            "volume_delta_mm3": delta,
-            "generation_seconds": result.mesh_result.generation_seconds,
-            "assertions": assertions,
-            "stl": result.stl_path,
-        })
+            records.append({
+                "name": name,
+                "variant": variant,
+                "effect": effect,
+                "multiline": multiline,
+                "status": "PASS" if not failed else "FAIL",
+                "failed_assertions": failed,
+                "vertices": result.mesh_result.vertex_count,
+                "faces": result.mesh_result.face_count,
+                "components": result.mesh_result.component_count,
+                "volume_delta_mm3": delta,
+                "generation_seconds": result.mesh_result.generation_seconds,
+                "assertions": assertions,
+                "stl": result.stl_path,
+            })
+        except Exception as error:
+            records.append({
+                "name": name,
+                "variant": variant,
+                "effect": effect,
+                "multiline": multiline,
+                "status": "ERROR",
+                "error_type": type(error).__name__,
+                "error": str(error),
+            })
 
     summary = {
         "schema": "dobo.profiled_native_text_regression.1",
         "case_count": len(records),
-        "pass": len(records),
-        "fail": 0,
+        "pass": sum(record["status"] == "PASS" for record in records),
+        "fail": sum(record["status"] != "PASS" for record in records),
         "variants": len({record["variant"] for record in records}),
         "records": records,
     }
@@ -132,6 +143,14 @@ def run() -> dict:
         encoding="utf-8",
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+    if summary["fail"]:
+        failed_names = [
+            record["name"] for record in records if record["status"] != "PASS"
+        ]
+        raise RuntimeError(
+            "Profiled native text matrix failed after full sweep: "
+            + ", ".join(failed_names)
+        )
     return summary
 
 
