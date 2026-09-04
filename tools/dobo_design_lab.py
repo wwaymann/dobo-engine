@@ -34,7 +34,7 @@ from product_generators.design_interpreter.phase_5_design_matrix import _feature
 from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
 
 
-DESIGN_LAB_VERSION = "DESIGNLAB.2-family-multicolor-typography"
+DESIGN_LAB_VERSION = "DESIGNLAB.3-faithful-multicolor-preview"
 HOST = "127.0.0.1"
 PORT = 8770
 OUTPUT_ROOT = ROOT / "outputs" / "design-lab"
@@ -344,6 +344,7 @@ def generate_design(spec: dict[str, Any]) -> dict[str, Any]:
         "preview": {
             "preferred": "three_mf" if multicolor.get("compound_object") else "stl",
             "colors": [body_color, text_color, accent_color],
+            "region_names": list(multicolor.get("region_names", ["Body", "Text", "Accent"])),
         },
     }
 
@@ -410,7 +411,7 @@ h2{font-size:18px;margin:0 0 5px}h3{font-size:11px;text-transform:uppercase;lett
 <button class="generate" id="generate">Generar diseño real</button>
 </section>
 
-<section class="stage"><canvas id="viewer"></canvas><div class="empty" id="empty"><div><b>Tu diseño aparecerá aquí</b>La vista usa el 3MF multicolor cuando existe.</div></div></section>
+<section class="stage"><canvas id="viewer"></canvas><div class="empty" id="empty"><div><b>Tu diseño aparecerá aquí</b>La vista usa las tres regiones reales del 3MF cuando existen.</div></div></section>
 
 <section class="right">
 <div class="panel"><div class="hint">Diseño actual</div><div class="resultName" id="resultName">Sin generar</div><div class="hint" id="resultMeta">—</div><div class="swatches" id="swatches"></div></div>
@@ -475,8 +476,8 @@ function clearModel(){if(!model)return;scene.remove(model);model.traverse?.(n=>{
 function fit(){if(!model)return;const b=new THREE.Box3().setFromObject(model),s=b.getSize(new THREE.Vector3()),c=b.getCenter(new THREE.Vector3()),m=Math.max(s.x,s.y,s.z);controls.target.copy(c);camera.position.set(c.x+1.5*m,c.y-1.8*m,c.z+1.15*m);controls.update()}
 function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera)}loop();
 function loadSTL(url,color){return new Promise((ok,bad)=>new STLLoader().load(url,g=>{clearModel();g.computeVertexNormals();model=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(color),roughness:.55,metalness:.01}));scene.add(model);$('#empty').style.display='none';fit();ok()},undefined,bad))}
-function load3MF(url){return new Promise((ok,bad)=>new ThreeMFLoader().load(url,obj=>{clearModel();model=obj;model.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;if(n.material){const mats=Array.isArray(n.material)?n.material:[n.material];mats.forEach(m=>{m.roughness=.55;m.metalness=.01;m.needsUpdate=true})}}});scene.add(model);$('#empty').style.display='none';fit();ok()},undefined,bad))}
-async function loadPreview(d){if(d.preview.preferred==='three_mf'){try{await load3MF(d.artifacts.three_mf);$('#previewMode').textContent='3MF multicolor';return}catch(e){console.warn('3MF preview fallback',e)}}await loadSTL(d.artifacts.stl,d.selection.body_color);$('#previewMode').textContent='STL monocolor (fallback)'}
+function load3MF(url,colors){return new Promise((ok,bad)=>new ThreeMFLoader().load(url,obj=>{clearModel();model=obj;const meshes=[];model.traverse(n=>{if(n.isMesh)meshes.push(n)});meshes.forEach((n,index)=>{const color=colors[Math.min(index,colors.length-1)]||'#cccccc';if(n.material){if(Array.isArray(n.material))n.material.forEach(m=>m.dispose?.());else n.material.dispose?.()}n.material=new THREE.MeshStandardMaterial({color:new THREE.Color(color),roughness:.55,metalness:.01,side:THREE.DoubleSide});n.castShadow=true;n.receiveShadow=true});scene.add(model);$('#empty').style.display='none';fit();ok(meshes.length)},undefined,bad))}
+async function loadPreview(d){if(d.preview.preferred==='three_mf'){try{const parts=await load3MF(d.artifacts.three_mf,d.preview.colors);$('#previewMode').textContent='3MF multicolor · '+parts+' partes';return}catch(e){console.warn('3MF preview fallback',e)}}await loadSTL(d.artifacts.stl,d.selection.body_color);$('#previewMode').textContent='STL monocolor (fallback)'}
 function swatches(colors){$('#swatches').innerHTML=colors.map(c=>'<span class="swatch" style="background:'+c+'" title="'+c+'"></span>').join('')}
 
 $('#generate').onclick=async()=>{
@@ -503,7 +504,7 @@ HTML = (
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "DOBODesignLab/2.0"
+    server_version = "DOBODesignLab/3.0"
 
     def _json(self, payload: dict[str, Any], status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
