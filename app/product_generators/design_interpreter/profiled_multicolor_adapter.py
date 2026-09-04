@@ -10,12 +10,14 @@ same analytic CAD contract used by the body/text pipeline:
 
 - Body   -> filament 1
 - Raised physical text -> filament 2
-- Recessed physical text -> filament 2 as a thin inlay at the bottom of the recess
+- Recessed physical text -> filament 2 as a substantial inlay volume through most of the recess
 - Upper/lower accent band -> filament 3
 
 Raised and recessed text may be single-line or multiline. The three material
-regions remain non-overlapping. Recessed text deliberately keeps an open
-physical recess above the colored inlay instead of filling the engraving flush.
+regions remain non-overlapping. Recessed text keeps a 0.30 mm visible lip below the vessel surface while the
+colored material occupies the remaining engraving depth as a real extruded
+insert. This keeps the deboss obvious without reducing the colored text to a
+thin floor skin.
 """
 
 from dataclasses import dataclass
@@ -44,9 +46,9 @@ from .native_text_pipeline_adapter import _text_features
 from .semantic_contract import DesignSemanticProgram
 
 
-PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.4-adaptive-text-zone-compound"
+PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.5-deep-deboss-full-inlay"
 _BOOLEAN_TOLERANCE_MM = 0.005
-_DEBOSS_VISIBLE_RECESS_MM = 0.16
+_DEBOSS_VISIBLE_RECESS_MM = 0.30
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +217,11 @@ def _deboss_inlay_region(
     final: cq.Shape,
     route: dict[str, Any],
 ) -> tuple[cq.Shape, float, float]:
-    """Keep deboss physically recessed while coloring only its floor."""
+    """Build a real colored insert through most of the deboss depth.
+
+    The outer 0.30 mm remains empty so the lettering still reads as recessed;
+    everything deeper becomes the printable filament-2 text volume.
+    """
     removed = base.cut(final, tol=_BOOLEAN_TOLERANCE_MM).clean()
     removed_volume = float(removed.Volume())
     if not removed.isValid() or removed_volume <= 1e-6:
@@ -404,6 +410,9 @@ def export_profiled_compound_multicolor(
         "text_relief_mode": relief_mode,
         "visible_recess_depth_mm": (
             _DEBOSS_VISIBLE_RECESS_MM if relief_mode == "deboss" else 0.0
+        ),
+        "deboss_inlay_mode": (
+            "deep_extruded_insert" if relief_mode == "deboss" else None
         ),
         "removed_recess_volume_mm3": removed_recess_volume,
         "open_recess_volume_mm3": open_recess_volume,
