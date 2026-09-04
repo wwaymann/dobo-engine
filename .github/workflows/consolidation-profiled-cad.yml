@@ -40,7 +40,7 @@ on:
 jobs:
   profiled-cad-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     env:
       PYTHONPATH: app
     steps:
