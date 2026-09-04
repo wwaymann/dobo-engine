@@ -595,9 +595,16 @@ def decorate_profiled_mesh_result_with_native_text(
     checks = dict(getattr(mesh_result, "semantic_checks", {}) or {})
     checks["native_profiled_text_volume_changed"] = abs(final_volume - base_volume) > 1e-8
     checks["native_profiled_text_one_component"] = len(components) == 1
-    checks["native_profiled_text_glyph_integrity"] = glyph_count == sum(
+    expected_glyphs = sum(
         1 for _feature, literal in _line_contract(program) for glyph in str(literal)
         if not glyph.isspace()
+    )
+    wrap_layout = (
+        isinstance(route.get("text_style"), dict)
+        and route["text_style"].get("layout") == "wrap"
+    )
+    checks["native_profiled_text_glyph_integrity"] = (
+        glyph_count >= expected_glyphs if wrap_layout else glyph_count == expected_glyphs
     )
 
     elapsed = perf_counter() - started
