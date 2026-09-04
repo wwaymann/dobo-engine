@@ -9,7 +9,12 @@ on:
       - "app/product_generators/design_interpreter/native_profiled_cad_adapter.py"
       - "app/product_generators/design_interpreter/native_profiled_text_adapter.py"
       - "app/product_generators/design_interpreter/profiled_native_text_regression.py"
+      - "app/product_generators/design_interpreter/profiled_multicolor_adapter.py"
+      - "app/product_generators/design_interpreter/profiled_multicolor_regression.py"
       - "app/product_generators/design_interpreter/profiled_cad_regression.py"
+      - "app/product_generators/design_interpreter/intelligent_surfaces.py"
+      - "app/product_generators/surface_designer/three_mf_exporter.py"
+      - "app/product_generators/surface_designer/creality_project_template.3mf"
       - "app/product_generators/design_interpreter/structural_pipeline.py"
       - "app/product_generators/design_interpreter/body_family_expansion.py"
       - "tools/dobo_capability_lab.py"
@@ -20,7 +25,12 @@ on:
       - "app/product_generators/design_interpreter/native_profiled_cad_adapter.py"
       - "app/product_generators/design_interpreter/native_profiled_text_adapter.py"
       - "app/product_generators/design_interpreter/profiled_native_text_regression.py"
+      - "app/product_generators/design_interpreter/profiled_multicolor_adapter.py"
+      - "app/product_generators/design_interpreter/profiled_multicolor_regression.py"
       - "app/product_generators/design_interpreter/profiled_cad_regression.py"
+      - "app/product_generators/design_interpreter/intelligent_surfaces.py"
+      - "app/product_generators/surface_designer/three_mf_exporter.py"
+      - "app/product_generators/surface_designer/creality_project_template.3mf"
       - "app/product_generators/design_interpreter/structural_pipeline.py"
       - "app/product_generators/design_interpreter/body_family_expansion.py"
       - "tools/dobo_capability_lab.py"
@@ -52,6 +62,9 @@ jobs:
 
       - name: Validate text on all profiled pot bodies
         run: python -m product_generators.design_interpreter.profiled_native_text_regression
+
+      - name: Validate Creality compound multicolor on all profiled pot bodies
+        run: python -m product_generators.design_interpreter.profiled_multicolor_regression
 
       - name: Validate profiled bodies through offline Lab
         env:
@@ -97,5 +110,6 @@ jobs:
           path: |
             outputs-ci/profiled-cad
             outputs-ci/profiled-native-text
+            outputs-ci/profiled-multicolor
           if-no-files-found: warn
           retention-days: 30
