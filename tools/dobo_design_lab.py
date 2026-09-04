@@ -131,8 +131,10 @@ def _design_program(spec: dict[str, Any]):
         raise ValueError("La posición de texto no es válida.")
     if size_key not in TEXT_SIZES:
         raise ValueError("El tamaño de texto no es válido.")
-    if relief not in {"raised", "recessed"}:
+    if relief not in {"raised", "recessed", "none"}:
         raise ValueError("El relieve de texto no es válido.")
+    if relief == "none":
+        text_value = ""
     if font_key not in FONT_STYLES:
         raise ValueError("La tipografía no es válida.")
 
@@ -147,7 +149,7 @@ def _design_program(spec: dict[str, Any]):
                 "user_text",
                 "text_user",
                 "text",
-                relief,
+                "raised" if relief == "none" else relief,
                 region="front",
                 horizontal=0.0,
                 vertical=POSITIONS[position_key],
