@@ -22,7 +22,7 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 
 
-PROFILED_CAD_ADAPTER_VERSION = "PCAD.4-design-surface-style-contract"
+PROFILED_CAD_ADAPTER_VERSION = "PCAD.5-multiple-text-zones"
 _PROFILED_ROUTE = "analytic_cad_profiled_revolution"
 _PROFILE_SAMPLES_PER_SPAN = 18
 _STL_TOLERANCE_MM = 0.015
@@ -156,24 +156,83 @@ def _profile_text_style(program) -> dict[str, str]:
     }
 
 
-def _profile_text_zone(profile: tuple[tuple[float,float], ...]) -> dict[str, Any]:
+def _best_profile_text_zone(
+    profile: tuple[tuple[float, float], ...],
+    *,
+    zone_id: str,
+    low: float,
+    high: float,
+    preferred: float,
+) -> dict[str, Any]:
     dense = _smooth_profile(profile)
-    best = (-1.0, 0.52, _radius_at(dense, 0.52), 0.0)
-    for index in range(47):
-        z = 0.28 + index * (0.46 / 46.0)
+    best_score = -1.0
+    best_z = preferred
+    best_radius = _radius_at(dense, preferred)
+    best_slope = 0.0
+    for index in range(49):
+        z = low + index * ((high - low) / 48.0)
         radius = _radius_at(dense, z)
         step = 0.008
-        slope = abs(_radius_at(dense, min(1.0,z+step)) - _radius_at(dense, max(0.0,z-step))) / (2.0*step)
-        score = radius * (1.0 - 0.18*min(1.0,abs(z-0.52)/0.30)) / (1.0 + 0.55*slope)
-        if score > best[0]:
-            best = (score, z, radius, slope)
-    _, z, radius, slope = best
+        slope = abs(
+            _radius_at(dense, min(1.0, z + step))
+            - _radius_at(dense, max(0.0, z - step))
+        ) / (2.0 * step)
+        preferred_bias = 1.0 - 0.16 * min(
+            1.0,
+            abs(z - preferred) / max(0.05, 0.5 * (high - low)),
+        )
+        score = radius * preferred_bias / (1.0 + 0.60 * slope)
+        if score > best_score:
+            best_score = score
+            best_z = z
+            best_radius = radius
+            best_slope = slope
     return {
-        "id":"front_primary","region":"front","center_z_ratio":round(z,4),
-        "local_radius_ratio":round(radius,4),"slope_abs":round(slope,4),
-        "width_fraction":0.55,"height_fraction":0.14,
-        "emboss_allowed":True,"deboss_allowed":True,
+        "id": zone_id,
+        "region": "front",
+        "center_z_ratio": round(best_z, 4),
+        "local_radius_ratio": round(best_radius, 4),
+        "slope_abs": round(best_slope, 4),
+        "width_fraction": 0.55,
+        "height_fraction": 0.14,
+        "emboss_allowed": True,
+        "deboss_allowed": True,
     }
+
+
+def _profile_text_zones(
+    profile: tuple[tuple[float, float], ...],
+) -> dict[str, dict[str, Any]]:
+    return {
+        "lower": _best_profile_text_zone(
+            profile,
+            zone_id="front_lower",
+            low=0.20,
+            high=0.42,
+            preferred=0.31,
+        ),
+        "center": _best_profile_text_zone(
+            profile,
+            zone_id="front_primary",
+            low=0.36,
+            high=0.66,
+            preferred=0.52,
+        ),
+        "upper": _best_profile_text_zone(
+            profile,
+            zone_id="front_upper",
+            low=0.62,
+            high=0.82,
+            preferred=0.72,
+        ),
+    }
+
+
+def _profile_text_zone(
+    profile: tuple[tuple[float, float], ...],
+) -> dict[str, Any]:
+    # Backward-compatible primary zone for existing consumers.
+    return _profile_text_zones(profile)["center"]
 
 
 def _saucer_contract(route: dict[str, Any]) -> dict[str, Any]:
@@ -247,7 +306,8 @@ def _expand_with_profiled_cad(cls, motor: dict[str, Any], program):
         "surface_regions": ["body_main","rim","base","text_zone"],
         "color_regions": ["body_main","rim","base","text"],
     }
-    route["text_zone"] = _profile_text_zone(PROFILE_CATALOG[variant])
+    route["text_zones"] = _profile_text_zones(PROFILE_CATALOG[variant])
+    route["text_zone"] = route["text_zones"]["center"]
     route["saucer"] = _saucer_contract(route)
     motor["_profiled_revolution"] = route
     return result
