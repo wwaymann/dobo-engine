@@ -98,12 +98,15 @@ FONT_STYLES = {
     "editorial": {"tag":"font_editorial","label":"Editorial","family":"serif","preview":"Walter"},
     "classic": {"tag":"font_classic","label":"Clásica","family":"serif","preview":"Walter"},
     "tech": {"tag":"font_tech","label":"Técnica","family":"mono","preview":"WALTER"},
+    "display": {"tag":"font_display","label":"Display","family":"display","preview":"Walter"},
+    "elegant": {"tag":"font_elegant","label":"Elegante","family":"display","preview":"Walter"},
 }
 
 FONT_FAMILIES = (
     {"id":"sans","name":"Sans","caption":"limpia o fuerte"},
     {"id":"serif","name":"Serif","caption":"editorial o clásica"},
     {"id":"mono","name":"Mono","caption":"técnica y geométrica"},
+    {"id":"display","name":"Display","caption":"expresiva y elegante"},
 )
 
 POSITIONS = {"top":0.72,"center":0.52,"bottom":0.31,"wrap":0.52}
@@ -393,7 +396,7 @@ h2{font-size:18px;margin:0 0 5px}h3{font-size:11px;text-transform:uppercase;lett
 .currentShape{margin-top:9px;padding:9px 11px;border-radius:10px;background:#eee9df;font-size:12px;display:flex;justify-content:space-between}
 .seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.seg.three{grid-template-columns:repeat(3,1fr)}.choice{border:1px solid var(--line);background:#faf8f3;border-radius:10px;padding:9px 5px;font-size:11px;cursor:pointer;text-align:center}.choice.active{background:#222;color:white;border-color:#222}
 .lineInputs{display:grid;gap:6px}.lineInputs input{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;background:#faf8f3;font:inherit}
-.fontFamilyGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.fontFamily{border:1px solid var(--line);border-radius:10px;background:#faf8f3;padding:9px;cursor:pointer;text-align:center;font-size:11px}.fontFamily.active{background:#222;color:#fff}.fontVariants{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.font{border:1px solid var(--line);border-radius:10px;background:#faf8f3;padding:10px;cursor:pointer;font-size:18px}.font.active{outline:2px solid #222}.f-clean{font-family:Arial,sans-serif;font-weight:400}.f-strong{font-family:Arial,sans-serif;font-weight:800}.f-editorial{font-family:Georgia,serif;font-weight:700}.f-classic{font-family:Georgia,serif;font-style:italic}.f-tech{font-family:ui-monospace,monospace;font-weight:800}
+.fontFamilyGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.fontFamily{border:1px solid var(--line);border-radius:10px;background:#faf8f3;padding:9px;cursor:pointer;text-align:center;font-size:11px}.fontFamily.active{background:#222;color:#fff}.fontVariants{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.font{border:1px solid var(--line);border-radius:10px;background:#faf8f3;padding:10px;cursor:pointer;font-size:18px}.font.active{outline:2px solid #222}.f-clean{font-family:Arial,sans-serif;font-weight:400}.f-strong{font-family:Arial,sans-serif;font-weight:800}.f-editorial{font-family:Georgia,serif;font-weight:700}.f-classic{font-family:Georgia,serif;font-style:italic}.f-tech{font-family:ui-monospace,monospace;font-weight:800}.f-display{font-family:"Times New Roman",serif;font-weight:800;letter-spacing:.03em}.f-elegant{font-family:"Times New Roman",serif;font-style:italic;font-size:20px}
 .colors{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.colorbox{font-size:10px;color:var(--muted)}input[type=color]{width:100%;height:42px;border:1px solid var(--line);border-radius:9px;background:white;padding:3px}
 .generate{width:100%;border:0;border-radius:12px;background:#222;color:#fff;padding:13px;font-weight:800;margin-top:18px;cursor:pointer}.generate:disabled{opacity:.5}
 #viewer{width:100%;height:100%;display:block}.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:#777;pointer-events:none}.empty b{display:block;font-size:20px;color:#333;margin-bottom:6px}
