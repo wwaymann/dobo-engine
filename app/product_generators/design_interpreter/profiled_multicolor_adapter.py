@@ -46,7 +46,7 @@ from .native_text_pipeline_adapter import _text_features
 from .semantic_contract import DesignSemanticProgram
 
 
-PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.5-deep-deboss-full-inlay"
+PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.6-faithful-preview-parts"
 _BOOLEAN_TOLERANCE_MM = 0.005
 _DEBOSS_VISIBLE_RECESS_MM = 0.55
 
@@ -391,6 +391,27 @@ def export_profiled_compound_multicolor(
     )
     output = ThreeMFExporter().export(regions=regions, path=path)
 
+    target = Path(output.path)
+    preview_root = target.parent / f"{target.stem}_preview"
+    preview_root.mkdir(parents=True, exist_ok=True)
+    preview_parts: list[dict[str, Any]] = []
+    for region in regions:
+        preview_path = preview_root / (
+            f"{int(region.filament_slot):02d}_{region.name.lower()}.stl"
+        )
+        cq.exporters.export(
+            region.shape,
+            str(preview_path),
+            tolerance=0.03,
+            angularTolerance=0.08,
+        )
+        preview_parts.append({
+            "name": region.name,
+            "filament_slot": int(region.filament_slot),
+            "color": str(region.color).upper(),
+            "path": str(preview_path.resolve()),
+        })
+
     tessellations = [
         shape.tessellate(0.03, 0.08)
         for shape in (body_region, text_region, accent_region)
@@ -400,7 +421,6 @@ def export_profiled_compound_multicolor(
         len(triangles) for _vertices, triangles in tessellations[1:]
     )
 
-    target = Path(output.path)
     with ZipFile(target, "r") as archive:
         members = tuple(sorted(archive.namelist()))
 
@@ -419,6 +439,7 @@ def export_profiled_compound_multicolor(
         "region_names": ["Body", "Text", "Accent"],
         "filament_slots": [1, 2, 3],
         "colors": list(colors),
+        "preview_parts": preview_parts,
         "text_lines": line_count,
         "text_glyphs": glyph_count,
         "effective_line_heights_mm": [round(float(value), 4) for value in effective_sizes],
