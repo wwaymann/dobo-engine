@@ -18,7 +18,7 @@ on:
       - "app/product_generators/design_interpreter/structural_pipeline.py"
       - "app/product_generators/design_interpreter/body_family_expansion.py"
       - "tools/dobo_capability_lab.py"
-      - "tools/dobo_capability_lab_live.py"
+      - "tools/dobo_capability_lab_live.py"\n      - "tools/dobo_design_lab_regression.py"\n      - "tools/dobo_design_lab.py"
       - ".github/workflows/consolidation-profiled-cad.yml"
   pull_request:
     paths:
@@ -66,6 +66,11 @@ jobs:
       - name: Validate Creality compound multicolor on all profiled pot bodies
         run: python -m product_generators.design_interpreter.profiled_multicolor_regression
 
+      - name: Validate end-user Design Lab
+        env:
+          PYTHONPATH: app:tools
+        run: python tools/dobo_design_lab_regression.py
+
       - name: Validate profiled bodies through offline Lab
         env:
           PYTHONPATH: app:tools
@@ -107,5 +112,6 @@ jobs:
             outputs-ci/profiled-cad
             outputs-ci/profiled-native-text
             outputs-ci/profiled-multicolor
+            outputs-ci/design-lab
           if-no-files-found: warn
           retention-days: 30
