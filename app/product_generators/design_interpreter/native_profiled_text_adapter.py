@@ -407,7 +407,7 @@ def _apply_text_block(
     route: dict[str, Any],
     program: DesignSemanticProgram,
     *,
-    multiline_slot_fraction: float = 0.09,
+    multiline_slot_fraction: float = 0.22,
     use_text_zone: bool = False,
 ) -> tuple[cq.Shape, float, float, int, int, tuple[float, ...]]:
     entries = tuple(_line_contract(program))
@@ -442,15 +442,23 @@ def _apply_text_block(
     requested_slot_height = max(
         minimum, float(first_feature.size.height_ratio) * height
     )
-    # Multiline blocks cross several different meridian slopes. The normal
-    # contract uses 9% of vessel height. A caller may request the compact 8%
-    # fallback only after the normal CAD tessellation proves topologically
-    # unstable on a high-curvature profile. Single-line sizing is unchanged.
-    slot_fraction = min(0.09, max(0.08, float(multiline_slot_fraction)))
-    slot_height = (
-        min(requested_slot_height, slot_fraction * height)
-        if multiline else requested_slot_height
-    )
+    # Multiline uses the selected typographic size as a real per-line size.
+    # The block is capped only when all lines together would consume more than
+    # roughly two thirds of the vessel height. This preserves visible Small /
+    # Medium / Large / XL differences without allowing a 3-line block to run
+    # through the rim or base.
+    if multiline:
+        max_block_fraction = 0.64
+        denominator = len(entries) + 0.18 * max(0, len(entries) - 1)
+        safe_per_line_fraction = max_block_fraction / max(1.0, denominator)
+        slot_fraction = min(
+            max(0.06, float(multiline_slot_fraction)),
+            safe_per_line_fraction,
+        )
+        slot_height = min(requested_slot_height, slot_fraction * height)
+    else:
+        slot_fraction = requested_slot_height / max(height, 1e-6)
+        slot_height = requested_slot_height
     gap = 0.18 * slot_height if multiline else 0.0
     block_height = len(entries) * slot_height + max(0, len(entries) - 1) * gap
     center = _resolved_vertical(first_feature) * height
@@ -582,7 +590,7 @@ def decorate_profiled_mesh_result_with_native_text(
         components = tuple(mesh.split(only_watertight=False))
         mesh_normalization = "fine_0_015_mm_weld_0_01_mm"
 
-    multiline_slot_fraction = 0.09
+    multiline_slot_fraction = 0.22
     if (
         line_count > 1
         and (
@@ -591,12 +599,15 @@ def decorate_profiled_mesh_result_with_native_text(
             or not mesh.is_winding_consistent
         )
     ):
-        # A small subset of strongly curved profiles can create OCC STL
-        # T-junctions when a 9%-high multiline glyph crosses a meridian
-        # transition. Rebuild the same physical text at 8% only after the
-        # normal route has demonstrably failed topology. This avoids shrinking
-        # profiles that are already stable.
-        multiline_slot_fraction = 0.08
+        # Only after a topology failure, reduce the current multiline line
+        # height by 15%. Do not collapse every design to the historical 8%
+        # size, because the user may have deliberately selected Large or XL.
+        previous_fraction = (
+            float(effective_sizes[0]) / max(float(route["height_mm"]), 1e-6)
+            if effective_sizes
+            else 0.10
+        )
+        multiline_slot_fraction = max(0.08, 0.85 * previous_fraction)
         final, base_volume, final_volume, line_count, glyph_count, effective_sizes = _apply_text_block(
             base,
             route,
@@ -654,6 +665,11 @@ def decorate_profiled_mesh_result_with_native_text(
         "volume_delta_mm3": final_volume - base_volume,
         "mesh_normalization": mesh_normalization,
         "multiline_slot_fraction": multiline_slot_fraction,
+        "requested_height_ratio": (
+            float(_line_contract(program)[0][0].size.height_ratio)
+            if _line_contract(program)
+            else None
+        ),
         "text_zone_id": route.get("text_zone", {}).get("id") if isinstance(route.get("text_zone"), dict) else None,
         "available_text_zones": (
             sorted(route.get("text_zones", {}).keys())
