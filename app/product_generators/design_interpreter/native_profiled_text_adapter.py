@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.9-expanded-profile-text-zone"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.10-active-profile-text-zone"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -319,6 +319,29 @@ def _apply_text_block(
     minimum = float(program.manufacturing.minimum_feature_mm)
     first_feature, _ = entries[0]
     multiline = len(entries) > 1
+
+    text_zone = route.get("text_zone", {})
+    zone_center = (
+        float(text_zone.get("center_z_ratio", 0.52))
+        if isinstance(text_zone, dict)
+        else 0.52
+    )
+
+    def _resolved_vertical(feature) -> float:
+        authored = float(feature.anchor.vertical)
+        # 0.52 is DOBO's canonical/default front-text anchor. When the author
+        # has not deliberately moved it, bind the text to the stable surface
+        # zone detected from the actual profile. Explicit user placement stays
+        # untouched.
+        if (
+            str(feature.anchor.region) == "front"
+            and abs(authored - 0.52) <= 0.035
+            and isinstance(text_zone, dict)
+            and text_zone.get("id") == "front_primary"
+        ):
+            return zone_center
+        return authored
+
     requested_slot_height = max(
         minimum, float(first_feature.size.height_ratio) * height
     )
@@ -333,7 +356,7 @@ def _apply_text_block(
     )
     gap = 0.18 * slot_height if multiline else 0.0
     block_height = len(entries) * slot_height + max(0, len(entries) - 1) * gap
-    center = 0.5 * height if multiline and str(first_feature.anchor.region) == "front" else float(first_feature.anchor.vertical) * height
+    center = _resolved_vertical(first_feature) * height
     top = center + 0.5 * block_height
 
     base_volume = float(shape.Volume())
@@ -345,7 +368,7 @@ def _apply_text_block(
         )
         z = (
             top - 0.5 * slot_height - index * (slot_height + gap)
-            if multiline else float(feature.anchor.vertical) * height
+            if multiline else _resolved_vertical(feature) * height
         )
         safe_edge = max(0.60 * size, 0.13 * height)
         z = min(height - safe_edge, max(safe_edge, z))
@@ -501,6 +524,11 @@ def decorate_profiled_mesh_result_with_native_text(
         "mesh_normalization": mesh_normalization,
         "multiline_slot_fraction": multiline_slot_fraction,
         "text_zone_id": route.get("text_zone", {}).get("id") if isinstance(route.get("text_zone"), dict) else None,
+        "text_zone_center_z_ratio": (
+            route.get("text_zone", {}).get("center_z_ratio")
+            if isinstance(route.get("text_zone"), dict)
+            else None
+        ),
     }
 
     decorated = replace(
