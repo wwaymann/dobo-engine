@@ -57,7 +57,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow
 
-      - name: Validate ten profiled pot bodies
+      - name: Validate complete profiled pot catalog
         run: python -m product_generators.design_interpreter.profiled_cad_regression
 
       - name: Validate text on all profiled pot bodies
