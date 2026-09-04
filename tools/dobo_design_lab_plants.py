@@ -45,7 +45,28 @@ let saucerSupportTop=0;
 const PLANT_SCALE={small:.72,medium:1.0,large:1.34};
 const C={leaf:0x356b3f,leaf2:0x4b8050,leaf3:0x254c32,stem:0x76563a};
 
-function disposeVisual(o){if(!o)return;o.traverse?.(n=>{n.geometry?.dispose?.();if(n.material){(Array.isArray(n.material)?n.material:[n.material]).forEach(m=>m.dispose?.())}});scene.remove(o)}
+function disposeMaterial(m){if(!m)return;['map','bumpMap','roughnessMap','alphaMap','normalMap'].forEach(k=>m[k]?.dispose?.());m.dispose?.()}
+function disposeVisual(o){if(!o)return;o.traverse?.(n=>{n.geometry?.dispose?.();if(n.material){(Array.isArray(n.material)?n.material:[n.material]).forEach(disposeMaterial)}});scene.remove(o)}
+
+function seededRandom(seed){let s=seed>>>0;return()=>{s=(1664525*s+1013904223)>>>0;return s/4294967296}}
+function textureCanvas(kind,size=1024){
+ const canvas=document.createElement('canvas');canvas.width=canvas.height=size;const ctx=canvas.getContext('2d');
+ const bump=document.createElement('canvas');bump.width=bump.height=size;const bctx=bump.getContext('2d');
+ const seed=kind==='soil'?9137:kind==='white_stone'?22471:44893,rand=seededRandom(seed);
+ const bg=kind==='soil'?'#3b2619':kind==='white_stone'?'#c9c6bd':'#2b2928';ctx.fillStyle=bg;ctx.fillRect(0,0,size,size);bctx.fillStyle='#777';bctx.fillRect(0,0,size,size);
+ if(kind==='soil'){
+  for(let i=0;i<9000;i++){const x=rand()*size,y=rand()*size,r=.35+rand()*2.6,v=28+Math.floor(rand()*55);ctx.fillStyle='rgb('+(52+v*.35)+','+(34+v*.20)+','+(20+v*.12)+')';ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();const g=85+Math.floor(rand()*95);bctx.fillStyle='rgb('+g+','+g+','+g+')';bctx.beginPath();bctx.arc(x,y,r,0,Math.PI*2);bctx.fill()}
+  ctx.globalAlpha=.35;ctx.strokeStyle='#b18b5d';ctx.lineWidth=.7;for(let i=0;i<260;i++){const x=rand()*size,y=rand()*size,l=3+rand()*15,a=rand()*Math.PI*2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l);ctx.stroke()}ctx.globalAlpha=1;
+ }else{
+  const pale=kind==='white_stone';ctx.fillStyle=pale?'#595650':'#151414';ctx.fillRect(0,0,size,size);
+  for(let i=0;i<560;i++){const x=rand()*size,y=rand()*size,rx=5+rand()*18,ry=4+rand()*13,rot=rand()*Math.PI;ctx.save();ctx.translate(x,y);ctx.rotate(rot);const grad=ctx.createRadialGradient(-rx*.25,-ry*.35,1,0,0,Math.max(rx,ry));if(pale){grad.addColorStop(0,'#fbfaf6');grad.addColorStop(.55,'#ddd9cf');grad.addColorStop(1,'#a7a399')}else{grad.addColorStop(0,'#5c5652');grad.addColorStop(.55,'#312e2c');grad.addColorStop(1,'#141313')}ctx.fillStyle=grad;ctx.beginPath();ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);ctx.fill();ctx.restore();const gv=pale?180+Math.floor(rand()*70):55+Math.floor(rand()*80);bctx.fillStyle='rgb('+gv+','+gv+','+gv+')';bctx.save();bctx.translate(x,y);bctx.rotate(rot);bctx.beginPath();bctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);bctx.fill();bctx.restore()}
+ }
+ const map=new THREE.CanvasTexture(canvas),bumpMap=new THREE.CanvasTexture(bump);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());bumpMap.anisotropy=map.anisotropy;map.needsUpdate=bumpMap.needsUpdate=true;return{map,bumpMap}
+}
+
+function leafTexture(base='#3f7849'){
+ const size=512,canvas=document.createElement('canvas');canvas.width=canvas.height=size;const ctx=canvas.getContext('2d'),rand=seededRandom(parseInt(base.slice(1),16)||7717);const grad=ctx.createLinearGradient(0,0,size,0);grad.addColorStop(0,'#173d28');grad.addColorStop(.48,base);grad.addColorStop(1,'#245635');ctx.fillStyle=grad;ctx.fillRect(0,0,size,size);ctx.globalAlpha=.30;for(let i=0;i<2400;i++){const v=90+Math.floor(rand()*80);ctx.fillStyle='rgb('+Math.floor(v*.35)+','+v+','+Math.floor(v*.48)+')';ctx.fillRect(rand()*size,rand()*size,1+rand()*2,1+rand()*2)}ctx.globalAlpha=.75;ctx.strokeStyle='#b6d39f';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(size*.5,size*.04);ctx.lineTo(size*.5,size*.96);ctx.stroke();ctx.globalAlpha=.38;ctx.lineWidth=1.4;for(let i=1;i<11;i++){const y=size*(.08+i*.075),dy=(i-5.5)*2;ctx.beginPath();ctx.moveTo(size*.5,y);ctx.lineTo(size*.12,y-58+dy);ctx.stroke();ctx.beginPath();ctx.moveTo(size*.5,y);ctx.lineTo(size*.88,y-58+dy);ctx.stroke()}ctx.globalAlpha=1;const t=new THREE.CanvasTexture(canvas);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());return t
+}
 
 function normalizePotForViewer(supportTop=0){
  if(!model)return;
@@ -78,7 +99,7 @@ function loadSaucerForViewer(d){
 }
 
 function leafShape(w,h,notch=0){const s=new THREE.Shape();s.moveTo(0,-h*.5);s.bezierCurveTo(w*.62,-h*.34,w*.62,h*.22,0,h*.5);if(notch){s.bezierCurveTo(-w*.10,h*.36,-w*.13,h*.18,-w*.18,h*.08);s.bezierCurveTo(-w*.43,h*.26,-w*.62,-h*.08,0,-h*.5)}else{s.bezierCurveTo(-w*.62,h*.22,-w*.62,-h*.34,0,-h*.5)}return s}
-function leaf(w,h,color=C.leaf,notch=0){const m=new THREE.Mesh(new THREE.ShapeGeometry(leafShape(w,h,notch),24),new THREE.MeshStandardMaterial({color,roughness:.84,side:THREE.DoubleSide}));m.userData.visual_only=true;return m}
+function leaf(w,h,color=C.leaf,notch=0){const hex='#'+new THREE.Color(color).getHexString(),map=leafTexture(hex);const m=new THREE.Mesh(new THREE.ShapeGeometry(leafShape(w,h,notch),32),new THREE.MeshStandardMaterial({color:0xffffff,map,roughness:.72,metalness:0,side:THREE.DoubleSide}));m.userData.visual_only=true;return m}
 function stem(h,r){const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r*1.12,h,10),new THREE.MeshStandardMaterial({color:C.stem,roughness:.95}));m.userData.visual_only=true;return m}
 
 // Plants are authored directly Y-up. Leaves are 2.5D cards with small depth offsets.
@@ -87,7 +108,8 @@ function makeMonstera(u){const g=new THREE.Group();const t=stem(u*.82,u*.016);t.
 function makeSansevieria(u){const g=new THREE.Group();[-.23,-.14,-.05,.05,.14,.23].forEach((x,i)=>{const h=u*(.72+(i%3)*.18),s=new THREE.Shape();s.moveTo(-u*.055,0);s.lineTo(u*.055,0);s.lineTo(u*.018,h*.92);s.lineTo(0,h);s.lineTo(-u*.018,h*.92);s.closePath();const l=new THREE.Mesh(new THREE.ShapeGeometry(s),new THREE.MeshStandardMaterial({color:i%2?0x46794a:0x315f38,roughness:.78,side:THREE.DoubleSide}));l.position.set(x*u,0,(i%2?1:-1)*u*.025);l.rotation.z=(i-2.5)*.045;l.rotation.y=(i%2?1:-1)*.08;l.userData.visual_only=true;g.add(l)});return g}
 function makePothos(u){const g=new THREE.Group();[-.25,-.08,.10,.25].forEach((x,i)=>{const h=u*(.56+i*.07),s=stem(h,u*.010);s.position.set(u*x,h*.5,(i%2?1:-1)*u*.02);s.rotation.z=(i-1.5)*.10;g.add(s);for(let j=0;j<3;j++){const l=leaf(u*.25,u*.29,(i+j)%2?C.leaf2:C.leaf);l.position.set(u*(x+(j%2?-.10:.10)),u*(.24+j*.19),(j-1)*u*.025);l.rotation.z=j%2?-.55:.55;l.rotation.y=(j-1)*.12;g.add(l)}});return g}
 
-function substrateColor(){return plantState.substrate==='white_stone'?0xe9e5dd:plantState.substrate==='volcanic'?0x433b38:0x4b3527}
+function substrateColor(){return 0xffffff}
+function substrateSurfaceY(size,rimY){return rimY-Math.max(4.0,Math.min(size.y*.045,6.5))}
 function makeSubstrate(center,size,rimY){
  const g=new THREE.Group();
  // Derive the visible mouth from the selected profile instead of the generic 0.58 body contract.
@@ -98,13 +120,10 @@ function makeSubstrate(center,size,rimY){
  const openingDiameter=Math.min(size.x,size.z)*topRadiusRatio;
  const wallInset=Math.max(2.0,openingDiameter*.025);
  const radius=Math.max(2,openingDiameter*.5-wallInset);
- const y=rimY-Math.max(.9,Math.min(size.y*.012,1.6));
- const mat=new THREE.MeshStandardMaterial({color:substrateColor(),roughness:1,side:THREE.DoubleSide});
- const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,64),mat);disc.rotation.x=-Math.PI/2;disc.position.set(center.x,y,center.z);disc.userData={visual_only:true,exportable:false,role:'substrate'};g.add(disc);
- if(plantState.substrate!=='soil'){
-  const stoneColor=plantState.substrate==='white_stone'?0xf2efe9:0x272321;
-  for(let i=0;i<26;i++){const a=i*2.3999632297,rr=radius*(.16+.72*((i*37)%101)/100),chip=new THREE.Mesh(new THREE.CircleGeometry(radius*(.032+((i*13)%7)*.004),8),new THREE.MeshStandardMaterial({color:stoneColor,roughness:1,side:THREE.DoubleSide}));chip.rotation.x=-Math.PI/2;chip.position.set(center.x+Math.cos(a)*rr,y+.06+(i%3)*.025,center.z+Math.sin(a)*rr);chip.userData.visual_only=true;g.add(chip)}
- }
+ const y=substrateSurfaceY(size,rimY);
+ const tex=textureCanvas(plantState.substrate,1024);
+ const mat=new THREE.MeshStandardMaterial({color:substrateColor(),map:tex.map,bumpMap:tex.bumpMap,bumpScale:plantState.substrate==='soil'?1.15:1.8,roughness:plantState.substrate==='white_stone'?.82:.98,metalness:0,side:THREE.DoubleSide});
+ const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,96),mat);disc.rotation.x=-Math.PI/2;disc.position.set(center.x,y,center.z);disc.receiveShadow=true;disc.userData={visual_only:true,exportable:false,role:'substrate',surface_y:y};g.add(disc);
  g.name='DOBO_VISUAL_ONLY_SUBSTRATE';g.userData={visual_only:true,exportable:false,substrate:plantState.substrate};return g
 }
 
@@ -114,7 +133,7 @@ function updatePlantVisual(){
  const unit=Math.max(size.x,size.z)*.58*PLANT_SCALE[plantState.size];
  disposeVisual(visualPlantGroup);disposeVisual(substrateGroup);visualPlantGroup=null;substrateGroup=null;
  substrateGroup=makeSubstrate(center,size,rimY);scene.add(substrateGroup);
- const makers={ficus:makeFicus,monstera:makeMonstera,sansevieria:makeSansevieria,pothos:makePothos};visualPlantGroup=makers[plantState.plant](unit);visualPlantGroup.position.set(center.x,rimY-Math.max(.25,size.y*.006),center.z);visualPlantGroup.name='DOBO_VISUAL_ONLY_PLANT_2_5D';visualPlantGroup.userData={visual_only:true,exportable:false,render_mode:'2.5D',plant:plantState.plant,size:plantState.size};scene.add(visualPlantGroup);
+ const makers={ficus:makeFicus,monstera:makeMonstera,sansevieria:makeSansevieria,pothos:makePothos};visualPlantGroup=makers[plantState.plant](unit);visualPlantGroup.position.set(center.x,substrateSurfaceY(size,rimY),center.z);visualPlantGroup.name='DOBO_VISUAL_ONLY_PLANT_2_5D';visualPlantGroup.userData={visual_only:true,exportable:false,render_mode:'2.5D',plant:plantState.plant,size:plantState.size};scene.add(visualPlantGroup);
  // Fit from the complete sellable composition: pot + plant + actual CAD saucer.
  const viewBox=new THREE.Box3().setFromObject(model).union(new THREE.Box3().setFromObject(visualPlantGroup));
  if(saucerModel)viewBox.union(new THREE.Box3().setFromObject(saucerModel));
@@ -143,7 +162,7 @@ def _inject(html: str) -> str:
     return html
 
 base.HTML = _inject(base.HTML)
-base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-2.5d-saucer-v4"
+base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-2.5d-textures-v5"
 
 if __name__ == "__main__":
     base.main()
