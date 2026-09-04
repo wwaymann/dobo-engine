@@ -13,6 +13,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 import math
+import re
 import unicodedata
 
 import cadquery as cq
@@ -89,12 +90,31 @@ def _supports_analytic_route(program: DesignSemanticProgram) -> bool:
     return not unsupported
 
 
+def _exact_prompt_text(prompt: str | None) -> str | None:
+    if not prompt:
+        return None
+    raw = str(prompt)
+    match = re.search(
+        r"(?:texto\\s+exacto|text\\s+exact)\\s*(?:=|:)?\\s*[\\\"“”]([^\\\"“”]+)[\\\"“”]",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    value = match.group(1).strip()
+    return value or None
+
+
 def _line_contract(program: DesignSemanticProgram):
     text_features = _text_features(program)
     explicit_lines = _prompt_lines(getattr(program.source, "prompt", None))
     if explicit_lines:
         feature = text_features[0]
         return tuple((feature, line) for line in explicit_lines)
+    exact = _exact_prompt_text(getattr(program.source, "prompt", None))
+    if exact and text_features:
+        feature = text_features[0]
+        return ((feature, exact),)
     return tuple(
         (feature, _text_core._literal_from_concept(feature.concept))
         for feature in text_features
