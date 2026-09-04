@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.1-local-profile-surface-band"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.2-robust-profile-surface-band"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -139,10 +139,18 @@ def _surface_band(
     wall = float(route["wall_mm"])
     if mode == "emboss":
         outward = min(max(float(requested_depth), 1.20), 2.20)
-        inward = min(0.24, 0.08 * outward + 0.08)
+        # Give raised glyphs enough physical overlap with the curved wall that
+        # the final CAD tessellation cannot leave them as numerically detached
+        # shells.  This remains far below the structural wall thickness.
+        inward = min(max(0.40, 0.16 * outward + 0.12), max(0.40, 0.20 * wall))
     elif mode == "deboss":
-        inward = min(max(float(requested_depth), 0.70), max(0.70, 0.48 * wall))
-        outward = 0.18
+        # On strongly varying profiles a deep radial cut can cross a narrow or
+        # highly sloped wall section and split the vessel.  Cap the engraving
+        # depth to a conservative fraction of the actual wall while retaining
+        # a clearly printable recessed mark.
+        safe_depth = max(0.65, min(0.85, 0.28 * wall))
+        inward = min(max(float(requested_depth), 0.65), safe_depth)
+        outward = 0.12
     else:
         raise ValueError(f"Unsupported profiled text mode: {mode!r}")
     expanded = _offset_profile_solid(route, outward)
