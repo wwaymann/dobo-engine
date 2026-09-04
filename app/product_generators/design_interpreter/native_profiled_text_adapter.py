@@ -272,7 +272,7 @@ def _apply_line(
         # not for a stretched word with artificial letter spacing.
         probe_size = max(minimum_feature, float(size))
         circumference = 2.0 * math.pi * max(local_radius, 1e-6)
-        for _repeat in range(3):
+        for _repeat in range(8):
             widths_probe, _centres_probe = _glyph_centres(
                 rendered_text,
                 probe_size,
@@ -687,6 +687,21 @@ def decorate_profiled_mesh_result_with_native_text(
             if isinstance(route.get("text_style"), dict)
             else None
         ),
+        "font_label": (
+            route.get("text_style", {}).get("font_label")
+            if isinstance(route.get("text_style"), dict)
+            else None
+        ),
+        "font_weight": (
+            route.get("text_style", {}).get("font_weight")
+            if isinstance(route.get("text_style"), dict)
+            else None
+        ),
+        "font_slant": (
+            route.get("text_style", {}).get("font_slant")
+            if isinstance(route.get("text_style"), dict)
+            else None
+        ),
         "font": (
             route.get("text_style", {}).get("font")
             if isinstance(route.get("text_style"), dict)
@@ -707,6 +722,11 @@ def decorate_profiled_mesh_result_with_native_text(
             route.get("text_style", {}).get("layout")
             if isinstance(route.get("text_style"), dict)
             else "front"
+        ),
+        "wrap_target_fraction": (
+            float(route.get("text_style", {}).get("wrap_target_fraction", 0.96))
+            if isinstance(route.get("text_style"), dict)
+            else 0.96
         ),
     }
 
