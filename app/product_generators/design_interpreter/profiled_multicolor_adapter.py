@@ -10,9 +10,12 @@ same analytic CAD contract used by the body/text pipeline:
 
 - Body   -> filament 1
 - Raised physical text -> filament 2
+- Recessed physical text -> filament 2 as a thin inlay at the bottom of the recess
 - Upper/lower accent band -> filament 3
 
-The three regions are non-overlapping and must conserve the final CAD volume.
+Raised and recessed text may be single-line or multiline. The three material
+regions remain non-overlapping. Recessed text deliberately keeps an open
+physical recess above the colored inlay instead of filling the engraving flush.
 """
 
 from dataclasses import dataclass
@@ -32,13 +35,18 @@ from product_generators.surface_designer.three_mf_exporter import (
 
 from .intelligent_surfaces import IntelligentSurfaceProgram, ResolvedSurfaceLayer
 from .native_profiled_cad_adapter import _profiled_body
-from .native_profiled_text_adapter import _apply_text_block, uses_native_profiled_text
+from .native_profiled_text_adapter import (
+    _apply_text_block,
+    _offset_profile_solid,
+    uses_native_profiled_text,
+)
 from .native_text_pipeline_adapter import _text_features
 from .semantic_contract import DesignSemanticProgram
 
 
-PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.1-creality-compound-profiled-text"
+PROFILED_MULTICOLOR_ADAPTER_VERSION = "PMC.2-raised-deboss-multiline-compound"
 _BOOLEAN_TOLERANCE_MM = 0.005
+_DEBOSS_VISIBLE_RECESS_MM = 0.16
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,24 +179,63 @@ def _multicolor_layers(
     return text_layers[0], accent_layers[0]
 
 
+def _text_relief_mode(program: DesignSemanticProgram) -> str:
+    features = tuple(_text_features(program))
+    if not features:
+        raise RuntimeError("Profiled multicolor requires native text.")
+    modes = {
+        "deboss" if feature.surface_effect in {"recessed", "cutout"} else "emboss"
+        for feature in features
+    }
+    if len(modes) != 1:
+        raise RuntimeError(
+            "Profiled compound multicolor does not mix emboss and deboss in one text block."
+        )
+    return next(iter(modes))
+
+
 def uses_profiled_compound_multicolor(
     program: DesignSemanticProgram,
     surface_program: IntelligentSurfaceProgram,
 ) -> bool:
     if not uses_native_profiled_text(program):
         return False
-    text_features = tuple(_text_features(program))
-    if not text_features:
+    layers = _multicolor_layers(surface_program)
+    if layers is None:
         return False
-    if any(
-        feature.surface_effect not in {"raised"}
-        for feature in text_features
-    ):
-        # The validated Creality compound route partitions actual positive
-        # material volumes. Recessed text remains on the standards-based painted
-        # 3MF route until a dedicated inlay contract is promoted.
-        return False
-    return _multicolor_layers(surface_program) is not None
+    text_layer, _accent_layer = layers
+    mode = _text_relief_mode(program)
+    expected_effect = "recessed" if mode == "deboss" else "raised"
+    return text_layer.effect == expected_effect
+
+
+def _deboss_inlay_region(
+    *,
+    base: cq.Shape,
+    final: cq.Shape,
+    route: dict[str, Any],
+) -> tuple[cq.Shape, float, float]:
+    """Keep deboss physically recessed while coloring only its floor."""
+    removed = base.cut(final, tol=_BOOLEAN_TOLERANCE_MM).clean()
+    removed_volume = float(removed.Volume())
+    if not removed.isValid() or removed_volume <= 1e-6:
+        raise RuntimeError("Profiled deboss produced no removable text volume.")
+
+    deep_profile = _offset_profile_solid(route, -_DEBOSS_VISIBLE_RECESS_MM)
+    inlay = removed.intersect(deep_profile, tol=_BOOLEAN_TOLERANCE_MM).clean()
+    inlay_volume = float(inlay.Volume())
+    if not inlay.isValid() or inlay_volume <= 1e-6:
+        raise RuntimeError("Profiled deboss multicolor inlay has zero volume.")
+    if inlay_volume >= removed_volume - 1e-6:
+        raise RuntimeError(
+            "Profiled deboss inlay filled the recess; visible deboss depth was lost."
+        )
+
+    overlap = final.intersect(inlay, tol=_BOOLEAN_TOLERANCE_MM).clean()
+    if float(overlap.Volume()) > max(1e-5, inlay_volume * 1e-6):
+        raise RuntimeError("Profiled deboss inlay overlaps the vessel body.")
+
+    return inlay, removed_volume, removed_volume - inlay_volume
 
 
 def _accent_region(
@@ -244,22 +291,38 @@ def export_profiled_compound_multicolor(
     final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
         base, route, program
     )
-    if final_volume <= base_volume:
-        raise RuntimeError(
-            "Profiled compound multicolor requires positive raised text volume."
-        )
+    relief_mode = _text_relief_mode(program)
+    removed_recess_volume = 0.0
+    open_recess_volume = 0.0
 
-    # The physical text material is exactly the volume added by the promoted
-    # emboss operation. It therefore matches the real glyph geometry rather than
-    # an approximate UV bitmap.
-    text_region = final.cut(base, tol=_BOOLEAN_TOLERANCE_MM).clean()
+    if relief_mode == "emboss":
+        if final_volume <= base_volume:
+            raise RuntimeError(
+                "Profiled emboss multicolor requires positive raised text volume."
+            )
+        text_region = final.cut(base, tol=_BOOLEAN_TOLERANCE_MM).clean()
+        material_body = base
+        assembly_volume = final_volume
+    else:
+        if final_volume >= base_volume:
+            raise RuntimeError(
+                "Profiled deboss multicolor requires negative text volume."
+            )
+        text_region, removed_recess_volume, open_recess_volume = (
+            _deboss_inlay_region(base=base, final=final, route=route)
+        )
+        material_body = final
+        assembly_volume = final_volume + float(text_region.Volume())
+
     if not isinstance(text_region, cq.Shape) or not text_region.isValid():
         raise RuntimeError("Profiled multicolor text material region is invalid.")
     if float(text_region.Volume()) <= 1e-6:
         raise RuntimeError("Profiled multicolor text material region has zero volume.")
 
-    accent_region = _accent_region(base, route, accent_layer)
-    body_region = base.cut(accent_region, tol=_BOOLEAN_TOLERANCE_MM).clean()
+    accent_region = _accent_region(material_body, route, accent_layer)
+    body_region = material_body.cut(
+        accent_region, tol=_BOOLEAN_TOLERANCE_MM
+    ).clean()
     if not isinstance(body_region, cq.Shape) or not body_region.isValid():
         raise RuntimeError("Profiled multicolor body material region is invalid.")
     if float(body_region.Volume()) <= 1e-6:
@@ -269,12 +332,12 @@ def export_profiled_compound_multicolor(
         float(shape.Volume())
         for shape in (body_region, text_region, accent_region)
     )
-    volume_error = abs(region_volume - final_volume)
-    volume_tolerance = max(1.0, final_volume * 2.0e-4)
+    volume_error = abs(region_volume - assembly_volume)
+    volume_tolerance = max(1.0, assembly_volume * 2.0e-4)
     if volume_error > volume_tolerance:
         raise RuntimeError(
             "Profiled multicolor partition does not conserve CAD volume: "
-            f"final={final_volume}, regions={region_volume}, "
+            f"assembly={assembly_volume}, regions={region_volume}, "
             f"error={volume_error}, tolerance={volume_tolerance}."
         )
 
@@ -324,12 +387,19 @@ def export_profiled_compound_multicolor(
     motor["_profiled_multicolor"] = {
         "adapter_version": PROFILED_MULTICOLOR_ADAPTER_VERSION,
         "method": "cad_volume_partition_creality_compound",
+        "text_relief_mode": relief_mode,
+        "visible_recess_depth_mm": (
+            _DEBOSS_VISIBLE_RECESS_MM if relief_mode == "deboss" else 0.0
+        ),
+        "removed_recess_volume_mm3": removed_recess_volume,
+        "open_recess_volume_mm3": open_recess_volume,
         "region_names": ["Body", "Text", "Accent"],
         "filament_slots": [1, 2, 3],
         "colors": list(colors),
         "text_lines": line_count,
         "text_glyphs": glyph_count,
-        "volume_final_mm3": final_volume,
+        "cad_text_body_volume_mm3": final_volume,
+        "volume_final_mm3": assembly_volume,
         "volume_regions_mm3": region_volume,
         "volume_error_mm3": volume_error,
         "compound_object": True,
@@ -346,7 +416,7 @@ def export_profiled_compound_multicolor(
         region_names=("Body", "Text", "Accent"),
         filament_slots=(1, 2, 3),
         colors=colors,
-        volume_final_mm3=final_volume,
+        volume_final_mm3=assembly_volume,
         volume_regions_mm3=region_volume,
         volume_error_mm3=volume_error,
     )
