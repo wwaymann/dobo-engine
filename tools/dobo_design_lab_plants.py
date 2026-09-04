@@ -45,6 +45,28 @@ let saucerSupportTop=0;
 const PLANT_SCALE={small:.72,medium:1.0,large:1.34};
 const C={leaf:0x356b3f,leaf2:0x4b8050,leaf3:0x254c32,stem:0x76563a};
 
+const COMMONS_FILE=name=>'https://commons.wikimedia.org/wiki/Special:Redirect/file/'+encodeURIComponent(name);
+const PHOTO_ASSETS={
+ ficus:{
+  file:'Ficus lyrata indoor house second floor Transparent - July 2026.png',
+  source:'Wikimedia Commons',mode:'transparent',height:1.62,layers:3
+ },
+ monstera:{
+  file:'Feuille Plante.png',
+  source:'Wikimedia Commons',mode:'leaf_cluster',height:1.22,layers:7
+ },
+ sansevieria:{
+  file:'Dracaena trifasciata.jpg',
+  source:'Wikimedia Commons',mode:'green_key',height:1.18,layers:3
+ },
+ pothos:{
+  file:"Epipremnum Aureum (Devil's Ivy) cutting.png",
+  source:'Wikimedia Commons',mode:'transparent',height:1.02,layers:3
+ }
+};
+const photoTextureCache=new Map();
+let plantLoadToken=0;
+
 function disposeMaterial(m){if(!m)return;['map','bumpMap','roughnessMap','alphaMap','normalMap'].forEach(k=>m[k]?.dispose?.());m.dispose?.()}
 function disposeVisual(o){if(!o)return;o.traverse?.(n=>{n.geometry?.dispose?.();if(n.material){(Array.isArray(n.material)?n.material:[n.material]).forEach(disposeMaterial)}});scene.remove(o)}
 
@@ -64,20 +86,111 @@ function textureCanvas(kind,size=1024){
  const map=new THREE.CanvasTexture(canvas),bumpMap=new THREE.CanvasTexture(bump);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());bumpMap.anisotropy=map.anisotropy;map.needsUpdate=bumpMap.needsUpdate=true;return{map,bumpMap}
 }
 
-function leafTexture(base='#3f7849'){
- const size=512,canvas=document.createElement('canvas');canvas.width=canvas.height=size;const ctx=canvas.getContext('2d'),rand=seededRandom(parseInt(base.slice(1),16)||7717);const grad=ctx.createLinearGradient(0,0,size,0);grad.addColorStop(0,'#173d28');grad.addColorStop(.48,base);grad.addColorStop(1,'#245635');ctx.fillStyle=grad;ctx.fillRect(0,0,size,size);ctx.globalAlpha=.30;for(let i=0;i<2400;i++){const v=90+Math.floor(rand()*80);ctx.fillStyle='rgb('+Math.floor(v*.35)+','+v+','+Math.floor(v*.48)+')';ctx.fillRect(rand()*size,rand()*size,1+rand()*2,1+rand()*2)}ctx.globalAlpha=.75;ctx.strokeStyle='#b6d39f';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(size*.5,size*.04);ctx.lineTo(size*.5,size*.96);ctx.stroke();ctx.globalAlpha=.38;ctx.lineWidth=1.4;for(let i=1;i<11;i++){const y=size*(.08+i*.075),dy=(i-5.5)*2;ctx.beginPath();ctx.moveTo(size*.5,y);ctx.lineTo(size*.12,y-58+dy);ctx.stroke();ctx.beginPath();ctx.moveTo(size*.5,y);ctx.lineTo(size*.88,y-58+dy);ctx.stroke()}ctx.globalAlpha=1;const t=new THREE.CanvasTexture(canvas);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());return t
+function loadRemoteImage(url){
+ return new Promise((ok,bad)=>{
+  const img=new Image();img.crossOrigin='anonymous';img.decoding='async';
+  img.onload=()=>ok(img);img.onerror=bad;img.src=url;
+ });
 }
+
+function textureFromImage(img){
+ const t=new THREE.Texture(img);t.needsUpdate=true;t.colorSpace=THREE.SRGBColorSpace;
+ t.anisotropy=Math.min(12,renderer.capabilities.getMaxAnisotropy());
+ t.generateMipmaps=true;t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
+ return t;
+}
+
+function greenKeyPhoto(img){
+ const maxSide=1400,scale=Math.min(1,maxSide/Math.max(img.width,img.height));
+ const w=Math.max(2,Math.round(img.width*scale)),h=Math.max(2,Math.round(img.height*scale));
+ const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,w,h);
+ const data=ctx.getImageData(0,0,w,h),p=data.data;
+ for(let i=0;i<p.length;i+=4){
+  const r=p[i]/255,g=p[i+1]/255,b=p[i+2]/255,max=Math.max(r,g,b),min=Math.min(r,g,b),sat=max>0?(max-min)/max:0;
+  const greenness=g-.55*r-.45*b;
+  const leaf=Math.max(0,Math.min(1,(greenness+.02)*4.4))*Math.max(0,Math.min(1,(sat-.06)*4.5));
+  const darkLeaf=(g>r*.88&&g>b*.82&&g>.12)?Math.min(1,(g+.10)*1.15):0;
+  const alpha=Math.max(leaf,darkLeaf);
+  p[i+3]=Math.round(255*Math.pow(alpha,.70));
+ }
+ ctx.putImageData(data,0,0);
+ const t=new THREE.CanvasTexture(canvas);t.needsUpdate=true;t.colorSpace=THREE.SRGBColorSpace;
+ t.anisotropy=Math.min(12,renderer.capabilities.getMaxAnisotropy());
+ return t;
+}
+
+async function photoTexture(asset){
+ const key=asset.file+'|'+asset.mode;
+ if(photoTextureCache.has(key))return photoTextureCache.get(key);
+ const promise=loadRemoteImage(COMMONS_FILE(asset.file)).then(img=>{
+  const texture=asset.mode==='green_key'?greenKeyPhoto(img):textureFromImage(img);
+  texture.userData={source:asset.source,file:asset.file};
+  return texture;
+ });
+ photoTextureCache.set(key,promise);
+ return promise;
+}
+
+function barkTexture(){
+ const size=512,canvas=document.createElement('canvas');canvas.width=canvas.height=size;
+ const ctx=canvas.getContext('2d'),rand=seededRandom(44219);
+ const grad=ctx.createLinearGradient(0,0,size,0);grad.addColorStop(0,'#3e2b1d');grad.addColorStop(.48,'#75513a');grad.addColorStop(1,'#342419');
+ ctx.fillStyle=grad;ctx.fillRect(0,0,size,size);
+ for(let x=0;x<size;x+=5+Math.floor(rand()*9)){
+  ctx.strokeStyle='rgba('+(55+Math.floor(rand()*55))+','+(34+Math.floor(rand()*35))+','+(22+Math.floor(rand()*25))+','+(.22+rand()*.32)+')';
+  ctx.lineWidth=.6+rand()*2;ctx.beginPath();ctx.moveTo(x+rand()*8,0);
+  for(let y=0;y<=size;y+=24)ctx.lineTo(x+Math.sin(y*.035+rand())*5+rand()*4,y);
+  ctx.stroke();
+ }
+ for(let i=0;i<650;i++){const x=rand()*size,y=rand()*size,r=.4+rand()*1.7;ctx.fillStyle='rgba(20,12,7,'+(.08+rand()*.18)+')';ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}
+ const t=new THREE.CanvasTexture(canvas);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(2.5,1.0);t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());return t
+}
+
+function texturedStem(h,r){
+ const map=barkTexture(),m=new THREE.Mesh(new THREE.CylinderGeometry(r,r*1.12,h,14),new THREE.MeshStandardMaterial({map,roughness:.92,metalness:0}));
+ m.userData.visual_only=true;m.castShadow=true;return m
+}
+
+function photoCard(texture,height,opts={}){
+ const img=texture.image||{},aspect=(img.width&&img.height)?img.width/img.height:(opts.aspect||.78);
+ const width=height*aspect*(opts.widthScale||1);
+ const mat=new THREE.MeshStandardMaterial({
+  map:texture,color:0xffffff,transparent:true,alphaTest:opts.alphaTest??.035,
+  roughness:opts.roughness??.72,metalness:0,side:THREE.DoubleSide,depthWrite:true,opacity:opts.opacity??1
+ });
+ const mesh=new THREE.Mesh(new THREE.PlaneGeometry(width,height),mat);
+ mesh.position.set(opts.x||0,opts.y??height*.5,opts.z||0);
+ mesh.rotation.z=opts.roll||0;
+ mesh.castShadow=true;mesh.receiveShadow=false;
+ mesh.userData.visual_only=true;
+ mesh.userData.billboard2_5d={baseYaw:opts.baseYaw||0,follow:opts.follow??1};
+ return mesh
+}
+
+function shortestAngle(a){return Math.atan2(Math.sin(a),Math.cos(a))}
+function updatePlantBillboards(){
+ if(!visualPlantGroup)return;
+ const wp=new THREE.Vector3();
+ visualPlantGroup.traverse(node=>{
+  const bb=node.userData?.billboard2_5d;if(!bb)return;
+  node.getWorldPosition(wp);
+  const target=Math.atan2(camera.position.x-wp.x,camera.position.z-wp.z);
+  const desired=bb.baseYaw+shortestAngle(target-bb.baseYaw)*(bb.follow??1);
+  node.rotation.y+=shortestAngle(desired-node.rotation.y)*.16;
+ });
+}
+function billboardLoop(){requestAnimationFrame(billboardLoop);updatePlantBillboards()}
+billboardLoop();
 
 function normalizePotForViewer(supportTop=0){
  if(!model)return;
- // Manufacturing geometry is untouched: this transform exists only in Three.js.
  model.rotation.set(-Math.PI/2,0,0);
- // When a real CAD saucer exists, lift the pot onto the generated support pads.
  model.position.set(0,Math.max(0,Number(supportTop)||0),0);
  model.updateMatrixWorld(true);
- // Base Lab floor is XZ, therefore Y is the visual vertical axis.
  floor.position.set(0,saucerModel?-.35:-2,0);
  floor.updateMatrixWorld(true);
+ key.position.set(-180,260,220);key.castShadow=true;floor.receiveShadow=true;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 }
 
 function loadSaucerForViewer(d){
@@ -98,18 +211,52 @@ function loadSaucerForViewer(d){
  },undefined,bad));
 }
 
-function leafShape(w,h,notch=0){const s=new THREE.Shape();s.moveTo(0,-h*.5);s.bezierCurveTo(w*.62,-h*.34,w*.62,h*.22,0,h*.5);if(notch){s.bezierCurveTo(-w*.10,h*.36,-w*.13,h*.18,-w*.18,h*.08);s.bezierCurveTo(-w*.43,h*.26,-w*.62,-h*.08,0,-h*.5)}else{s.bezierCurveTo(-w*.62,h*.22,-w*.62,-h*.34,0,-h*.5)}return s}
-function leaf(w,h,color=C.leaf,notch=0){const hex='#'+new THREE.Color(color).getHexString(),map=leafTexture(hex);const m=new THREE.Mesh(new THREE.ShapeGeometry(leafShape(w,h,notch),32),new THREE.MeshStandardMaterial({color:0xffffff,map,roughness:.72,metalness:0,side:THREE.DoubleSide}));m.userData.visual_only=true;return m}
-function stem(h,r){const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r*1.12,h,10),new THREE.MeshStandardMaterial({color:C.stem,roughness:.95}));m.userData.visual_only=true;return m}
+function buildPhotoLayers(group,texture,u,id){
+ const asset=PHOTO_ASSETS[id],H=u*asset.height;
+ if(asset.mode==='leaf_cluster'){
+  const trunk=texturedStem(H*.62,u*.018);trunk.position.y=H*.31;group.add(trunk);
+  const leaves=[
+   [-.30,.43,-.08,.62,-.52, .62], [.29,.48,.07,.68,.48,.72], [-.24,.61,.03,.66,-.31,.82],
+   [.25,.70,-.03,.72,.30,.90], [-.08,.82,.07,.69,-.12,.96], [.12,.93,-.06,.64,.20,.86], [0,1.02,.01,.72,0,1.0]
+  ];
+  leaves.forEach(([x,y,z,scale,roll,follow],i)=>{
+   const card=photoCard(texture,H*.42*scale,{x:x*u,y:y*H,z:z*u,roll,baseYaw:(i-3)*.055,follow,alphaTest:.045,roughness:.68});
+   group.add(card);
+  });
+  return;
+ }
+ if(id==='pothos'){
+  const trunk=texturedStem(H*.46,u*.012);trunk.position.y=H*.23;trunk.rotation.z=-.08;group.add(trunk);
+ }
+ const layers=[
+  {scale:1.00,x:0,z:0,baseYaw:0,follow:1.00,opacity:1},
+  {scale:.92,x:-.055*u,z:.060*u,baseYaw:-.24,follow:.72,opacity:.88},
+  {scale:.88,x:.060*u,z:-.055*u,baseYaw:.25,follow:.58,opacity:.82},
+ ];
+ layers.slice(0,asset.layers||3).forEach((L,i)=>{
+  const card=photoCard(texture,H*L.scale,{x:L.x,y:H*L.scale*.5,z:L.z,baseYaw:L.baseYaw,follow:L.follow,opacity:L.opacity,alphaTest:asset.mode==='green_key'?.08:.035,roughness:.70});
+  card.renderOrder=10+i;group.add(card);
+ });
+}
 
-// Plants are authored directly Y-up. Leaves are 2.5D cards with small depth offsets.
-function makeFicus(u){const g=new THREE.Group();const t=stem(u*1.03,u*.018);t.position.y=u*.515;g.add(t);[[-.22,.62,-.025,-.40,.34,.46],[.21,.72,.025,.36,.37,.50],[-.18,.86,.04,-.50,.33,.44],[.18,.98,-.04,.43,.35,.48],[-.08,1.10,.03,-.16,.37,.50],[.09,1.22,-.02,.24,.35,.47]].forEach(([x,y,z,r,w,h],i)=>{const l=leaf(u*w,u*h,i%3===0?C.leaf3:(i%2?C.leaf2:C.leaf));l.position.set(u*x,u*y,u*z);l.rotation.z=r;l.rotation.y=(i%2?1:-1)*.12;g.add(l)});return g}
-function makeMonstera(u){const g=new THREE.Group();const t=stem(u*.82,u*.016);t.position.y=u*.41;g.add(t);[[-.30,.55,-.04,-.58],[.29,.62,.04,.54],[-.21,.78,.03,-.34],[.23,.87,-.03,.30],[0,1.03,.02,.04]].forEach(([x,y,z,r],i)=>{const l=leaf(u*.50,u*.54,i%2?C.leaf2:C.leaf,1);l.position.set(u*x,u*y,u*z);l.rotation.z=r;l.rotation.y=(i-2)*.08;g.add(l)});return g}
-function makeSansevieria(u){const g=new THREE.Group();[-.23,-.14,-.05,.05,.14,.23].forEach((x,i)=>{const h=u*(.72+(i%3)*.18),s=new THREE.Shape();s.moveTo(-u*.055,0);s.lineTo(u*.055,0);s.lineTo(u*.018,h*.92);s.lineTo(0,h);s.lineTo(-u*.018,h*.92);s.closePath();const l=new THREE.Mesh(new THREE.ShapeGeometry(s),new THREE.MeshStandardMaterial({color:i%2?0x46794a:0x315f38,roughness:.78,side:THREE.DoubleSide}));l.position.set(x*u,0,(i%2?1:-1)*u*.025);l.rotation.z=(i-2.5)*.045;l.rotation.y=(i%2?1:-1)*.08;l.userData.visual_only=true;g.add(l)});return g}
-function makePothos(u){const g=new THREE.Group();[-.25,-.08,.10,.25].forEach((x,i)=>{const h=u*(.56+i*.07),s=stem(h,u*.010);s.position.set(u*x,h*.5,(i%2?1:-1)*u*.02);s.rotation.z=(i-1.5)*.10;g.add(s);for(let j=0;j<3;j++){const l=leaf(u*.25,u*.29,(i+j)%2?C.leaf2:C.leaf);l.position.set(u*(x+(j%2?-.10:.10)),u*(.24+j*.19),(j-1)*u*.025);l.rotation.z=j%2?-.55:.55;l.rotation.y=(j-1)*.12;g.add(l)}});return g}
+function makePhotoPlant(id,u){
+ const g=new THREE.Group(),token=++plantLoadToken;g.userData.photo_loading=true;
+ const asset=PHOTO_ASSETS[id];
+ photoTexture(asset).then(texture=>{
+  if(!g.parent||token!==plantLoadToken)return;
+  buildPhotoLayers(g,texture,u,id);
+  g.userData.photo_loading=false;g.userData.photo_source=asset.source;g.userData.photo_file=asset.file;
+  updatePlantBillboards();
+ }).catch(error=>{
+  console.warn('DOBO 2.5D photo texture fallback',id,error);
+  g.userData.photo_error=String(error);
+  const fallback=texturedStem(u*.9,u*.018);fallback.position.y=u*.45;g.add(fallback);
+ });
+ return g;
+}
 
 function substrateColor(){return 0xffffff}
-function substrateSurfaceY(size,rimY){return rimY-Math.max(4.0,Math.min(size.y*.045,6.5))}
+function substrateSurfaceY(size,rimY){return rimY-Math.max(6.0,Math.min(size.y*.055,9.0))}
 function makeSubstrate(center,size,rimY){
  const g=new THREE.Group();
  // Derive the visible mouth from the selected profile instead of the generic 0.58 body contract.
@@ -121,7 +268,7 @@ function makeSubstrate(center,size,rimY){
  const wallInset=Math.max(2.0,openingDiameter*.025);
  const radius=Math.max(2,openingDiameter*.5-wallInset);
  const y=substrateSurfaceY(size,rimY);
- const tex=textureCanvas(plantState.substrate,1024);
+ const tex=textureCanvas(plantState.substrate,2048);
  const mat=new THREE.MeshStandardMaterial({color:substrateColor(),map:tex.map,bumpMap:tex.bumpMap,bumpScale:plantState.substrate==='soil'?1.15:1.8,roughness:plantState.substrate==='white_stone' ? 0.82 : 0.98,metalness:0,side:THREE.DoubleSide});
  const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,96),mat);disc.rotation.x=-Math.PI/2;disc.position.set(center.x,y,center.z);disc.receiveShadow=true;disc.userData={visual_only:true,exportable:false,role:'substrate',surface_y:y};g.add(disc);
  g.name='DOBO_VISUAL_ONLY_SUBSTRATE';g.userData={visual_only:true,exportable:false,substrate:plantState.substrate};return g
@@ -133,7 +280,7 @@ function updatePlantVisual(){
  const unit=Math.max(size.x,size.z)*.58*PLANT_SCALE[plantState.size];
  disposeVisual(visualPlantGroup);disposeVisual(substrateGroup);visualPlantGroup=null;substrateGroup=null;
  substrateGroup=makeSubstrate(center,size,rimY);scene.add(substrateGroup);
- const makers={ficus:makeFicus,monstera:makeMonstera,sansevieria:makeSansevieria,pothos:makePothos};visualPlantGroup=makers[plantState.plant](unit);visualPlantGroup.position.set(center.x,substrateSurfaceY(size,rimY),center.z);visualPlantGroup.name='DOBO_VISUAL_ONLY_PLANT_2_5D';visualPlantGroup.userData={visual_only:true,exportable:false,render_mode:'2.5D',plant:plantState.plant,size:plantState.size};scene.add(visualPlantGroup);
+ visualPlantGroup=makePhotoPlant(plantState.plant,unit);visualPlantGroup.position.set(center.x,substrateSurfaceY(size,rimY),center.z);visualPlantGroup.name='DOBO_VISUAL_ONLY_PLANT_2_5D_PHOTO';visualPlantGroup.userData={visual_only:true,exportable:false,render_mode:'2.5D_billboard_photo',plant:plantState.plant,size:plantState.size};scene.add(visualPlantGroup);
  // Fit from the complete sellable composition: pot + plant + actual CAD saucer.
  const viewBox=new THREE.Box3().setFromObject(model).union(new THREE.Box3().setFromObject(visualPlantGroup));
  if(saucerModel)viewBox.union(new THREE.Box3().setFromObject(saucerModel));
@@ -162,7 +309,7 @@ def _inject(html: str) -> str:
     return html
 
 base.HTML = _inject(base.HTML)
-base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-2.5d-textures-v5"
+base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-photo-billboard-v6"
 
 if __name__ == "__main__":
     base.main()
