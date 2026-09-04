@@ -10,6 +10,10 @@ Run:
     python tools/dobo_design_lab_plants.py
 """
 
+import mimetypes
+import urllib.parse
+import urllib.request
+
 import dobo_design_lab as base
 
 PLANT_CSS = r'''
@@ -45,7 +49,7 @@ let saucerSupportTop=0;
 const PLANT_SCALE={small:.72,medium:1.0,large:1.34};
 const C={leaf:0x356b3f,leaf2:0x4b8050,leaf3:0x254c32,stem:0x76563a};
 
-const COMMONS_FILE=name=>'https://commons.wikimedia.org/wiki/Special:Redirect/file/'+encodeURIComponent(name)+'?width=1400';
+const COMMONS_FILE=name=>'/plant-asset?name='+encodeURIComponent(name);
 const PHOTO_ASSETS={
  ficus:{
   file:'Ficus lyrata indoor house second floor Transparent - July 2026.png',
@@ -56,12 +60,12 @@ const PHOTO_ASSETS={
   source:'Wikimedia Commons',mode:'leaf_cluster',height:1.22,layers:7
  },
  sansevieria:{
-  file:'Dracaena trifasciata.jpg',
+  file:'Snake plant -Dracaena trifasciata.jpg',
   source:'Wikimedia Commons',mode:'green_key',height:1.18,layers:3
  },
  pothos:{
-  file:"Epipremnum Aureum (Devil's Ivy) cutting.png",
-  source:'Wikimedia Commons',mode:'transparent',height:1.02,layers:3
+  file:'Pothos plant grown as an indoor plant in indirect light, on a frame.png',
+  source:'Wikimedia Commons',mode:'green_key',height:1.08,layers:3
  }
 };
 const photoTextureCache=new Map();
@@ -183,6 +187,16 @@ function updatePlantBillboards(){
 function billboardLoop(){requestAnimationFrame(billboardLoop);updatePlantBillboards()}
 billboardLoop();
 
+function fitPresentationView(){
+ if(!model)return;
+ const viewBox=new THREE.Box3().setFromObject(model);
+ if(visualPlantGroup)viewBox.union(new THREE.Box3().setFromObject(visualPlantGroup));
+ if(saucerModel)viewBox.union(new THREE.Box3().setFromObject(saucerModel));
+ if(viewBox.isEmpty())return;
+ const vs=viewBox.getSize(new THREE.Vector3()),vc=viewBox.getCenter(new THREE.Vector3()),m=Math.max(vs.x,vs.y,vs.z);
+ controls.target.copy(vc);camera.position.set(vc.x+1.45*m,vc.y+.72*m,vc.z+1.65*m);camera.updateProjectionMatrix();controls.update();
+}
+
 function normalizePotForViewer(supportTop=0){
  if(!model)return;
  model.rotation.set(-Math.PI/2,0,0);
@@ -246,11 +260,24 @@ function makePhotoPlant(id,u){
   if(!g.parent||token!==plantLoadToken)return;
   buildPhotoLayers(g,texture,u,id);
   g.userData.photo_loading=false;g.userData.photo_source=asset.source;g.userData.photo_file=asset.file;
-  updatePlantBillboards();
+  updatePlantBillboards();fitPresentationView();
  }).catch(error=>{
   console.warn('DOBO 2.5D photo texture fallback',id,error);
   g.userData.photo_error=String(error);
-  const fallback=texturedStem(u*.9,u*.018);fallback.position.y=u*.45;g.add(fallback);
+  const H=u*(PHOTO_ASSETS[id]?.height||1.15);
+  const trunk=texturedStem(H*.68,u*.017);trunk.position.y=H*.34;g.add(trunk);
+  const canvas=document.createElement('canvas');canvas.width=512;canvas.height=700;const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,512,700);
+  const colors=id==='sansevieria'?['#315c36','#487948','#6b8c49']:['#245d36','#397b46','#4f9258'];
+  const rand=seededRandom(9041+id.length*791);
+  for(let i=0;i<22;i++){
+   const x=256+(rand()-.5)*270,y=160+rand()*360,rx=28+rand()*52,ry=50+rand()*85,rot=(rand()-.5)*1.5;
+   ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.fillStyle=colors[i%colors.length];ctx.beginPath();ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);ctx.fill();
+   ctx.strokeStyle='rgba(220,238,190,.42)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-ry*.78);ctx.lineTo(0,ry*.78);ctx.stroke();ctx.restore();
+  }
+  const tex=new THREE.CanvasTexture(canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.userData.sharedPhoto=false;
+  const canopy=photoCard(tex,H*.92,{y:H*.60,baseYaw:0,follow:1,alphaTest:.02,roughness:.76});g.add(canopy);
+  fitPresentationView();
  });
  return g;
 }
@@ -281,10 +308,7 @@ function updatePlantVisual(){
  disposeVisual(visualPlantGroup);disposeVisual(substrateGroup);visualPlantGroup=null;substrateGroup=null;
  substrateGroup=makeSubstrate(center,size,rimY);scene.add(substrateGroup);
  visualPlantGroup=makePhotoPlant(plantState.plant,unit);visualPlantGroup.position.set(center.x,substrateSurfaceY(size,rimY),center.z);visualPlantGroup.name='DOBO_VISUAL_ONLY_PLANT_2_5D_PHOTO';visualPlantGroup.userData={visual_only:true,exportable:false,render_mode:'2.5D_billboard_photo',plant:plantState.plant,size:plantState.size};scene.add(visualPlantGroup);
- // Fit from the complete sellable composition: pot + plant + actual CAD saucer.
- const viewBox=new THREE.Box3().setFromObject(model).union(new THREE.Box3().setFromObject(visualPlantGroup));
- if(saucerModel)viewBox.union(new THREE.Box3().setFromObject(saucerModel));
- const vs=viewBox.getSize(new THREE.Vector3()),vc=viewBox.getCenter(new THREE.Vector3()),m=Math.max(vs.x,vs.y,vs.z);controls.target.copy(vc);camera.position.set(vc.x+1.45*m,vc.y+.72*m,vc.z+1.65*m);controls.update();
+ fitPresentationView();
 }
 
 function bindPlantUI(){document.querySelectorAll('#plantChoices [data-plant]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#plantChoices [data-plant]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.plant=el.dataset.plant;updatePlantVisual()});document.querySelectorAll('#plantSizes [data-size]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#plantSizes [data-size]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.size=el.dataset.size;updatePlantVisual()});document.querySelectorAll('#substrates [data-substrate]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#substrates [data-substrate]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.substrate=el.dataset.substrate;updatePlantVisual()})}
@@ -309,7 +333,66 @@ def _inject(html: str) -> str:
     return html
 
 base.HTML = _inject(base.HTML)
-base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-photo-billboard-v6"
+base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-photo-proxy-v7"
+
+PLANT_ASSET_FILES = {
+    "Ficus lyrata indoor house second floor Transparent - July 2026.png",
+    "Feuille Plante.png",
+    "Snake plant -Dracaena trifasciata.jpg",
+    "Pothos plant grown as an indoor plant in indirect light, on a frame.png",
+}
+
+
+class PlantAssetHandler(base.Handler):
+    _plant_asset_cache: dict[str, tuple[str, bytes]] = {}
+
+    def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/plant-asset":
+            return super().do_GET()
+
+        name = urllib.parse.parse_qs(parsed.query).get("name", [""])[0]
+        if name not in PLANT_ASSET_FILES:
+            self.send_error(404)
+            return
+
+        cached = self._plant_asset_cache.get(name)
+        if cached is None:
+            remote = (
+                "https://commons.wikimedia.org/wiki/Special:Redirect/file/"
+                + urllib.parse.quote(name, safe="")
+                + "?width=1400"
+            )
+            request = urllib.request.Request(
+                remote,
+                headers={
+                    "User-Agent": "DOBO-Design-Lab/1.0 (local product preview)",
+                    "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=25) as response:
+                    body = response.read()
+                    content_type = response.headers.get_content_type() or "application/octet-stream"
+                if not content_type.startswith("image/") or not body:
+                    raise RuntimeError(f"Plant asset returned {content_type!r}")
+                cached = (content_type, body)
+                self._plant_asset_cache[name] = cached
+            except Exception as error:
+                print("[DOBO DESIGN LAB] plant asset error:", name, error)
+                self.send_error(502, "Plant image could not be loaded")
+                return
+
+        content_type, body = cached
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+base.Handler = PlantAssetHandler
 
 if __name__ == "__main__":
     base.main()
