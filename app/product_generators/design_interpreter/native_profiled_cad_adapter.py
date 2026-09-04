@@ -10,6 +10,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 import math
+
+from matplotlib import font_manager
 import unicodedata
 
 import cadquery as cq
@@ -22,7 +24,7 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 
 
-PROFILED_CAD_ADAPTER_VERSION = "PCAD.5-multiple-text-zones"
+PROFILED_CAD_ADAPTER_VERSION = "PCAD.6-adaptive-mesh-real-fonts"
 _PROFILED_ROUTE = "analytic_cad_profiled_revolution"
 _PROFILE_SAMPLES_PER_SPAN = 18
 _STL_TOLERANCE_MM = 0.015
@@ -129,31 +131,70 @@ def _plain_motor(motor: dict[str, Any]) -> bool:
     )
 
 
-_PROFILE_FONT_STYLES: dict[str, tuple[str, str]] = {
-    "font_clean": ("DejaVu Sans", "regular"),
-    "font_strong": ("DejaVu Sans", "bold"),
-    "font_editorial": ("DejaVu Serif", "bold"),
-    "font_classic": ("DejaVu Serif", "regular"),
-    "font_tech": ("DejaVu Sans Mono", "bold"),
+_PROFILE_FONT_STYLES: dict[str, dict[str, str]] = {
+    "font_clean": {
+        "family": "DejaVu Sans",
+        "weight": "normal",
+        "style": "normal",
+        "label": "Limpia",
+    },
+    "font_strong": {
+        "family": "DejaVu Sans",
+        "weight": "bold",
+        "style": "normal",
+        "label": "Fuerte",
+    },
+    "font_editorial": {
+        "family": "DejaVu Serif",
+        "weight": "bold",
+        "style": "normal",
+        "label": "Editorial",
+    },
+    "font_classic": {
+        "family": "DejaVu Serif",
+        "weight": "normal",
+        "style": "italic",
+        "label": "Clásica",
+    },
+    "font_tech": {
+        "family": "DejaVu Sans Mono",
+        "weight": "bold",
+        "style": "normal",
+        "label": "Técnica",
+    },
 }
+
+
+def _resolved_font_contract(style_id: str) -> dict[str, str]:
+    contract = _PROFILE_FONT_STYLES[style_id]
+    properties = font_manager.FontProperties(
+        family=contract["family"],
+        weight=contract["weight"],
+        style=contract["style"],
+    )
+    font_path = font_manager.findfont(properties, fallback_to_default=True)
+    return {
+        "font_style": style_id,
+        "font": contract["family"],
+        "kind": "regular",
+        "font_path": str(font_path),
+        "font_weight": contract["weight"],
+        "font_slant": contract["style"],
+        "font_label": contract["label"],
+    }
 
 
 def _profile_text_style(program) -> dict[str, str]:
     tags = {_plain(tag) for tag in program.body.style_tags}
-    font_name, font_kind = _PROFILE_FONT_STYLES["font_strong"]
     selected = "font_strong"
-    for tag, contract in _PROFILE_FONT_STYLES.items():
+    for tag in _PROFILE_FONT_STYLES:
         if tag in tags:
             selected = tag
-            font_name, font_kind = contract
             break
-    layout = "wrap" if "text_layout_wrap" in tags else "front"
-    return {
-        "font_style": selected,
-        "font": font_name,
-        "kind": font_kind,
-        "layout": layout,
-    }
+    resolved = _resolved_font_contract(selected)
+    resolved["layout"] = "wrap" if "text_layout_wrap" in tags else "front"
+    resolved["wrap_target_fraction"] = "0.96"
+    return resolved
 
 
 def _best_profile_text_zone(
@@ -500,13 +541,33 @@ def _generate_profiled(motor: dict[str, Any]) -> OrganicVesselResult:
     output_dir = Path(str(output["directory"]))
     output_dir.mkdir(parents=True, exist_ok=True)
     stl_path = output_dir / f"{output['basename']}.stl"
+    tessellation_tolerance = _STL_TOLERANCE_MM
+    tessellation_angular = _STL_ANGULAR_TOLERANCE_RAD
     cq.exporters.export(
         shape,
         str(stl_path),
-        tolerance=_STL_TOLERANCE_MM,
-        angularTolerance=_STL_ANGULAR_TOLERANCE_RAD,
+        tolerance=tessellation_tolerance,
+        angularTolerance=tessellation_angular,
     )
     mesh = _load_mesh(stl_path)
+    # Preserve the denser cubic design curve, but relax only the final STL
+    # tessellation when a visually complex profile would exceed the native
+    # mesh budget. This avoids reverting to coarse silhouettes just to satisfy
+    # a triangle-count guard.
+    if len(mesh.vertices) >= 145_000:
+        for tolerance, angular in ((0.020, 0.045), (0.025, 0.055), (0.030, 0.065)):
+            cq.exporters.export(
+                shape,
+                str(stl_path),
+                tolerance=tolerance,
+                angularTolerance=angular,
+            )
+            candidate = _load_mesh(stl_path)
+            tessellation_tolerance = tolerance
+            tessellation_angular = angular
+            mesh = candidate
+            if len(mesh.vertices) < 145_000:
+                break
 
     saucer_shape = _profiled_saucer(route)
     saucer_path = output_dir / f"{output['basename']}.saucer.stl"
@@ -566,6 +627,12 @@ def _generate_profiled(motor: dict[str, Any]) -> OrganicVesselResult:
         "saucer_winding_consistent": bool(saucer_mesh.is_winding_consistent),
         "saucer_one_component": len(saucer_components) == 1,
         "saucer_drain_clearance": float(saucer_contract["drain_clearance_mm"]) >= 1.0,
+        "mesh_budget_respected": int(len(mesh.vertices)) < 150_000,
+    }
+    motor["_profiled_revolution"]["effective_tessellation"] = {
+        "tolerance_mm": tessellation_tolerance,
+        "angular_tolerance_rad": tessellation_angular,
+        "vertex_count": int(len(mesh.vertices)),
     }
 
     elapsed = perf_counter() - started
