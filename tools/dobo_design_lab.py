@@ -345,6 +345,21 @@ def generate_design(spec: dict[str, Any]) -> dict[str, Any]:
             ),
         },
         "preview": {
+            "saucer": (
+                {
+                    "url": _artifact_url(str(saucer.get("stl_path"))),
+                    "outer_radius_mm": float(saucer.get("outer_radius_mm", 0.0)),
+                    "floor_mm": float(saucer.get("floor_mm", 0.0)),
+                    "wall_height_mm": float(saucer.get("wall_height_mm", 0.0)),
+                    "support_height_mm": float(saucer.get("support_height_mm", 0.0)),
+                    "support_top_mm": (
+                        float(saucer.get("floor_mm", 0.0))
+                        + float(saucer.get("support_height_mm", 0.0))
+                    ),
+                }
+                if isinstance(saucer, dict) and saucer.get("stl_path")
+                else None
+            ),
             "preferred": (
                 "region_stls"
                 if isinstance(multicolor.get("preview_parts"), list)
