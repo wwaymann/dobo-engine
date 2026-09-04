@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.17-robust-relief-tessellation"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.18-surface-crossing-glyph-retry"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -231,6 +231,48 @@ def _safe_text_size(radius: float, text_value: str, requested: float, minimum: f
     return max(float(minimum), min(float(requested), usable_arc / per_size))
 
 
+def _glyph_surface_excursion(
+    route: dict[str, Any],
+    *,
+    theta: float,
+    z: float,
+    local_radius: float,
+    glyph_width: float,
+    actual_size: float,
+    normal: np.ndarray,
+) -> tuple[float, float]:
+    """Estimate how far the real profiled wall departs from the glyph tangent plane.
+
+    Large glyphs on narrow or strongly curved profiles can sit partly inside or
+    outside a single tangent plane.  Sampling the actual revolved profile over
+    the glyph footprint gives us a local inward/outward travel requirement.
+    The receiving surface band still clips the final relief depth, so this only
+    improves attachment robustness; it does not make the authored relief deeper.
+    """
+    height = float(route["height_mm"])
+    centre = np.array([
+        local_radius * math.cos(theta),
+        local_radius * math.sin(theta),
+        float(z),
+    ])
+    half_u = max(0.5, 0.58 * abs(float(glyph_width)))
+    half_z = max(0.5, 0.65 * float(actual_size))
+    projections: list[float] = [0.0]
+    for u_factor in (-1.0, -0.5, 0.0, 0.5, 1.0):
+        theta_sample = theta + (u_factor * half_u) / max(local_radius, 1e-6)
+        cos_s, sin_s = math.cos(theta_sample), math.sin(theta_sample)
+        for z_factor in (-1.0, -0.5, 0.0, 0.5, 1.0):
+            z_sample = min(height, max(0.0, float(z) + z_factor * half_z))
+            radius_sample = _radius_mm(route, z_sample)
+            surface = np.array([
+                radius_sample * cos_s,
+                radius_sample * sin_s,
+                z_sample,
+            ])
+            projections.append(float(np.dot(surface - centre, normal)))
+    return max(0.0, -min(projections)), max(0.0, max(projections))
+
+
 def _apply_line(
     current: cq.Shape,
     *,
@@ -344,73 +386,123 @@ def _apply_line(
             normal = -normal
 
         # A tangent glyph can span a rapidly changing meridian (trumpet,
-        # pedestal, waist). Give the prism enough normal travel to cross the
-        # whole receiving band, then clip it back to the band. This improves
-        # robustness without deepening the authored relief.
+        # pedestal, waist) and a curved circumferential patch.  Measure the
+        # actual surface excursion across this glyph footprint rather than
+        # relying only on a fixed heuristic.
+        inward_excursion, outward_excursion = _glyph_surface_excursion(
+            route,
+            theta=theta,
+            z=z,
+            local_radius=local_radius,
+            glyph_width=glyph_width,
+            actual_size=actual_size,
+            normal=normal,
+        )
         curvature_allowance = min(
             3.5,
             0.18 * actual_size + 0.24 * actual_size * abs(slope),
         )
-        start_inside = inward + 0.85 + 0.45 * curvature_allowance
-        total_span = (
-            inward + outward + 1.70 + curvature_allowance
+        start_inside = max(
+            inward + 0.85 + 0.45 * curvature_allowance,
+            inward + 0.55 + inward_excursion,
         )
-        plane = cq.Plane(
-            origin=tuple(float(value) for value in point - normal * start_inside),
-            xDir=tuple(float(value) for value in tangent_u),
-            normal=tuple(float(value) for value in normal),
+        outward_reach = max(
+            outward + 0.85 + 0.55 * curvature_allowance,
+            outward + 0.55 + outward_excursion,
         )
-        try:
-            prisms = tuple(
-                value for value in cq.Workplane(plane).text(
-                    glyph,
-                    actual_size,
-                    total_span,
-                    combine=False,
-                    halign="center",
-                    valign="center",
-                    **({
-                        "font": font,
-                        "kind": kind,
-                        **({"fontPath": font_path} if font_path else {}),
-                    }),
-                ).vals()
-                if isinstance(value, cq.Shape)
-            )
-        except Exception as error:
-            raise RuntimeError(
-                f"Profiled text glyph construction failed for {glyph!r}."
-            ) from error
-        if not prisms:
-            raise RuntimeError(f"Profiled text glyph {glyph!r} produced no CAD prism.")
 
+        # Keep the operation atomic per glyph.  If OCC reports a detached
+        # relief, a missed surface, or zero volume change, retry the *whole*
+        # glyph with modestly larger normal travel.  Because every prism is
+        # clipped to the narrow receiving band, the retry cannot deepen the
+        # requested emboss/deboss.
+        retry_step = max(
+            0.60,
+            min(2.50, 0.10 * actual_size + 0.20 * actual_size * abs(slope)),
+        )
         before = float(current.Volume())
-        for prism_index, prism in enumerate(prisms):
-            tool = prism.intersect(band, tol=_BOOLEAN_TOLERANCE_MM).clean()
-            if not tool.isValid() or float(tool.Volume()) <= 1e-7:
-                raise RuntimeError(
-                    f"Profiled {mode} glyph {glyph_index} {glyph!r}, part "
-                    f"{prism_index}, missed the receiving surface."
-                )
-            raw = (
-                current.fuse(tool, tol=_BOOLEAN_TOLERANCE_MM)
-                if mode == "emboss"
-                else current.cut(tool, tol=_BOOLEAN_TOLERANCE_MM)
-            ).clean()
-            solids = tuple(raw.Solids())
-            if len(solids) != 1:
-                raise RuntimeError(
-                    f"Profiled {mode} glyph {glyph_index} {glyph!r} produced "
-                    f"{len(solids)} CAD solids."
-                )
-            current = solids[0].clean()
+        applied_candidate: cq.Shape | None = None
+        last_failure = (
+            f"Profiled {mode} glyph {glyph_index} {glyph!r} changed no volume."
+        )
 
-        after = float(current.Volume())
-        delta = after - before if mode == "emboss" else before - after
-        if delta <= 1e-7:
-            raise RuntimeError(
+        for extra_travel in (0.0, retry_step, 2.0 * retry_step):
+            attempt_inside = start_inside + extra_travel
+            attempt_outward = outward_reach + extra_travel
+            plane = cq.Plane(
+                origin=tuple(
+                    float(value) for value in point - normal * attempt_inside
+                ),
+                xDir=tuple(float(value) for value in tangent_u),
+                normal=tuple(float(value) for value in normal),
+            )
+            try:
+                prisms = tuple(
+                    value for value in cq.Workplane(plane).text(
+                        glyph,
+                        actual_size,
+                        attempt_inside + attempt_outward,
+                        combine=False,
+                        halign="center",
+                        valign="center",
+                        **({
+                            "font": font,
+                            "kind": kind,
+                            **({"fontPath": font_path} if font_path else {}),
+                        }),
+                    ).vals()
+                    if isinstance(value, cq.Shape)
+                )
+            except Exception as error:
+                raise RuntimeError(
+                    f"Profiled text glyph construction failed for {glyph!r}."
+                ) from error
+            if not prisms:
+                raise RuntimeError(
+                    f"Profiled text glyph {glyph!r} produced no CAD prism."
+                )
+
+            candidate = current
+            attempt_failed = False
+            for prism_index, prism in enumerate(prisms):
+                tool = prism.intersect(band, tol=_BOOLEAN_TOLERANCE_MM).clean()
+                if not tool.isValid() or float(tool.Volume()) <= 1e-7:
+                    last_failure = (
+                        f"Profiled {mode} glyph {glyph_index} {glyph!r}, part "
+                        f"{prism_index}, missed the receiving surface."
+                    )
+                    attempt_failed = True
+                    break
+                raw = (
+                    candidate.fuse(tool, tol=_BOOLEAN_TOLERANCE_MM)
+                    if mode == "emboss"
+                    else candidate.cut(tool, tol=_BOOLEAN_TOLERANCE_MM)
+                ).clean()
+                solids = tuple(raw.Solids())
+                if len(solids) != 1:
+                    last_failure = (
+                        f"Profiled {mode} glyph {glyph_index} {glyph!r} produced "
+                        f"{len(solids)} CAD solids."
+                    )
+                    attempt_failed = True
+                    break
+                candidate = solids[0].clean()
+
+            if attempt_failed:
+                continue
+
+            after = float(candidate.Volume())
+            delta = after - before if mode == "emboss" else before - after
+            if delta > 1e-7:
+                applied_candidate = candidate
+                break
+            last_failure = (
                 f"Profiled {mode} glyph {glyph_index} {glyph!r} changed no volume."
             )
+
+        if applied_candidate is None:
+            raise RuntimeError(last_failure)
+        current = applied_candidate
         applied += 1
     return current, applied, float(actual_size)
 
