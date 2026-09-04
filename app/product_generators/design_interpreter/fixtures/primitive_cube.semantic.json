@@ -1,0 +1,38 @@
+{
+  "schema_version": "3A.1",
+  "id": "planter_cubo_basico_001",
+  "product_kind": "planter",
+  "source": {
+    "kind": "prompt",
+    "prompt": "Haz una maceta funcional con cuerpo de cubo, hueca, abierta arriba y con drenaje inferior. Sin texto, sin decoración y sin patrones.",
+    "image_reference": null
+  },
+  "body": {
+    "family": "organic",
+    "height_mm": 120.0,
+    "width_mm": 120.0,
+    "depth_mm": 120.0,
+    "opening_shape": "polygonal",
+    "opening_width_ratio": 0.95,
+    "opening_depth_ratio": 0.9,
+    "style_tags": ["cuboid"]
+  },
+  "features": [],
+  "relations": [],
+  "manufacturing": {
+    "minimum_wall_mm": 3.0,
+    "minimum_feature_mm": 1.0,
+    "maximum_relief_depth_mm": 1.0,
+    "drainage_required": true,
+    "multicolor_requested": false
+  },
+  "assumptions": [
+    {"field_path":"body.height_mm","selected_value":"120","reason":"Validated live semantic fixture from primitive E2E run","confidence":0.8,"requires_confirmation":true},
+    {"field_path":"body.width_mm","selected_value":"120","reason":"Validated live semantic fixture from primitive E2E run","confidence":0.8,"requires_confirmation":true},
+    {"field_path":"body.depth_mm","selected_value":"120","reason":"Validated live semantic fixture from primitive E2E run","confidence":0.8,"requires_confirmation":true},
+    {"field_path":"body.opening_shape","selected_value":"polygonal","reason":"Validated live semantic fixture from primitive E2E run","confidence":1.0,"requires_confirmation":false},
+    {"field_path":"body.opening_width_ratio","selected_value":"0.95","reason":"Validated live semantic fixture from primitive E2E run","confidence":0.9,"requires_confirmation":true},
+    {"field_path":"body.opening_depth_ratio","selected_value":"0.9","reason":"Validated live semantic fixture from primitive E2E run","confidence":0.7,"requires_confirmation":true}
+  ],
+  "ambiguities": []
+}

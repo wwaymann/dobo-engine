@@ -1,0 +1,41 @@
+name: DOBO Consolidation Foundational CAD
+
+on:
+  pull_request:
+    paths:
+      - 'app/product_generators/design_interpreter/native_foundational_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_text_pipeline_adapter.py'
+      - 'app/product_generators/design_interpreter/body_family_expansion.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - 'app/product_generators/design_interpreter/foundational_cad_regression.py'
+      - 'tools/dobo_capability_lab_live.py'
+      - '.github/workflows/consolidation-foundational-cad.yml'
+  workflow_dispatch:
+
+jobs:
+  foundational-cad:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: app:tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install geometry stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow
+      - name: Run foundational CAD physical regression
+        run: |
+          python -m product_generators.design_interpreter.foundational_cad_regression
+      - name: Upload foundational CAD evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-foundational-cad-evidence
+          path: outputs-ci/foundational-cad
+          if-no-files-found: warn
+          retention-days: 30

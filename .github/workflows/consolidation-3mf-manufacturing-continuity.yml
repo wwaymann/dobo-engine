@@ -1,0 +1,100 @@
+name: DOBO Consolidation 3MF Manufacturing Continuity
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - '.github/workflows/consolidation-3mf-manufacturing-continuity.yml'
+      - 'app/product_generators/surface_designer/multicolor_product.py'
+      - 'app/product_generators/surface_designer/three_mf_exporter.py'
+      - 'app/product_generators/manufacturability/product_integration.py'
+      - 'app/product_generators/manufacturability/three_mf_project_inspector.py'
+      - 'app/product_generators/manufacturability/test_phase_7_10_real_product_validation.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-3mf-manufacturing-continuity.yml'
+      - 'app/product_generators/surface_designer/multicolor_product.py'
+      - 'app/product_generators/surface_designer/three_mf_exporter.py'
+      - 'app/product_generators/manufacturability/product_integration.py'
+      - 'app/product_generators/manufacturability/three_mf_project_inspector.py'
+      - 'app/product_generators/manufacturability/test_phase_7_10_real_product_validation.py'
+
+permissions:
+  contents: read
+
+jobs:
+  continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing DOBO stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy
+
+      - name: Execute existing Phase 6.5 to Phase 7.10 integration boundary
+        run: |
+          python -m product_generators.manufacturability.test_phase_7_10_real_product_validation | tee consolidation-3mf-manufacturing.log
+
+      - name: Verify production evidence from the same real product
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path('outputs/product_generators/surface_designer/phase_6_multicolor_3mf')
+          files = list(root.glob('*.3mf'))
+          if len(files) != 1:
+              raise RuntimeError(f'Expected one generated 3MF, found {len(files)}')
+          three_mf = files[0]
+          if three_mf.stat().st_size < 1000:
+              raise RuntimeError('Generated 3MF is implausibly small')
+          with zipfile.ZipFile(three_mf, 'r') as archive:
+              names = set(archive.namelist())
+              required = {
+                  '3D/3dmodel.model',
+                  'Metadata/model_settings.config',
+                  'Metadata/project_settings.config',
+              }
+              missing = required - names
+              if missing:
+                  raise RuntimeError(f'3MF missing required Creality project entries: {sorted(missing)}')
+
+          log = Path('consolidation-3mf-manufacturing.log').read_text(encoding='utf-8')
+          required_markers = (
+              'OK 20',
+              'WARNING 1',
+              'ERROR 0',
+              'SOURCE_PENDING 0',
+              'NOT_AVAILABLE 3',
+              'blocking errors 0',
+              'Phase 7.10 Real Product Integration: Valid OK',
+          )
+          absent = [m for m in required_markers if m not in log]
+          if absent:
+              raise RuntimeError(f'Manufacturing integration report changed unexpectedly; missing {absent}')
+          print('CONSOLIDATION 3MF -> MANUFACTURABILITY BOUNDARY OK')
+          print('3MF', three_mf, three_mf.stat().st_size, 'bytes')
+          PY
+
+      - name: Upload boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-3mf-manufacturing-continuity
+          path: |
+            consolidation-3mf-manufacturing.log
+            outputs/product_generators/surface_designer/phase_6_multicolor_3mf/*.3mf
+            outputs/product_generators/surface_designer/phase_6_multicolor_3mf/*.step
+          if-no-files-found: error
+          retention-days: 30

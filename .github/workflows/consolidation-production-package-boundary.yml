@@ -1,0 +1,35 @@
+name: DOBO Consolidation Production Package Boundary
+
+on:
+  pull_request:
+    paths:
+      - 'app/product_generators/production_package/**'
+      - '.github/workflows/consolidation-production-package-boundary.yml'
+  push:
+    branches:
+      - integration-consolidation-core
+    paths:
+      - 'app/product_generators/production_package/**'
+      - '.github/workflows/consolidation-production-package-boundary.yml'
+  workflow_dispatch:
+
+jobs:
+  production-package-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install boundary dependencies
+        run: python -m pip install --upgrade pip pytest numpy pillow trimesh
+      - name: Validate physical artifact to verified package
+        run: python -m pytest -q app/product_generators/production_package/test_consolidation_production_package_boundary.py
+      - name: Upload boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-production-package-boundary-${{ github.sha }}
+          path: |
+            .pytest_cache
+          if-no-files-found: ignore

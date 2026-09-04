@@ -1,0 +1,45 @@
+name: DOBO Consolidation Real Product Combination Benchmark PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-combinatorial-product-benchmark-pr.yml'
+      - 'app/product_generators/design_interpreter/combinatorial_product_benchmark.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-product-combination-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      PYTHONPATH: app
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install consolidated runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib cadquery
+      - name: Execute real product combination audit
+        run: |
+          # Audit cases independently so one failed product never hides the others.
+          rm -rf outputs-ci/combinatorial-product-benchmark
+          python -m product_generators.design_interpreter.combinatorial_product_benchmark
+      - name: Upload real combinatorial benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-real-combinatorial-product-benchmark
+          path: outputs-ci/combinatorial-product-benchmark
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,45 @@
+name: DOBO Consolidation Primitive Pots End-to-End
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-primitive-pot-benchmark.yml'
+      - 'app/product_generators/design_interpreter/primitive_pot_benchmark.py'
+      - 'app/product_generators/design_interpreter/body_family_expansion.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  primitive-pots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      PYTHONPATH: app
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install existing consolidated runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema numpy scipy scikit-image trimesh networkx shapely Pillow matplotlib cadquery
+      - name: Execute primitive pots through existing end-to-end flow
+        run: |
+          rm -rf outputs-ci/primitive-pot-benchmark
+          python -m product_generators.design_interpreter.primitive_pot_benchmark
+      - name: Upload primitive pot renders and physical evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-primitive-pots-end-to-end
+          path: outputs-ci/primitive-pot-benchmark
+          if-no-files-found: error
+          retention-days: 30

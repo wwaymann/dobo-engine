@@ -1,0 +1,444 @@
+from __future__ import annotations
+
+"""Visual-only 2.5D plant layer for DOBO Design Lab.
+
+This module does not modify CAD/manufacturing geometry. It normalizes the
+viewer to Y-up, adds selectable visual plants and a substrate surface, and
+keeps all of that out of STL/3MF generation.
+
+Run:
+    python tools/dobo_design_lab_plants.py
+"""
+
+import mimetypes
+import urllib.parse
+import urllib.request
+
+import dobo_design_lab as base
+
+PLANT_CSS = r'''
+.plantBlock{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.plantGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.plantChoice{border:1px solid var(--line);background:#faf8f3;border-radius:10px;padding:9px;cursor:pointer;text-align:left;font-size:11px}.plantChoice.active{background:#222;color:#fff;border-color:#222}.plantChoice b{display:block;font-size:12px}.plantChoice span{opacity:.72}
+.plantSizes{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px}.plantSize{border:1px solid var(--line);background:#faf8f3;border-radius:9px;padding:8px 4px;cursor:pointer;text-align:center;font-size:10px}.plantSize.active{background:#222;color:#fff;border-color:#222}
+.substrateRow{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px}.substrateChoice{border:1px solid var(--line);background:#faf8f3;border-radius:9px;padding:8px 4px;cursor:pointer;text-align:center;font-size:10px}.substrateChoice.active{background:#222;color:#fff;border-color:#222}
+.visualOnlyTag{display:inline-block;margin-top:8px;padding:4px 7px;border-radius:999px;background:#eee9df;color:#666;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+'''
+
+PLANT_CONTROLS = r'''
+<div class="plantBlock">
+<h3>8 · Planta · vista previa 2.5D</h3>
+<div class="hint">Capa visual independiente. No se incorpora al STL ni al 3MF.</div>
+<div class="plantGrid" id="plantChoices">
+<button class="plantChoice active" data-plant="ficus"><b>Ficus lyrata</b><span>hoja ancha</span></button>
+<button class="plantChoice" data-plant="monstera"><b>Monstera</b><span>hoja abierta</span></button>
+<button class="plantChoice" data-plant="sansevieria"><b>Sansevieria</b><span>vertical</span></button>
+<button class="plantChoice" data-plant="pothos"><b>Pothos</b><span>colgante</span></button>
+</div>
+<div class="plantSizes" id="plantSizes"><button class="plantSize" data-size="small">Pequeña</button><button class="plantSize active" data-size="medium">Mediana</button><button class="plantSize" data-size="large">Grande</button></div>
+<h3>9 · Superficie</h3>
+<div class="substrateRow" id="substrates"><button class="substrateChoice active" data-substrate="soil">Tierra</button><button class="substrateChoice" data-substrate="white_stone">Piedra blanca</button><button class="substrateChoice" data-substrate="volcanic">Volcánica</button></div>
+<span class="visualOnlyTag">visual_only · no exportable</span>
+</div>
+'''
+
+PLANT_JS = r'''
+// DOBO visual presentation layer. CAD arrives Z-up; the Lab scene is Y-up.
+const plantState={plant:'ficus',size:'medium',substrate:'soil'};
+let visualPlantGroup=null,substrateGroup=null,saucerModel=null;
+let saucerSupportTop=0;
+const PLANT_SCALE={small:.72,medium:1.0,large:1.34};
+const C={leaf:0x356b3f,leaf2:0x4b8050,leaf3:0x254c32,stem:0x76563a};
+
+const COMMONS_FILE=name=>'/plant-asset?name='+encodeURIComponent(name);
+const PHOTO_ASSETS={
+ ficus:{
+  file:'Ficus lyrata indoor house second floor Transparent - July 2026.png',
+  source:'Wikimedia Commons',mode:'transparent',height:1.62,layers:3
+ },
+ monstera:{
+  file:'Feuille Plante.png',
+  source:'Wikimedia Commons',mode:'leaf_cluster',height:1.22,layers:7
+ },
+ sansevieria:{
+  file:'Snake plant -Dracaena trifasciata.jpg',
+  source:'Wikimedia Commons',mode:'green_key',height:1.18,layers:3
+ },
+ pothos:{
+  file:'Pothos plant grown as an indoor plant in indirect light, on a frame.png',
+  source:'Wikimedia Commons',mode:'green_key',height:1.08,layers:3
+ }
+};
+const photoTextureCache=new Map();
+let plantLoadToken=0;
+
+function disposeMaterial(m){if(!m)return;['map','bumpMap','roughnessMap','alphaMap','normalMap'].forEach(k=>{const t=m[k];if(t&&!t.userData?.sharedPhoto)t.dispose?.()});m.dispose?.()}
+function disposeVisual(o){if(!o)return;o.traverse?.(n=>{n.geometry?.dispose?.();if(n.material){(Array.isArray(n.material)?n.material:[n.material]).forEach(disposeMaterial)}});scene.remove(o)}
+
+function seededRandom(seed){let s=seed>>>0;return()=>{s=(1664525*s+1013904223)>>>0;return s/4294967296}}
+function textureCanvas(kind,size=1024){
+ const canvas=document.createElement('canvas');canvas.width=canvas.height=size;const ctx=canvas.getContext('2d');
+ const bump=document.createElement('canvas');bump.width=bump.height=size;const bctx=bump.getContext('2d');
+ const seed=kind==='soil'?9137:kind==='white_stone'?22471:44893,rand=seededRandom(seed);
+ const bg=kind==='soil'?'#3b2619':kind==='white_stone'?'#c9c6bd':'#2b2928';ctx.fillStyle=bg;ctx.fillRect(0,0,size,size);bctx.fillStyle='#777';bctx.fillRect(0,0,size,size);
+ if(kind==='soil'){
+  for(let i=0;i<9000;i++){const x=rand()*size,y=rand()*size,r=.35+rand()*2.6,v=28+Math.floor(rand()*55);ctx.fillStyle='rgb('+(52+v*.35)+','+(34+v*.20)+','+(20+v*.12)+')';ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();const g=85+Math.floor(rand()*95);bctx.fillStyle='rgb('+g+','+g+','+g+')';bctx.beginPath();bctx.arc(x,y,r,0,Math.PI*2);bctx.fill()}
+  ctx.globalAlpha=.35;ctx.strokeStyle='#b18b5d';ctx.lineWidth=.7;for(let i=0;i<260;i++){const x=rand()*size,y=rand()*size,l=3+rand()*15,a=rand()*Math.PI*2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l);ctx.stroke()}ctx.globalAlpha=1;
+ }else{
+  const pale=kind==='white_stone';ctx.fillStyle=pale?'#595650':'#151414';ctx.fillRect(0,0,size,size);
+  for(let i=0;i<560;i++){const x=rand()*size,y=rand()*size,rx=5+rand()*18,ry=4+rand()*13,rot=rand()*Math.PI;ctx.save();ctx.translate(x,y);ctx.rotate(rot);const grad=ctx.createRadialGradient(-rx*.25,-ry*.35,1,0,0,Math.max(rx,ry));if(pale){grad.addColorStop(0,'#fbfaf6');grad.addColorStop(.55,'#ddd9cf');grad.addColorStop(1,'#a7a399')}else{grad.addColorStop(0,'#5c5652');grad.addColorStop(.55,'#312e2c');grad.addColorStop(1,'#141313')}ctx.fillStyle=grad;ctx.beginPath();ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);ctx.fill();ctx.restore();const gv=pale?180+Math.floor(rand()*70):55+Math.floor(rand()*80);bctx.fillStyle='rgb('+gv+','+gv+','+gv+')';bctx.save();bctx.translate(x,y);bctx.rotate(rot);bctx.beginPath();bctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);bctx.fill();bctx.restore()}
+ }
+ const map=new THREE.CanvasTexture(canvas),bumpMap=new THREE.CanvasTexture(bump);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());bumpMap.anisotropy=map.anisotropy;map.needsUpdate=bumpMap.needsUpdate=true;return{map,bumpMap}
+}
+
+function loadRemoteImage(url){
+ return new Promise((ok,bad)=>{
+  const img=new Image();img.crossOrigin='anonymous';img.decoding='async';
+  img.onload=()=>ok(img);img.onerror=bad;img.src=url;
+ });
+}
+
+function textureFromImage(img){
+ const t=new THREE.Texture(img);t.needsUpdate=true;t.colorSpace=THREE.SRGBColorSpace;
+ t.anisotropy=Math.min(12,renderer.capabilities.getMaxAnisotropy());
+ t.generateMipmaps=true;t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
+ return t;
+}
+
+function greenKeyPhoto(img){
+ const maxSide=1400,scale=Math.min(1,maxSide/Math.max(img.width,img.height));
+ const w=Math.max(2,Math.round(img.width*scale)),h=Math.max(2,Math.round(img.height*scale));
+ const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,w,h);
+ const data=ctx.getImageData(0,0,w,h),p=data.data;
+ for(let i=0;i<p.length;i+=4){
+  const r=p[i]/255,g=p[i+1]/255,b=p[i+2]/255,max=Math.max(r,g,b),min=Math.min(r,g,b),sat=max>0?(max-min)/max:0;
+  const greenness=g-.55*r-.45*b;
+  const leaf=Math.max(0,Math.min(1,(greenness+.02)*4.4))*Math.max(0,Math.min(1,(sat-.06)*4.5));
+  const darkLeaf=(g>r*.88&&g>b*.82&&g>.12)?Math.min(1,(g+.10)*1.15):0;
+  const alpha=Math.max(leaf,darkLeaf);
+  p[i+3]=Math.round(255*Math.pow(alpha,.70));
+ }
+ ctx.putImageData(data,0,0);
+ const t=new THREE.CanvasTexture(canvas);t.needsUpdate=true;t.colorSpace=THREE.SRGBColorSpace;
+ t.anisotropy=Math.min(12,renderer.capabilities.getMaxAnisotropy());
+ return t;
+}
+
+async function photoTexture(asset){
+ const key=asset.file+'|'+asset.mode;
+ if(photoTextureCache.has(key))return photoTextureCache.get(key);
+ const promise=loadRemoteImage(COMMONS_FILE(asset.file)).then(img=>{
+  const texture=asset.mode==='green_key'?greenKeyPhoto(img):textureFromImage(img);
+  texture.userData={source:asset.source,file:asset.file,sharedPhoto:true};
+  return texture;
+ });
+ photoTextureCache.set(key,promise);
+ return promise;
+}
+
+function barkTexture(){
+ const size=512,canvas=document.createElement('canvas');canvas.width=canvas.height=size;
+ const ctx=canvas.getContext('2d'),rand=seededRandom(44219);
+ const grad=ctx.createLinearGradient(0,0,size,0);grad.addColorStop(0,'#3e2b1d');grad.addColorStop(.48,'#75513a');grad.addColorStop(1,'#342419');
+ ctx.fillStyle=grad;ctx.fillRect(0,0,size,size);
+ for(let x=0;x<size;x+=5+Math.floor(rand()*9)){
+  ctx.strokeStyle='rgba('+(55+Math.floor(rand()*55))+','+(34+Math.floor(rand()*35))+','+(22+Math.floor(rand()*25))+','+(.22+rand()*.32)+')';
+  ctx.lineWidth=.6+rand()*2;ctx.beginPath();ctx.moveTo(x+rand()*8,0);
+  for(let y=0;y<=size;y+=24)ctx.lineTo(x+Math.sin(y*.035+rand())*5+rand()*4,y);
+  ctx.stroke();
+ }
+ for(let i=0;i<650;i++){const x=rand()*size,y=rand()*size,r=.4+rand()*1.7;ctx.fillStyle='rgba(20,12,7,'+(.08+rand()*.18)+')';ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}
+ const t=new THREE.CanvasTexture(canvas);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(2.5,1.0);t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());return t
+}
+
+function texturedStem(h,r){
+ const map=barkTexture(),m=new THREE.Mesh(new THREE.CylinderGeometry(r,r*1.12,h,14),new THREE.MeshStandardMaterial({map,roughness:.92,metalness:0}));
+ m.userData.visual_only=true;m.castShadow=true;return m
+}
+
+function smooth01(v){return v<=0?0:v>=1?1:v*v*(3-2*v)}
+
+function slicePhotoTexture(texture,layer){
+ const img=texture.image||{},srcW=img.width||1024,srcH=img.height||1024;
+ const scale=Math.min(1,1200/Math.max(srcW,srcH)),w=Math.max(2,Math.round(srcW*scale)),h=Math.max(2,Math.round(srcH*scale));
+ const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,w,h);
+ const data=ctx.getImageData(0,0,w,h),p=data.data;
+ for(let y=0;y<h;y++){
+  const ny=y/Math.max(1,h-1);
+  for(let x=0;x<w;x++){
+   const i=(y*w+x)*4;if(p[i+3]===0)continue;
+   const nx=x/Math.max(1,w-1),edge=Math.abs(nx-.5)*2;
+   let weight=1;
+   if(layer===0){
+    weight=(1-smooth01((ny-.44)/.20))*(.72+.28*smooth01((edge-.18)/.70));
+   }else if(layer===1){
+    const top=smooth01((ny-.16)/.24),bottom=1-smooth01((ny-.78)/.18);
+    weight=top*bottom*(.88+.12*(1-edge));
+   }else{
+    weight=smooth01((ny-.43)/.22)*(.78+.22*(1-edge));
+   }
+   p[i+3]=Math.round(p[i+3]*Math.max(0,Math.min(1,weight)));
+  }
+ }
+ ctx.putImageData(data,0,0);
+ const t=new THREE.CanvasTexture(canvas);t.colorSpace=THREE.SRGBColorSpace;
+ t.anisotropy=Math.min(12,renderer.capabilities.getMaxAnisotropy());
+ t.generateMipmaps=true;t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;
+ t.userData={sharedPhoto:false,derived25d:true};
+ return t;
+}
+
+function photoCard(texture,height,opts={}){
+ const img=texture.image||{},aspect=(img.width&&img.height)?img.width/img.height:(opts.aspect||.78);
+ const width=height*aspect*(opts.widthScale||1);
+ const mat=new THREE.MeshBasicMaterial({
+  map:texture,color:0xffffff,transparent:true,alphaTest:opts.alphaTest??.045,
+  side:THREE.DoubleSide,depthWrite:false,depthTest:true,opacity:opts.opacity??1,toneMapped:false
+ });
+ const mesh=new THREE.Mesh(new THREE.PlaneGeometry(width,height),mat);
+ mesh.position.set(opts.x||0,opts.y??height*.5,opts.z||0);
+ mesh.rotation.set(0,opts.baseYaw||0,opts.roll||0);
+ mesh.castShadow=false;mesh.receiveShadow=false;
+ mesh.renderOrder=opts.renderOrder??10;
+ mesh.userData.visual_only=true;
+ return mesh;
+}
+
+function shortestAngle(a){return Math.atan2(Math.sin(a),Math.cos(a))}
+function updatePlantBillboards(){
+ if(!visualPlantGroup||!visualPlantGroup.userData?.cameraFacing25d)return;
+ const wp=new THREE.Vector3();visualPlantGroup.getWorldPosition(wp);
+ const target=Math.atan2(camera.position.x-wp.x,camera.position.z-wp.z);
+ visualPlantGroup.rotation.y+=shortestAngle(target-visualPlantGroup.rotation.y)*.18;
+}
+function billboardLoop(){requestAnimationFrame(billboardLoop);updatePlantBillboards()}
+billboardLoop();
+
+function fitPresentationView(){
+ if(!model)return;
+ const viewBox=new THREE.Box3().setFromObject(model);
+ if(visualPlantGroup)viewBox.union(new THREE.Box3().setFromObject(visualPlantGroup));
+ if(saucerModel)viewBox.union(new THREE.Box3().setFromObject(saucerModel));
+ if(viewBox.isEmpty())return;
+ const vs=viewBox.getSize(new THREE.Vector3()),vc=viewBox.getCenter(new THREE.Vector3()),m=Math.max(vs.x,vs.y,vs.z);
+ controls.target.copy(vc);camera.position.set(vc.x+1.45*m,vc.y+.72*m,vc.z+1.65*m);camera.updateProjectionMatrix();controls.update();
+}
+
+function tunePresentationLighting(){
+ scene.traverse(o=>{
+  if(o.isHemisphereLight)o.intensity=1.15;
+  if(o.isDirectionalLight){o.intensity=1.45;o.position.set(-170,240,210);o.castShadow=true}
+ });
+ renderer.toneMapping=THREE.ACESFilmicToneMapping;
+ renderer.toneMappingExposure=1.02;
+ renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+ floor.receiveShadow=true;
+}
+
+function normalizePotForViewer(supportTop=0){
+ if(!model)return;
+ model.rotation.set(-Math.PI/2,0,0);
+ model.position.set(0,Math.max(0,Number(supportTop)||0),0);
+ model.updateMatrixWorld(true);
+ floor.position.set(0,saucerModel?-.35:-2,0);
+ floor.updateMatrixWorld(true);
+ tunePresentationLighting();
+}
+
+function loadSaucerForViewer(d){
+ disposeVisual(saucerModel);saucerModel=null;saucerSupportTop=0;
+ const info=d?.preview?.saucer;
+ if(!info?.url)return Promise.resolve(false);
+ return new Promise((ok,bad)=>new STLLoader().load(info.url,g=>{
+  g.computeVertexNormals();
+  const material=new THREE.MeshStandardMaterial({color:new THREE.Color(d.selection.body_color),roughness:.68,metalness:.01,side:THREE.DoubleSide});
+  saucerModel=new THREE.Mesh(g,material);
+  saucerModel.rotation.set(-Math.PI/2,0,0);
+  saucerModel.position.set(0,0,0);
+  saucerModel.castShadow=true;saucerModel.receiveShadow=true;
+  saucerModel.name='DOBO_CAD_SAUCER';
+  saucerModel.userData={visual_only:false,exportable:true,role:'saucer',source:'CAD_STL'};
+  saucerSupportTop=Math.max(0,Number(info.support_top_mm)||0);
+  scene.add(saucerModel);saucerModel.updateMatrixWorld(true);ok(true);
+ },undefined,bad));
+}
+
+function buildPhotoLayers(group,texture,u,id){
+ const asset=PHOTO_ASSETS[id],H=u*asset.height;
+ group.userData.cameraFacing25d=true;
+
+ if(asset.mode==='leaf_cluster'){
+  const trunk=texturedStem(H*.60,u*.017);trunk.position.y=H*.30;group.add(trunk);
+  const leaves=[
+   [-.29,.43,-.055,.62,-.52,-.10], [.28,.49,.045,.67,.46,.10], [-.23,.61,.018,.65,-.30,-.06],
+   [.24,.70,-.025,.71,.28,.07], [-.08,.82,.050,.69,-.12,-.04], [.12,.92,-.045,.63,.18,.05], [0,1.01,.005,.72,0,0]
+  ];
+  leaves.forEach(([x,y,z,scale,roll,yaw],i)=>{
+   const card=photoCard(texture,H*.42*scale,{x:x*u,y:y*H,z:z*u,roll,baseYaw:yaw,alphaTest:.05,renderOrder:10+i});
+   group.add(card);
+  });
+  return;
+ }
+
+ if(id==='ficus'){
+  const trunk=texturedStem(H*.62,u*.018);trunk.position.y=H*.31;group.add(trunk);
+ }else if(id==='pothos'){
+  const trunk=texturedStem(H*.43,u*.012);trunk.position.y=H*.215;trunk.rotation.z=-.06;group.add(trunk);
+ }
+
+ const slices=[slicePhotoTexture(texture,0),slicePhotoTexture(texture,1),slicePhotoTexture(texture,2)];
+ const layers=[
+  {texture:slices[0],z:-.055*u,x:-.010*u,yaw:-.045,scale:.992,opacity:.98,order:10},
+  {texture:slices[1],z:0,x:0,yaw:0,scale:1.000,opacity:1,order:11},
+  {texture:slices[2],z:.060*u,x:.012*u,yaw:.048,scale:1.008,opacity:.99,order:12},
+ ];
+ layers.forEach(L=>{
+  const card=photoCard(L.texture,H*L.scale,{x:L.x,y:H*L.scale*.5,z:L.z,baseYaw:L.yaw,opacity:L.opacity,alphaTest:asset.mode==='green_key' ? .075 : .045,renderOrder:L.order});
+  group.add(card);
+ });
+}
+
+function makePhotoPlant(id,u){
+ const g=new THREE.Group(),token=++plantLoadToken;g.userData.photo_loading=true;
+ const asset=PHOTO_ASSETS[id];
+ photoTexture(asset).then(texture=>{
+  if(!g.parent||token!==plantLoadToken)return;
+  buildPhotoLayers(g,texture,u,id);
+  g.userData.photo_loading=false;g.userData.photo_source=asset.source;g.userData.photo_file=asset.file;
+  updatePlantBillboards();fitPresentationView();
+ }).catch(error=>{
+  console.warn('DOBO 2.5D photo texture fallback',id,error);
+  g.userData.photo_error=String(error);
+  const H=u*(PHOTO_ASSETS[id]?.height||1.15);
+  const trunk=texturedStem(H*.68,u*.017);trunk.position.y=H*.34;g.add(trunk);
+  const canvas=document.createElement('canvas');canvas.width=512;canvas.height=700;const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,512,700);
+  const colors=id==='sansevieria'?['#315c36','#487948','#6b8c49']:['#245d36','#397b46','#4f9258'];
+  const rand=seededRandom(9041+id.length*791);
+  for(let i=0;i<22;i++){
+   const x=256+(rand()-.5)*270,y=160+rand()*360,rx=28+rand()*52,ry=50+rand()*85,rot=(rand()-.5)*1.5;
+   ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.fillStyle=colors[i%colors.length];ctx.beginPath();ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);ctx.fill();
+   ctx.strokeStyle='rgba(220,238,190,.42)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-ry*.78);ctx.lineTo(0,ry*.78);ctx.stroke();ctx.restore();
+  }
+  const tex=new THREE.CanvasTexture(canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.userData.sharedPhoto=false;
+  const canopy=photoCard(tex,H*.92,{y:H*.60,baseYaw:0,follow:1,alphaTest:.02,roughness:.76});g.add(canopy);
+  fitPresentationView();
+ });
+ return g;
+}
+
+function substrateColor(){return 0xffffff}
+function substrateSurfaceY(size,rimY){return rimY-Math.max(6.0,Math.min(size.y*.055,9.0))}
+function makeSubstrate(center,size,rimY){
+ const g=new THREE.Group();
+ // Derive the visible mouth from the selected profile instead of the generic 0.58 body contract.
+ // This fixes the undersized floating brown circle seen on low/wide profiles.
+ const shapeItem=byId(state.shape);
+ const profile=shapeItem?.profile||[];
+ const topRadiusRatio=profile.length?Number(profile[profile.length-1][1])||.80:.80;
+ const openingDiameter=Math.min(size.x,size.z)*topRadiusRatio;
+ const wallInset=Math.max(2.0,openingDiameter*.025);
+ const radius=Math.max(2,openingDiameter*.5-wallInset);
+ const y=substrateSurfaceY(size,rimY);
+ const tex=textureCanvas(plantState.substrate,2048);
+ const mat=new THREE.MeshStandardMaterial({color:substrateColor(),map:tex.map,bumpMap:tex.bumpMap,bumpScale:plantState.substrate==='soil'?0.85:1.45,roughness:plantState.substrate==='white_stone' ? 0.90 : 1.0,metalness:0,side:THREE.DoubleSide});
+ const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,96),mat);disc.rotation.x=-Math.PI/2;disc.position.set(center.x,y,center.z);disc.receiveShadow=true;disc.userData={visual_only:true,exportable:false,role:'substrate',surface_y:y};g.add(disc);
+ g.name='DOBO_VISUAL_ONLY_SUBSTRATE';g.userData={visual_only:true,exportable:false,substrate:plantState.substrate};return g
+}
+
+function updatePlantVisual(){
+ if(!model)return;
+ const box=new THREE.Box3().setFromObject(model),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3()),rimY=box.max.y;
+ const unit=Math.max(size.x,size.z)*.58*PLANT_SCALE[plantState.size];
+ disposeVisual(visualPlantGroup);disposeVisual(substrateGroup);visualPlantGroup=null;substrateGroup=null;
+ substrateGroup=makeSubstrate(center,size,rimY);scene.add(substrateGroup);
+ visualPlantGroup=makePhotoPlant(plantState.plant,unit);visualPlantGroup.position.set(center.x,substrateSurfaceY(size,rimY),center.z);visualPlantGroup.name='DOBO_VISUAL_ONLY_PLANT_2_5D_PHOTO';visualPlantGroup.userData={visual_only:true,exportable:false,render_mode:'2.5D_billboard_photo',plant:plantState.plant,size:plantState.size};scene.add(visualPlantGroup);
+ fitPresentationView();
+}
+
+function bindPlantUI(){document.querySelectorAll('#plantChoices [data-plant]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#plantChoices [data-plant]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.plant=el.dataset.plant;updatePlantVisual()});document.querySelectorAll('#plantSizes [data-size]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#plantSizes [data-size]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.size=el.dataset.size;updatePlantVisual()});document.querySelectorAll('#substrates [data-substrate]').forEach(el=>el.onclick=()=>{document.querySelectorAll('#substrates [data-substrate]').forEach(x=>x.classList.remove('active'));el.classList.add('active');plantState.substrate=el.dataset.substrate;updatePlantVisual()})}
+bindPlantUI();
+
+const doboOriginalLoadPreview=loadPreview;
+loadPreview=async function(d){
+ await doboOriginalLoadPreview(d);
+ try{
+  await loadSaucerForViewer(d);
+ }catch(e){console.warn('saucer preview fallback',e);disposeVisual(saucerModel);saucerModel=null;saucerSupportTop=0}
+ normalizePotForViewer(saucerSupportTop);
+ updatePlantVisual();
+ if(saucerModel)$('#previewMode').textContent+=' · plato CAD';
+};
+'''
+
+def _inject(html: str) -> str:
+    html = html.replace("</style></head>", PLANT_CSS + "\n</style></head>")
+    html = html.replace('<button class="generate" id="generate">Generar diseño real</button>','<button class="generate" id="generate">Generar diseño real</button>\n' + PLANT_CONTROLS)
+    html = html.replace("</script></body></html>", PLANT_JS + "\n</script></body></html>")
+    return html
+
+base.HTML = _inject(base.HTML)
+base.DESIGN_LAB_VERSION = base.DESIGN_LAB_VERSION + "+visual-plants-layered-billboard-v8"
+
+PLANT_ASSET_FILES = {
+    "Ficus lyrata indoor house second floor Transparent - July 2026.png",
+    "Feuille Plante.png",
+    "Snake plant -Dracaena trifasciata.jpg",
+    "Pothos plant grown as an indoor plant in indirect light, on a frame.png",
+}
+
+
+class PlantAssetHandler(base.Handler):
+    _plant_asset_cache: dict[str, tuple[str, bytes]] = {}
+
+    def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/plant-asset":
+            return super().do_GET()
+
+        name = urllib.parse.parse_qs(parsed.query).get("name", [""])[0]
+        if name not in PLANT_ASSET_FILES:
+            self.send_error(404)
+            return
+
+        cached = self._plant_asset_cache.get(name)
+        if cached is None:
+            remote = (
+                "https://commons.wikimedia.org/wiki/Special:Redirect/file/"
+                + urllib.parse.quote(name, safe="")
+                + "?width=1400"
+            )
+            request = urllib.request.Request(
+                remote,
+                headers={
+                    "User-Agent": "DOBO-Design-Lab/1.0 (local product preview)",
+                    "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=25) as response:
+                    body = response.read()
+                    content_type = response.headers.get_content_type() or "application/octet-stream"
+                if not content_type.startswith("image/") or not body:
+                    raise RuntimeError(f"Plant asset returned {content_type!r}")
+                cached = (content_type, body)
+                self._plant_asset_cache[name] = cached
+            except Exception as error:
+                print("[DOBO DESIGN LAB] plant asset error:", name, error)
+                self.send_error(502, "Plant image could not be loaded")
+                return
+
+        content_type, body = cached
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+base.Handler = PlantAssetHandler
+
+if __name__ == "__main__":
+    base.main()

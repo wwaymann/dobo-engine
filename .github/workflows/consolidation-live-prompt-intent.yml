@@ -1,0 +1,217 @@
+name: DOBO Consolidation Live Prompt Intent
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - '.github/workflows/consolidation-live-prompt-intent.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-live-prompt-intent.yml'
+      - 'app/product_generators/design_interpreter/prompt_interpreter.py'
+      - 'app/product_generators/design_interpreter/semantic_program.schema.json'
+      - 'app/product_generators/design_interpreter/semantic_contract.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: app
+      DESIGN_PROMPT: 'Haz una maceta esférica con la palabra DOBO en sobrerrelieve, centrada al frente.'
+      CONE_PROMPT: 'Crea una maceta con forma de tronco de cono regular, perfectamente simétrica alrededor del eje vertical. La base inferior debe ser circular y más estrecha que la abertura superior. Las paredes exteriores deben ser completamente rectas y lisas desde la base hasta la boca, con una inclinación continua y uniforme. Debe estar hueca, abierta arriba y tener un único agujero de drenaje circular centrado en el fondo. No agregues anillos, ondulaciones, relieves, escalones, curvas, abultamientos, texturas ni decoración.'
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DOBO_SEMANTIC_MODEL: ${{ vars.DOBO_SEMANTIC_MODEL || 'gpt-4.1-mini' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install semantic boundary dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow
+
+      - name: Verify live prompt intent continuity
+        run: |
+          mkdir -p outputs-ci/consolidation-live-prompt
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+
+          from product_generators.design_interpreter.prompt_interpreter import OpenAIResponsesSemanticClient, PromptSemanticInterpreter
+          from product_generators.design_interpreter.semantic_contract import BODY_FAMILIES
+
+          out = Path('outputs-ci/consolidation-live-prompt')
+          prompt = os.environ['DESIGN_PROMPT']
+          if not os.environ.get('OPENAI_API_KEY', '').strip():
+              raise RuntimeError('OPENAI_API_KEY is not configured; live semantic continuity cannot be validated.')
+
+          result = PromptSemanticInterpreter(
+              OpenAIResponsesSemanticClient(model=os.environ['DOBO_SEMANTIC_MODEL'])
+          ).interpret(prompt)
+          semantic = result.program.to_dict()
+          features = semantic.get('features', [])
+
+          def preserves_text(feature):
+              concept = str(feature.get('concept', '')).lower()
+              tokens = [token for token in concept.split('_') if token]
+              return (
+                  feature.get('form_hint') == 'text'
+                  and 'dobo' in tokens
+                  and feature.get('surface_effect') == 'raised'
+                  and feature.get('anchor', {}).get('region') == 'front'
+              )
+
+          audit = {
+              'schema': 'dobo.consolidation.live_prompt_intent.1',
+              'prompt': prompt,
+              'body_family': semantic.get('body', {}).get('family'),
+              'spherical_contract_available': 'spherical' in BODY_FAMILIES,
+              'spherical_intent_preserved': semantic.get('body', {}).get('family') == 'spherical',
+              'dobo_raised_front_text_preserved': any(preserves_text(f) for f in features),
+              'relation_count': len(semantic.get('relations', [])),
+              'interpreter_version': result.trace.interpreter_version,
+          }
+          audit['verdict'] = 'PASS' if all([
+              audit['spherical_contract_available'],
+              audit['spherical_intent_preserved'],
+              audit['dobo_raised_front_text_preserved'],
+          ]) else 'FAIL'
+
+          (out/'PROMPT.txt').write_text(prompt + '\n', encoding='utf-8')
+          (out/'SEMANTIC_PROGRAM.json').write_text(json.dumps(semantic, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          (out/'INTENT_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+
+          if audit['verdict'] != 'PASS':
+              raise RuntimeError('Live prompt semantic intent was not preserved across the consolidation boundary.')
+          PY
+
+      - name: Capture exact live cone semantic evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+
+          from product_generators.design_interpreter.body_family_expansion import GeneralBodyFamilyExpander
+          from product_generators.design_interpreter.prompt_interpreter import OpenAIResponsesSemanticClient, PromptSemanticInterpreter
+
+          out = Path('outputs-ci/consolidation-live-prompt/cone')
+          out.mkdir(parents=True, exist_ok=True)
+          prompt = os.environ['CONE_PROMPT']
+          result = PromptSemanticInterpreter(
+              OpenAIResponsesSemanticClient(model=os.environ['DOBO_SEMANTIC_MODEL'])
+          ).interpret(prompt)
+          semantic = result.program.to_dict()
+          features = semantic.get('features', [])
+          audit = {
+              'schema': 'dobo.consolidation.live_cone_prompt.1',
+              'prompt': prompt,
+              'body_family': semantic.get('body', {}).get('family'),
+              'style_tags': semantic.get('body', {}).get('style_tags', []),
+              'requested_profile': GeneralBodyFamilyExpander.requested_profile(result.program),
+              'feature_count': len(features),
+              'features': [
+                  {
+                      'id': feature.get('id'),
+                      'concept': feature.get('concept'),
+                      'form_hint': feature.get('form_hint'),
+                      'surface_effect': feature.get('surface_effect'),
+                  }
+                  for feature in features
+              ],
+              'relation_count': len(semantic.get('relations', [])),
+              'drainage_required': semantic.get('manufacturing', {}).get('drainage_required'),
+              'interpreter_version': result.trace.interpreter_version,
+          }
+          audit['semantic_taper_ok'] = (
+              audit['body_family'] == 'tapered'
+              and audit['requested_profile'] == 'tapered_revolution'
+          )
+          (out/'PROMPT.txt').write_text(prompt + '\n', encoding='utf-8')
+          (out/'SEMANTIC_PROGRAM.json').write_text(json.dumps(semantic, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          (out/'CONE_AUDIT.json').write_text(json.dumps(audit, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          if not audit['semantic_taper_ok']:
+              raise RuntimeError('Exact live cone prompt did not preserve tapered_revolution intent.')
+          PY
+
+      - name: Generate exact cone through live DOBO Lab
+        if: always()
+        env:
+          PYTHONPATH: app:tools
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from pathlib import Path
+
+          os.environ['DOBO_OPENAI_MODEL'] = os.environ['DOBO_SEMANTIC_MODEL']
+          import dobo_capability_lab_live as live
+
+          out = Path('outputs-ci/consolidation-live-prompt/cone')
+          out.mkdir(parents=True, exist_ok=True)
+          result = live.generate(os.environ['CONE_PROMPT'], mode='openai')
+          motor = result['motor']
+          validation = result['validation']
+          vessel = result['vessel']
+          audit = {
+              'schema': 'dobo.consolidation.live_cone_geometry.1',
+              'source': result['source'],
+              'profile': result['profile'],
+              'morphology': result['morphology'],
+              'capability_route': motor.get('_capability_route'),
+              'analytic_contract': motor.get('_analytic_tapered'),
+              'watertight': validation.get('watertight'),
+              'winding_consistent': validation.get('winding_consistent'),
+              'component_count': validation.get('component_count'),
+              'opening': bool(vessel.get('opening')),
+              'drain': bool(vessel.get('drain')),
+              'vertices': result['trace'].get('vertices'),
+              'faces': result['trace'].get('faces'),
+              'generation_attempts': result['trace'].get('generation_attempts'),
+          }
+          audit['verdict'] = 'PASS' if all([
+              audit['morphology'] == 'tapered_revolution',
+              audit['capability_route'] == 'analytic_cad_tapered_primitive',
+              audit['watertight'],
+              audit['winding_consistent'],
+              int(audit['component_count'] or 0) == 1,
+              audit['opening'],
+              audit['drain'],
+          ]) else 'FAIL'
+          (out/'LIVE_GEOMETRY_AUDIT.json').write_text(
+              json.dumps(audit, indent=2, ensure_ascii=False) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(audit, indent=2, ensure_ascii=False))
+          if audit['verdict'] != 'PASS':
+              raise RuntimeError('Exact free cone prompt did not use the promoted analytic CAD route in DOBO Lab.')
+          PY
+
+      - name: Upload semantic continuity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-live-prompt-intent
+          path: outputs-ci/consolidation-live-prompt
+          if-no-files-found: warn
+          retention-days: 30

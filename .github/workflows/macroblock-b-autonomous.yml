@@ -1,0 +1,130 @@
+name: DOBO Macroblock B Autonomous
+
+on:
+  push:
+    branches:
+      - macroblock-b-autonomous
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dobo-macroblock-b-autonomous
+  cancel-in-progress: true
+
+jobs:
+  validate-manufacturability-and-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: app
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Checkout Macroblock B branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install CAD and geometry dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy scipy scikit-image trimesh networkx shapely Pillow
+
+      - name: Compile Macroblock B foundation
+        run: |
+          python -m py_compile app/product_generators/manufacturability/repair_controller.py
+          python -m py_compile app/product_generators/manufacturability/text_geometry.py
+          python -m py_compile app/product_generators/manufacturability/final_geometry.py
+          python -m py_compile app/product_generators/manufacturability/geometry_repair_strategies.py
+          python -m py_compile app/product_generators/manufacturability/production_orientation.py
+          python -m py_compile app/product_generators/manufacturability/production_handoff.py
+          python -m py_compile app/product_generators/manufacturability/three_mf_project_inspector.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_repair_controller.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_final_geometry.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_geometry_repairs.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_production_orientation.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_3mf_placement.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_planned_3mf_export.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_production_handoff.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_real_overhang_sources.py
+          python -m py_compile app/product_generators/manufacturability/test_macroblock_b_real_repair_audit.py
+          python -m py_compile app/product_generators/manufacturability/product_integration.py
+          python -m py_compile app/product_generators/surface_designer/multicolor_product.py
+
+      - name: Preserve Macroblock A regression contract
+        run: |
+          python -m product_generators.design_interpreter.test_phase_3a_semantic_contract
+          python -m product_generators.design_interpreter.test_phase_3b_semantic_compiler
+          python -m product_generators.design_interpreter.test_phase_3c_prompt_interpreter
+          python -m product_generators.design_interpreter.test_phase_3d_image_interpreter
+          python -m product_generators.design_interpreter.test_phase_3e_proposal_repair
+          python -m product_generators.design_interpreter.test_phase_4a_structural_vocabulary
+          python -m product_generators.design_interpreter.test_phase_4g_4k_visual_acceptance
+          python -m product_generators.design_interpreter.test_phase_4l_4p_facial_volume
+          python -m product_generators.design_interpreter.test_phase_4q_4u_canonical_face
+          python -m product_generators.design_interpreter.test_phase_5_generalized_design_grammar
+          python -m product_generators.design_interpreter.test_phase_6_structural_morphogenesis
+          python -m product_generators.design_interpreter.test_phase_6_advanced_visual_geometry
+          python -m product_generators.design_interpreter.test_macroblock_a_7_8
+          python -m product_generators.design_interpreter.test_macroblock_a2_morphological_integration
+          python -m product_generators.design_interpreter.test_macroblock_a3_continuous_fusion
+          python -m product_generators.design_interpreter.test_macroblock_a4_visible_continuity
+
+      - name: Validate consolidated manufacturing contract
+        run: |
+          python -m product_generators.manufacturability.test_phase_7_8_color_final_production
+          python -m product_generators.manufacturability.test_phase_7_9_consolidated_validator
+
+      - name: Validate real final geometry rules
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_final_geometry
+
+      - name: Validate bounded automatic repair controller
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_repair_controller
+          python -m product_generators.manufacturability.test_macroblock_b_geometry_repairs
+
+      - name: Validate advanced production orientation
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_production_orientation
+
+      - name: Validate planned orientation reaches exported 3MF
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_planned_3mf_export
+
+      - name: Validate real exported 3MF placement
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_3mf_placement
+
+      - name: Diagnose real overhang sources
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_real_overhang_sources
+
+      - name: Validate current real product manufacturing baseline
+        run: |
+          python -m product_generators.manufacturability.test_phase_7_10_real_product_validation
+
+      - name: Audit bounded real-product repair space
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_real_repair_audit
+
+      - name: Build auditable production handoff manifest
+        run: |
+          python -m product_generators.manufacturability.test_macroblock_b_production_handoff
+
+      - name: Upload current production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-macroblock-b-production-baseline
+          path: outputs/product_generators/surface_designer/phase_6_multicolor_3mf
+          if-no-files-found: warn
+          retention-days: 14

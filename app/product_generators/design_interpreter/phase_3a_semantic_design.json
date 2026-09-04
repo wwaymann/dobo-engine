@@ -1,0 +1,119 @@
+{
+  "schema_version": "3A.1",
+  "id": "bear_planter_semantic_probe",
+  "product_kind": "planter",
+  "source": {
+    "kind": "prompt",
+    "prompt": "Maceta orgánica tipo oso, amable y minimalista, con orejas redondas, ojos pequeños, hocico y nariz en relieve.",
+    "image_reference": null
+  },
+  "body": {
+    "family": "character",
+    "height_mm": 120.0,
+    "width_mm": 105.0,
+    "depth_mm": 100.0,
+    "opening_shape": "elliptical",
+    "opening_width_ratio": 0.48,
+    "opening_depth_ratio": 0.40,
+    "style_tags": ["friendly", "minimalist", "rounded"]
+  },
+  "features": [
+    {
+      "id": "left_ear",
+      "concept": "ear",
+      "form_hint": "disc",
+      "surface_effect": "raised",
+      "anchor": {"region": "upper", "horizontal": -0.52, "vertical": 0.88, "roll_degrees": -8.0},
+      "size": {"width_ratio": 0.18, "height_ratio": 0.16, "depth_mm": 2.4},
+      "priority": "required",
+      "can_omit": false,
+      "confidence": 0.96
+    },
+    {
+      "id": "right_ear",
+      "concept": "ear",
+      "form_hint": "disc",
+      "surface_effect": "raised",
+      "anchor": {"region": "upper", "horizontal": 0.52, "vertical": 0.88, "roll_degrees": 8.0},
+      "size": {"width_ratio": 0.18, "height_ratio": 0.16, "depth_mm": 2.4},
+      "priority": "required",
+      "can_omit": false,
+      "confidence": 0.96
+    },
+    {
+      "id": "left_eye",
+      "concept": "eye",
+      "form_hint": "slit",
+      "surface_effect": "recessed",
+      "anchor": {"region": "front", "horizontal": -0.28, "vertical": 0.62, "roll_degrees": -5.0},
+      "size": {"width_ratio": 0.10, "height_ratio": 0.025, "depth_mm": 1.4},
+      "priority": "required",
+      "can_omit": false,
+      "confidence": 0.94
+    },
+    {
+      "id": "right_eye",
+      "concept": "eye",
+      "form_hint": "slit",
+      "surface_effect": "recessed",
+      "anchor": {"region": "front", "horizontal": 0.28, "vertical": 0.62, "roll_degrees": 5.0},
+      "size": {"width_ratio": 0.10, "height_ratio": 0.025, "depth_mm": 1.4},
+      "priority": "required",
+      "can_omit": false,
+      "confidence": 0.94
+    },
+    {
+      "id": "muzzle",
+      "concept": "muzzle",
+      "form_hint": "oval",
+      "surface_effect": "raised",
+      "anchor": {"region": "front", "horizontal": 0.0, "vertical": 0.43, "roll_degrees": 0.0},
+      "size": {"width_ratio": 0.34, "height_ratio": 0.16, "depth_mm": 2.6},
+      "priority": "required",
+      "can_omit": false,
+      "confidence": 0.91
+    },
+    {
+      "id": "nose",
+      "concept": "nose",
+      "form_hint": "disc",
+      "surface_effect": "raised",
+      "anchor": {"region": "front", "horizontal": 0.0, "vertical": 0.49, "roll_degrees": 0.0},
+      "size": {"width_ratio": 0.08, "height_ratio": 0.07, "depth_mm": 2.0},
+      "priority": "preferred",
+      "can_omit": true,
+      "confidence": 0.88
+    }
+  ],
+  "relations": [
+    {"kind": "mirror_of", "subject_id": "right_ear", "object_id": "left_ear", "confidence": 0.99},
+    {"kind": "mirror_of", "subject_id": "right_eye", "object_id": "left_eye", "confidence": 0.99},
+    {"kind": "above", "subject_id": "left_eye", "object_id": "muzzle", "confidence": 0.98},
+    {"kind": "above", "subject_id": "right_eye", "object_id": "muzzle", "confidence": 0.98},
+    {"kind": "centered_on", "subject_id": "nose", "object_id": "muzzle", "confidence": 0.97}
+  ],
+  "manufacturing": {
+    "minimum_wall_mm": 4.0,
+    "minimum_feature_mm": 1.2,
+    "maximum_relief_depth_mm": 3.0,
+    "drainage_required": true,
+    "multicolor_requested": false
+  },
+  "assumptions": [
+    {
+      "field_path": "body.height_mm",
+      "selected_value": "120.0",
+      "reason": "El prompt no indicó tamaño; se utilizó el tamaño medio DOBO.",
+      "confidence": 0.72,
+      "requires_confirmation": false
+    }
+  ],
+  "ambiguities": [
+    {
+      "field_path": "features.muzzle.form_hint",
+      "candidates": ["oval", "capsule"],
+      "question": "¿El hocico debe ser ovalado o más alargado?",
+      "blocking": false
+    }
+  ]
+}

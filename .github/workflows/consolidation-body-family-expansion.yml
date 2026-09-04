@@ -1,0 +1,46 @@
+name: DOBO Consolidation Body Family Expansion
+
+on:
+  pull_request:
+    paths:
+      - 'app/product_generators/design_interpreter/body_family_expansion.py'
+      - '.github/workflows/consolidation-body-family-expansion.yml'
+  workflow_dispatch:
+
+jobs:
+  body-family-expansion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install boundary dependencies
+        run: python -m pip install numpy scipy scikit-image cadquery trimesh
+      - name: Validate five reusable base body families
+        run: |
+          PYTHONPATH=app python - <<'PY'
+          from types import SimpleNamespace
+          from product_generators.design_interpreter.body_family_expansion import GeneralBodyFamilyExpander
+
+          expected = {
+              'tapered_revolution', 'rectangular_prism', 'cuboid', 'ovoid', 'compound_multivolume'
+          }
+          for family in sorted(expected):
+              body = SimpleNamespace(family=family, style_tags=(), width_mm=120.0, depth_mm=100.0, height_mm=110.0)
+              program = SimpleNamespace(body=body, features=(), relations=())
+              motor = {
+                  'fields': [{'id':'legacy_body'}],
+                  'composition': {'field_ids':['legacy_body'], 'blend_mm':2.0},
+                  'vessel': {'shell_field_ids':['legacy_body']},
+                  'morphogenesis': {'field_ids':['legacy_body'], 'profile':'legacy'},
+              }
+              result = GeneralBodyFamilyExpander.apply(motor, program)
+              assert result.applied and result.profile == family
+              assert len(result.field_ids) >= 3
+              assert motor['morphogenesis']['profile'] == family
+              assert tuple(motor['composition']['field_ids'][:len(result.field_ids)]) == result.field_ids
+              assert motor['vessel']['shell_field_ids'] == list(result.field_ids)
+          print('DOBO body family expansion boundary: PASS')
+          print('families:', ', '.join(sorted(expected)))
+          PY

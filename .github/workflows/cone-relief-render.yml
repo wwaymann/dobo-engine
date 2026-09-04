@@ -1,0 +1,43 @@
+name: DOBO Cone Native Relief Render
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - 'app/product_generators/surface_designer/native_text.py'
+      - 'app/product_generators/surface_mapping/cone_mapper.py'
+      - 'tools/dobo_cone_relief_render_check.py'
+      - '.github/workflows/cone-relief-render.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/product_generators/surface_designer/native_text.py'
+      - 'app/product_generators/surface_mapping/cone_mapper.py'
+      - 'tools/dobo_cone_relief_render_check.py'
+      - '.github/workflows/cone-relief-render.yml'
+  workflow_dispatch:
+
+jobs:
+  cone-relief-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install geometry and render stack
+        run: python -m pip install cadquery numpy trimesh matplotlib
+      - name: Generate plain emboss and deboss cone evidence
+        env:
+          PYTHONPATH: app:tools
+          MPLBACKEND: Agg
+        run: python tools/dobo_cone_relief_render_check.py
+      - name: Upload cone relief evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-cone-native-relief-render
+          path: outputs-ci/cone-relief-render/**
+          if-no-files-found: error
+          retention-days: 30

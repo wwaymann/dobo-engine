@@ -1,0 +1,224 @@
+name: DOBO Capability Lab HTTP Primitive Routing
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - 'tools/dobo_capability_lab.py'
+      - 'tools/dobo_capability_lab_live.py'
+      - 'tools/dobo_capability_repairs.py'
+      - 'tools/dobo_retry_repairs.py'
+      - 'app/product_generators/design_interpreter/body_family_expansion.py'
+      - 'app/product_generators/design_interpreter/native_foundational_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
+      - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_text_adapter.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - '.github/workflows/consolidation-capability-lab-http.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/dobo_capability_lab.py'
+      - 'tools/dobo_capability_lab_live.py'
+      - 'tools/dobo_capability_repairs.py'
+      - 'tools/dobo_retry_repairs.py'
+      - 'app/product_generators/design_interpreter/body_family_expansion.py'
+      - 'app/product_generators/design_interpreter/native_foundational_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_tapered_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_tapered_text_adapter.py'
+      - 'app/product_generators/design_interpreter/native_radial_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_cad_adapter.py'
+      - 'app/product_generators/design_interpreter/native_profiled_text_adapter.py'
+      - 'app/product_generators/design_interpreter/structural_pipeline.py'
+      - '.github/workflows/consolidation-capability-lab-http.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-server-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: app:tools
+      DOBO_LAB_NO_BROWSER: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Lab runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install openai jsonschema cadquery numpy scipy trimesh scikit-image shapely Pillow
+
+      - name: Start actual DOBO Lab HTTP server
+        run: |
+          python tools/dobo_capability_lab_live.py > /tmp/dobo-lab.log 2>&1 &
+          echo $! > /tmp/dobo-lab.pid
+          python - <<'PY'
+          import time
+          import urllib.request
+
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8765/', timeout=1) as response:
+                      if response.status == 200:
+                          print('DOBO Lab HTTP server is ready')
+                          break
+              except Exception:
+                  time.sleep(0.25)
+          else:
+              raise RuntimeError('DOBO Lab HTTP server did not become ready.')
+          PY
+
+      - name: Validate served Lab UI integrity contract
+        run: |
+          python - <<'PY'
+          import urllib.request
+
+          with urllib.request.urlopen('http://127.0.0.1:8765/', timeout=5) as response:
+              html = response.read().decode('utf-8')
+
+          checks = {
+              'creased_normals': 'toCreasedNormals' in html,
+              'stale_result_clear': 'clearFailedResult' in html,
+              'failure_placeholder': 'No se muestra geometría de una ejecución anterior.' in html,
+              'old_flat_normals_removed': 'g.computeVertexNormals();mesh=' not in html,
+          }
+          print(checks)
+          if not all(checks.values()):
+              failed = [name for name, passed in checks.items() if not passed]
+              raise RuntimeError(f'Live Lab UI integrity contract failed: {failed}')
+          PY
+
+      - name: POST promoted primitives through browser API
+        run: |
+          mkdir -p outputs-ci/capability-lab-http-primitives
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          from pathlib import Path
+          import urllib.request
+
+          cases = {
+              'cylinder': {
+                  'prompt': 'Crea una maceta cilindro',
+                  'morphology': 'cylindrical',
+                  'route': 'analytic_cad_cylindrical_text',
+                  'vertex_ceiling': 20000,
+              },
+              'triangular_prism': {
+                  'prompt': 'Crea una maceta prisma triangular',
+                  'morphology': 'triangular_prism',
+                  'route': 'analytic_cad_triangular_primitive',
+                  'vertex_ceiling': 20000,
+              },
+              'cone': {
+                  'prompt': 'Crea una maceta cono',
+                  'morphology': 'tapered_revolution',
+                  'route': 'analytic_cad_tapered_primitive',
+                  'vertex_ceiling': 20000,
+              },
+              'sphere': {
+                  'prompt': 'Crea una maceta esfera',
+                  'morphology': 'spherical',
+                  'route': 'analytic_cad_spherical_primitive',
+                  'vertex_ceiling': 30000,
+              },
+              'ovoid': {
+                  'prompt': 'Crea una maceta ovoide',
+                  'morphology': 'ovoid',
+                  'route': 'analytic_cad_ovoid_primitive',
+                  'vertex_ceiling': 30000,
+              },
+          }
+          out = Path('outputs-ci/capability-lab-http-primitives')
+          report = {}
+
+          for name, case in cases.items():
+              payload = json.dumps({'prompt': case['prompt'], 'mode': 'auto'}).encode('utf-8')
+              request = urllib.request.Request(
+                  'http://127.0.0.1:8765/api/generate',
+                  data=payload,
+                  headers={'Content-Type': 'application/json'},
+                  method='POST',
+              )
+              with urllib.request.urlopen(request, timeout=90) as response:
+                  result = json.loads(response.read().decode('utf-8'))
+              (out / f'{name.upper()}_HTTP_RESPONSE.json').write_text(
+                  json.dumps(result, indent=2, ensure_ascii=False) + '\n',
+                  encoding='utf-8',
+              )
+              if not result.get('ok'):
+                  raise RuntimeError(f"HTTP Lab {name} generation failed: {result!r}")
+
+              motor = result.get('motor', {})
+              validation = result.get('validation', {})
+              vessel = result.get('vessel', {})
+              trace = result.get('trace', {})
+              audit = {
+                  'source': result.get('source'),
+                  'profile': result.get('profile'),
+                  'morphology': result.get('morphology'),
+                  'capability_route': motor.get('_capability_route'),
+                  'live_lab_version': trace.get('live_lab_version'),
+                  'trace_route': trace.get('capability_route'),
+                  'vertices': trace.get('vertices'),
+                  'faces': trace.get('faces'),
+                  'watertight': validation.get('watertight'),
+                  'winding_consistent': validation.get('winding_consistent'),
+                  'component_count': validation.get('component_count'),
+                  'opening': bool(vessel.get('opening')),
+                  'drain': bool(vessel.get('drain')),
+              }
+              checks = [
+                  audit['source'] == 'offline-semantic',
+                  audit['morphology'] == case['morphology'],
+                  audit['capability_route'] == case['route'],
+                  audit['trace_route'] == case['route'],
+                  audit['live_lab_version'] == 'LABLIVE.9-profiled-native-text',
+                  bool(audit['watertight']),
+                  bool(audit['winding_consistent']),
+                  int(audit['component_count'] or 0) == 1,
+                  audit['opening'],
+                  audit['drain'],
+                  0 < int(audit['vertices'] or 0) < case['vertex_ceiling'],
+              ]
+              audit['verdict'] = 'PASS' if all(checks) else 'FAIL'
+              report[name] = audit
+              if audit['verdict'] != 'PASS':
+                  raise RuntimeError(f'Actual DOBO Lab HTTP {name} path failed promoted CAD audit: {audit}')
+
+          (out / 'HTTP_PROMOTED_PRIMITIVES_AUDIT.json').write_text(
+              json.dumps(report, indent=2, ensure_ascii=False) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(report, indent=2, ensure_ascii=False))
+          PY
+
+      - name: Print server log on failure
+        if: failure()
+        run: cat /tmp/dobo-lab.log || true
+
+      - name: Stop DOBO Lab server
+        if: always()
+        run: |
+          if [ -f /tmp/dobo-lab.pid ]; then
+            kill "$(cat /tmp/dobo-lab.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload HTTP routing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-capability-lab-http-primitives
+          path: outputs-ci/capability-lab-http-primitives
+          if-no-files-found: warn
+          retention-days: 30

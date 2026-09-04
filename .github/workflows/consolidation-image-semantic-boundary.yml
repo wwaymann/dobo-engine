@@ -1,0 +1,68 @@
+name: DOBO Consolidation Image Semantic Boundary
+
+on:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - '.github/workflows/consolidation-image-semantic-boundary.yml'
+      - 'app/product_generators/design_interpreter/image_interpreter.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-image-semantic-boundary.yml'
+      - 'app/product_generators/design_interpreter/image_interpreter.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-semantic-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify canonical vessel semantics remain top-level
+        run: |
+          mkdir -p outputs-ci/consolidation-image-semantic-boundary
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path('app/product_generators/design_interpreter/image_interpreter.py').read_text(encoding='utf-8')
+          required = {
+              'canonical_body_rule': 'The main vessel body, base, rim/opening and cavity belong to the top-level',
+              'no_duplicate_rule': 'Do not duplicate them as feature entries',
+              'secondary_feature_rule': 'Use features only for secondary visible geometry that is distinct from the',
+              'jpeg_media_type': '".jpg": "image/jpeg"',
+          }
+          checks = {name: marker in source for name, marker in required.items()}
+          forbidden_loss = all(token in source for token in [
+              'rounded_body', 'planter_body', 'plant_opening', 'pot_opening', 'rim or cavity'
+          ])
+          audit = {
+              'schema': 'dobo.consolidation.image_semantic_boundary.1',
+              'checks': checks,
+              'canonical_examples_preserved': forbidden_loss,
+          }
+          audit['verdict'] = 'PASS' if all(checks.values()) and forbidden_loss else 'FAIL'
+          out = Path('outputs-ci/consolidation-image-semantic-boundary/IMAGE_SEMANTIC_BOUNDARY_AUDIT.json')
+          out.write_text(json.dumps(audit, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(audit, indent=2))
+          if audit['verdict'] != 'PASS':
+              raise RuntimeError('Image semantic boundary rules are incomplete.')
+          PY
+
+      - name: Upload image semantic boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-image-semantic-boundary
+          path: outputs-ci/consolidation-image-semantic-boundary
+          if-no-files-found: warn
+          retention-days: 30

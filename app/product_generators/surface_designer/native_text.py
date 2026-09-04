@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import cadquery as cq
 
@@ -11,12 +12,8 @@ from cadquery.func import (
 
 from kernel.geometry.solid_factory import SolidFactory
 
-from product_generators.surface_mapping.cylinder_mapper import (
-    CylinderSurfaceMapper,
-)
-from product_generators.surface_mapping.cone_mapper import (
-    ConeSurfaceMapper,
-)
+from product_generators.surface_mapping.cylinder_mapper import CylinderSurfaceMapper
+from product_generators.surface_mapping.cone_mapper import ConeSurfaceMapper
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,320 +29,294 @@ class NativeSurfaceTextResult:
     def validate(self) -> None:
         if not isinstance(self.shape, cq.Shape):
             raise TypeError("shape must be a CadQuery Shape.")
-
         if not self.shape.isValid():
-            raise RuntimeError(
-                "Native surface text final shape is invalid."
-            )
-
+            raise RuntimeError("Native surface text final shape is invalid.")
         if not isinstance(self.projected_shape, cq.Shape):
-            raise TypeError(
-                "projected_shape must be a CadQuery Shape."
-            )
-
+            raise TypeError("projected_shape must be a CadQuery Shape.")
         if not isinstance(self.text_tool, cq.Shape):
-            raise TypeError(
-                "text_tool must be a CadQuery Shape."
-            )
-
+            raise TypeError("text_tool must be a CadQuery Shape.")
         if self.base_volume <= 0.0:
             raise ValueError("base_volume must be positive.")
-
         if self.final_volume <= 0.0:
             raise ValueError("final_volume must be positive.")
-
         if self.solid_count != 1:
-            raise RuntimeError(
-                "Native text result must contain exactly one body."
-            )
+            raise RuntimeError("Native text result must contain exactly one body.")
 
 
 class NativeSurfaceTextBuilder:
-    """
-    Native CadQuery surface-text implementation.
+    """Native CadQuery surface-text implementation."""
 
-    Cylinder text uses:
-        cadquery.func.text(..., spine, base_surface)
-        cadquery.func.offset(...)
-
-    Offset direction:
-        emboss -> positive / outward
-        deboss -> negative / inward
-    """
-
-    def apply(
-        self,
-        *,
-        base_shape: cq.Shape,
-        surface,
-        text_value: str,
-        size: float,
-        depth: float,
-        mode: str,
-        font: str = "Arial",
-        kind: str = "regular",
-        u_offset: float = 0.0,
-        v_offset: float = 0.0,
-    ) -> NativeSurfaceTextResult:
+    def apply(self, *, base_shape: cq.Shape, surface, text_value: str, size: float,
+              depth: float, mode: str, font: str = "Arial", kind: str = "regular",
+              u_offset: float = 0.0, v_offset: float = 0.0) -> NativeSurfaceTextResult:
         if not isinstance(base_shape, cq.Shape) or not base_shape.isValid():
-            raise ValueError(
-                "base_shape must be a valid CadQuery Shape."
-            )
-
+            raise ValueError("base_shape must be a valid CadQuery Shape.")
         if not isinstance(text_value, str) or not text_value.strip():
             raise ValueError("text_value cannot be empty.")
-
-        size = float(size)
-        depth = float(depth)
-
+        size, depth = float(size), float(depth)
         if size <= 0.0 or depth <= 0.0:
             raise ValueError("size and depth must be positive.")
-
         if mode not in {"emboss", "deboss"}:
-            raise ValueError(
-                "mode must be 'emboss' or 'deboss'."
-            )
+            raise ValueError("mode must be 'emboss' or 'deboss'.")
 
         if isinstance(surface, CylinderSurfaceMapper):
             projected, tool = self._cylinder_text(
-                base_shape=base_shape,
-                surface=surface,
-                text_value=text_value,
-                size=size,
-                depth=depth,
-                mode=mode,
-                font=font,
-                kind=kind,
-                u_offset=float(u_offset),
-                v_offset=float(v_offset),
+                base_shape=base_shape, surface=surface, text_value=text_value,
+                size=size, depth=depth, mode=mode, font=font, kind=kind,
+                u_offset=float(u_offset), v_offset=float(v_offset),
             )
         elif isinstance(surface, ConeSurfaceMapper):
-            raise NotImplementedError(
-                "Native text Phase 2 currently validates "
-                "cylindrical surfaces only. Cone support is next."
+            projected, tool = self._cone_text(
+                base_shape=base_shape, surface=surface, text_value=text_value,
+                size=size, depth=depth, mode=mode, font=font, kind=kind,
+                u_offset=float(u_offset), v_offset=float(v_offset),
             )
         else:
-            raise NotImplementedError(
-                "Native text Phase 2 currently validates "
-                "cylindrical surfaces only."
-            )
+            raise NotImplementedError("Native text supports cylindrical and conical surfaces.")
 
         base_contract = SolidFactory.from_shape(
-            geometry=base_shape.clean(),
-            source="surface_designer:native_text_base",
-            metadata={
-                "text": text_value,
-                "mode": mode,
-            },
+            geometry=base_shape.clean(), source="surface_designer:native_text_base",
+            metadata={"text": text_value, "mode": mode},
         )
-
         try:
             if mode == "emboss":
-                raw = base_shape.fuse(
-                    tool,
-                    tol=0.01,
-                )
+                current = base_shape
+                tool_solids = tuple(tool.Solids())
+                if not tool_solids:
+                    raise RuntimeError("Native text emboss tool contains no solids.")
+                for glyph_index, glyph in enumerate(tool_solids):
+                    before = float(current.Volume())
+                    joined = current.fuse(glyph, tol=0.01).clean()
+                    solids = tuple(joined.Solids())
+                    if len(solids) != 1:
+                        raise RuntimeError(f"Native text emboss glyph {glyph_index} did not join the vessel body.")
+                    after = float(solids[0].Volume())
+                    if after <= before + 1e-8:
+                        raise RuntimeError(f"Native text emboss glyph {glyph_index} produced no measurable joined volume.")
+                    current = solids[0]
+                raw = current
             else:
-                raw = base_shape.cut(
-                    tool,
-                    tol=0.01,
-                )
+                raw = base_shape.cut(tool, tol=0.01)
+        except RuntimeError:
+            raise
         except Exception as error:
-            raise RuntimeError(
-                "Native surface text Boolean failed."
-            ) from error
+            raise RuntimeError("Native surface text Boolean failed.") from error
 
-        cleaned = raw.clean()
-
-        final_shape = self._single_primary_solid(
-            cleaned
-        )
-
+        final_shape = self._single_primary_solid(raw.clean())
         final_contract = SolidFactory.from_shape(
-            geometry=final_shape,
-            source="surface_designer:native_text_final",
-            metadata={
-                "text": text_value,
-                "mode": mode,
-            },
+            geometry=final_shape, source="surface_designer:native_text_final",
+            metadata={"text": text_value, "mode": mode},
         )
-
         result = NativeSurfaceTextResult(
-            shape=final_contract.geometry,
-            projected_shape=projected,
-            text_tool=tool,
-            base_volume=float(base_contract.volume),
-            final_volume=float(final_contract.volume),
-            mode=mode,
-            solid_count=len(
-                final_contract.geometry.Solids()
-            ),
+            shape=final_contract.geometry, projected_shape=projected, text_tool=tool,
+            base_volume=float(base_contract.volume), final_volume=float(final_contract.volume),
+            mode=mode, solid_count=len(final_contract.geometry.Solids()),
         )
         result.validate()
-
-        delta = (
-            result.final_volume
-            - result.base_volume
-            if mode == "emboss"
-            else result.base_volume
-            - result.final_volume
-        )
-
+        delta = result.final_volume - result.base_volume if mode == "emboss" else result.base_volume - result.final_volume
         if delta <= 1e-8:
-            raise RuntimeError(
-                f"Native text {mode} produced no measurable "
-                f"volume change."
-            )
-
+            raise RuntimeError(f"Native text {mode} produced no measurable volume change.")
         return result
 
-    def _cylinder_text(
-        self,
+    @staticmethod
+    def _frontal_arc(radius: float, z: float, text_value: str, size: float) -> cq.Edge:
+        """Return a bounded constant-Z arc on a rotational receiving surface."""
+        glyph_count = max(1, len(text_value.strip()))
+        estimated_width = max(size, glyph_count * size * 0.72)
+        arc_length = min(estimated_width * 1.18, math.pi * radius * 0.82)
+        half_angle = max(math.radians(3.0), min(0.5 * arc_length / radius, math.radians(73.0)))
+
+        def point(angle: float) -> cq.Vector:
+            return cq.Vector(radius * math.sin(angle), radius * math.cos(angle), z)
+
+        left = point(-half_angle)
+        middle = point(0.0)
+        right = point(half_angle)
+        arc = cq.Edge.makeThreePointArc(right, middle, left)
+        if not arc.isValid():
+            raise RuntimeError("Native frontal text arc is invalid.")
+        return arc
+
+    @staticmethod
+    def _projection_size_limit(radius: float, text_value: str, requested_size: float) -> float:
+        """Keep a line inside the same frontal arc without globally shrinking the block."""
+        glyph_count = max(1, len(text_value.strip()))
+        usable_arc = math.pi * radius * 0.82 * 0.92
+        width_per_size = max(1.0, glyph_count * 0.72) * 1.18
+        safe_size = usable_arc / width_per_size
+        return min(float(requested_size), safe_size)
+
+    @staticmethod
+    def _angular_bounds_center(shape: cq.Shape, reference_angle: float) -> float:
+        """Measure the visual angular midpoint of projected glyph geometry."""
+        angles: list[float] = []
+        for vertex in shape.Vertices():
+            point = vertex.toTuple()
+            angle = math.atan2(float(point[1]), float(point[0]))
+            while angle - reference_angle > math.pi:
+                angle -= 2.0 * math.pi
+            while angle - reference_angle < -math.pi:
+                angle += 2.0 * math.pi
+            angles.append(angle)
+        if not angles:
+            center = shape.Center()
+            return math.atan2(float(center.y), float(center.x))
+        return 0.5 * (min(angles) + max(angles))
+
+    @staticmethod
+    def _relief_tool(
+        projected: cq.Shape,
         *,
-        base_shape: cq.Shape,
-        surface: CylinderSurfaceMapper,
-        text_value: str,
-        size: float,
         depth: float,
         mode: str,
-        font: str,
-        kind: str,
-        u_offset: float,
-        v_offset: float,
-    ) -> tuple[cq.Shape, cq.Shape]:
-        cylindrical_faces = [
-            face
-            for face in base_shape.Faces()
-            if face.geomType() == "CYLINDER"
-        ]
+        outward_sign: float,
+    ) -> cq.Shape:
+        """Build relief along the receiving face orientation.
 
+        OCC cylindrical and conical projection faces expose opposite offset
+        directions in the current CadQuery path-text implementation. The caller
+        supplies the known outward sign so emboss always protrudes and deboss
+        always cuts into the vessel instead of depending on face orientation.
+        """
+        sign = 1.0 if float(outward_sign) >= 0.0 else -1.0
+        try:
+            if mode == "emboss":
+                outward_depth = min(depth, 1.50)
+                anchor_depth = min(0.16, max(0.06, 0.10 * outward_depth))
+                outward_tool = offset(projected, sign * outward_depth, cap=True)
+                inward_anchor = offset(projected, -sign * anchor_depth, cap=True)
+                tool = outward_tool.fuse(inward_anchor, tol=0.01).clean()
+            else:
+                tool = offset(projected, -sign * depth, cap=True)
+        except Exception as error:
+            raise RuntimeError(f"Native text {mode} offset failed.") from error
+        if not tool.isValid():
+            raise RuntimeError(f"Native text {mode} offset tool is invalid.")
+        return tool
+
+    @staticmethod
+    def _front_rotation(projected: cq.Shape, *, local_radius: float, u_offset: float) -> float:
+        measured_center = NativeSurfaceTextBuilder._angular_bounds_center(
+            projected, math.pi / 2.0
+        )
+        target_center = -math.pi / 2.0
+        semantic_offset = float(u_offset) / float(local_radius)
+        return math.degrees(target_center - measured_center + semantic_offset)
+
+    def _cylinder_text(self, *, base_shape: cq.Shape, surface: CylinderSurfaceMapper,
+                       text_value: str, size: float, depth: float, mode: str,
+                       font: str, kind: str, u_offset: float,
+                       v_offset: float) -> tuple[cq.Shape, cq.Shape]:
+        cylindrical_faces = [face for face in base_shape.Faces() if face.geomType() == "CYLINDER"]
         if not cylindrical_faces:
-            raise RuntimeError(
-                "Base shape contains no cylindrical face."
-            )
+            raise RuntimeError("Base shape contains no cylindrical face.")
+        lateral_face = max(cylindrical_faces, key=lambda face: float(face.Area()))
 
-        lateral_face = max(
-            cylindrical_faces,
-            key=lambda face: float(face.Area()),
+        projection_size = self._projection_size_limit(
+            float(surface.radius), text_value, size
         )
-
-        circular_edges = [
-            edge
-            for edge in base_shape.Edges()
-            if edge.geomType() == "CIRCLE"
-        ]
-
-        if not circular_edges:
-            raise RuntimeError(
-                "Cylinder contains no circular edge for text spine."
-            )
-
-        reference_edge = min(
-            circular_edges,
-            key=lambda edge: abs(
-                float(edge.Center().z)
-                - float(v_offset)
-            ),
-        )
-
-        dz = (
-            float(v_offset)
-            - float(reference_edge.Center().z)
-        )
-
-        spine = reference_edge.translate(
-            (0.0, 0.0, dz)
-        )
-
-        if not spine.isValid():
-            raise RuntimeError(
-                "Native text spine is invalid."
-            )
-
-        projected = text(
-            text_value,
-            size,
-            spine,
-            lateral_face,
-            font=font,
-            kind=kind,
-            halign="center",
-            valign="center",
-        )
-
-        if not projected.isValid():
-            raise RuntimeError(
-                "Native projected text is invalid."
-            )
-
-        # Critical correction:
-        # lateral cylinder normals point outward.
-        # emboss needs outward thickness; deboss must penetrate inward.
-        signed_depth = (
-            depth
-            if mode == "emboss"
-            else -depth
+        spine = self._frontal_arc(
+            float(surface.radius), float(v_offset), text_value, projection_size
         )
 
         try:
-            tool = offset(
-                projected,
-                signed_depth,
-                cap=True,
+            projected = text(
+                text_value, projection_size, spine, lateral_face, font=font, kind=kind,
+                halign="center", valign="center",
             )
-        except Exception as error:
-            raise RuntimeError(
-                f"Native text {mode} offset failed."
-            ) from error
-
-        if not tool.isValid():
-            raise RuntimeError(
-                f"Native text {mode} offset tool is invalid."
+        except ValueError as error:
+            if "Null TopoDS_Shape" not in str(error):
+                raise
+            projection_size *= 0.94
+            spine = self._frontal_arc(
+                float(surface.radius), float(v_offset), text_value, projection_size
             )
+            try:
+                projected = text(
+                    text_value, projection_size, spine, lateral_face,
+                    font=font, kind=kind, halign="center", valign="center",
+                )
+            except ValueError as retry_error:
+                raise RuntimeError(
+                    f"Native cylindrical text projection failed for {text_value!r} "
+                    f"at safe size {projection_size:.3f} mm."
+                ) from retry_error
+        if not projected.isValid():
+            raise RuntimeError("Native projected text is invalid.")
 
-        if abs(u_offset) > 1e-12:
-            angle_deg = (
-                float(u_offset)
-                / float(surface.radius)
-                * 180.0
-                / 3.141592653589793
+        tool = self._relief_tool(
+            projected, depth=depth, mode=mode, outward_sign=-1.0
+        )
+        angle_deg = self._front_rotation(
+            projected, local_radius=float(surface.radius), u_offset=u_offset
+        )
+        projected = projected.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
+        tool = tool.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
+        return projected, tool
+
+    def _cone_text(self, *, base_shape: cq.Shape, surface: ConeSurfaceMapper,
+                   text_value: str, size: float, depth: float, mode: str,
+                   font: str, kind: str, u_offset: float,
+                   v_offset: float) -> tuple[cq.Shape, cq.Shape]:
+        conical_faces = [face for face in base_shape.Faces() if face.geomType() == "CONE"]
+        if not conical_faces:
+            raise RuntimeError("Base shape contains no conical face.")
+        lateral_face = max(conical_faces, key=lambda face: float(face.Area()))
+
+        z = min(max(float(v_offset), 0.12 * float(surface.height)), 0.88 * float(surface.height))
+        local_radius = float(surface.radius_at(z))
+        projection_size = self._projection_size_limit(local_radius, text_value, size)
+        spine = self._frontal_arc(local_radius, z, text_value, projection_size)
+
+        try:
+            projected = text(
+                text_value, projection_size, spine, lateral_face,
+                font=font, kind=kind, halign="center", valign="center",
             )
+        except ValueError as error:
+            if "Null TopoDS_Shape" not in str(error):
+                raise
+            projection_size *= 0.92
+            spine = self._frontal_arc(local_radius, z, text_value, projection_size)
+            try:
+                projected = text(
+                    text_value, projection_size, spine, lateral_face,
+                    font=font, kind=kind, halign="center", valign="center",
+                )
+            except ValueError as retry_error:
+                raise RuntimeError(
+                    f"Native conical text projection failed for {text_value!r} "
+                    f"at safe size {projection_size:.3f} mm."
+                ) from retry_error
+        if not projected.isValid():
+            raise RuntimeError("Native projected conical text is invalid.")
 
-            projected = projected.rotate(
-                (0.0, 0.0, 0.0),
-                (0.0, 0.0, 1.0),
-                angle_deg,
-            )
-
-            tool = tool.rotate(
-                (0.0, 0.0, 0.0),
-                (0.0, 0.0, 1.0),
-                angle_deg,
-            )
-
+        tool = self._relief_tool(
+            projected, depth=depth, mode=mode, outward_sign=1.0
+        )
+        angle_deg = self._front_rotation(
+            projected, local_radius=local_radius, u_offset=u_offset
+        )
+        projected = projected.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
+        tool = tool.rotate(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle_deg
+        )
         return projected, tool
 
     @staticmethod
-    def _single_primary_solid(
-        shape: cq.Shape,
-    ) -> cq.Shape:
-        solids = tuple(
-            shape.Solids()
-        )
-
+    def _single_primary_solid(shape: cq.Shape) -> cq.Shape:
+        solids = tuple(shape.Solids())
         if not solids:
-            raise RuntimeError(
-                "Native text Boolean produced no solids."
-            )
-
-        primary = max(
-            solids,
-            key=lambda solid: float(solid.Volume()),
-        ).clean()
-
+            raise RuntimeError("Native text Boolean produced no solids.")
+        if len(solids) != 1:
+            raise RuntimeError(f"Native text Boolean produced {len(solids)} disconnected solids.")
+        primary = solids[0].clean()
         if not primary.isValid():
-            raise RuntimeError(
-                "Native text primary body is invalid."
-            )
-
+            raise RuntimeError("Native text primary body is invalid.")
         return primary

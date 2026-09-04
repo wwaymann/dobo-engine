@@ -1,0 +1,115 @@
+name: DOBO Consolidation Parametric Text Continuity
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [integration-consolidation-core]
+    paths:
+      - '.github/workflows/consolidation-parametric-text-continuity.yml'
+      - 'tools/dobo_parametric_text_planter.py'
+      - 'tools/dobo_blender_acceptance.py'
+      - 'app/product_generators/surface_designer/face_selector.py'
+      - 'app/product_generators/surface_designer/native_text_face.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidation-parametric-text-continuity.yml'
+      - 'tools/dobo_parametric_text_planter.py'
+      - 'tools/dobo_blender_acceptance.py'
+      - 'app/product_generators/surface_designer/face_selector.py'
+      - 'app/product_generators/surface_designer/native_text_face.py'
+
+permissions:
+  contents: read
+
+jobs:
+  continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: app
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install existing DOBO stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cadquery numpy Pillow trimesh
+
+      - name: Generate one hollow decorated planter through existing capabilities
+        run: |
+          rm -rf outputs-ci/consolidation-parametric-text
+          mkdir -p outputs-ci/consolidation-parametric-text
+          python tools/dobo_parametric_text_planter.py \
+            --shape sphere \
+            --text "DOBO CONSOLIDADO" \
+            --size 14.0 \
+            --depth 1.8 \
+            --output-root outputs-ci/consolidation-parametric-text
+
+      - name: Validate integration boundary and preserved design intent
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, math
+          import trimesh
+
+          root = Path('outputs-ci/consolidation-parametric-text')
+          manifest = json.loads((root/'EXECUTED_SPECIFICATION.json').read_text(encoding='utf-8'))
+          assert manifest['shape'] == 'sphere'
+          assert manifest['body']['wall_mm'] == 4.0
+          assert manifest['body']['opening_radius_mm'] == 25.0
+          assert manifest['text']['content'] == 'DOBO CONSOLIDADO'
+          assert manifest['text']['mode'] == 'emboss'
+
+          stls = list(root.glob('*.stl'))
+          if len(stls) != 1:
+              raise RuntimeError(f'Expected one STL, found {len(stls)}')
+          mesh = trimesh.load_mesh(stls[0], process=True)
+          if mesh.is_empty or len(mesh.faces) < 100:
+              raise RuntimeError('Generated STL is empty or implausibly small')
+          if not all(math.isfinite(float(v)) for v in mesh.vertices.reshape(-1)):
+              raise RuntimeError('Generated STL contains non-finite vertices')
+          if min(float(v) for v in mesh.extents) <= 1.0:
+              raise RuntimeError(f'Generated STL has degenerate extents: {mesh.extents.tolist()}')
+          print('CONTINUITY BOUNDARY OK', mesh.extents.tolist(), 'faces', len(mesh.faces))
+          PY
+
+      - name: Install Blender and render review views
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri libglx-mesa0
+          STL=$(find outputs-ci/consolidation-parametric-text -maxdepth 1 -name '*.stl' -print -quit)
+          mkdir -p outputs-ci/consolidation-parametric-text/renders
+          xvfb-run -a -s '-screen 0 1280x1024x24' blender --background --python tools/dobo_blender_acceptance.py -- \
+            --stl "$STL" --output-root outputs-ci/consolidation-parametric-text/renders --label consolidated --resolution 512
+
+      - name: Build visual review sheet
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          root = Path('outputs-ci/consolidation-parametric-text')
+          views = ['front','side','top','iso']
+          imgs = [Image.open(root/'renders'/f'consolidated_{v}.png').convert('RGB') for v in views]
+          sheet = Image.new('RGB',(2048,580),'white')
+          d = ImageDraw.Draw(sheet)
+          d.text((12,10), 'DOBO CONSOLIDATION — sphere + opening/cavity + embossed text', fill='black')
+          for i,(v,img) in enumerate(zip(views,imgs)):
+              sheet.paste(img,(i*512,60)); d.text((i*512+12,44),v,fill='black')
+          sheet.save(root/'DOBO_CONSOLIDATION_PARAMETRIC_TEXT_REVIEW.jpg',quality=94)
+          PY
+
+      - name: Upload continuity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobo-consolidation-parametric-text-continuity
+          path: outputs-ci/consolidation-parametric-text
+          if-no-files-found: error
+          retention-days: 30

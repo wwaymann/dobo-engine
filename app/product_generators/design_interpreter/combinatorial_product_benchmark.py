@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+from pathlib import Path
+from zipfile import ZipFile
+
+import matplotlib.pyplot as plt
+import numpy as np
+import trimesh
+from PIL import Image, ImageDraw, ImageFont
+
+from .prompt_interpreter import OpenAIResponsesSemanticClient, PromptSemanticInterpreter
+from .semantic_surface_bridge import SemanticSurfaceIntentBridge
+from .structural_pipeline import DoboStructuralPipeline
+from product_generators.manufacturability.profile import ManufacturingProfile
+
+CASES = (
+    {"id": "01_spherical_sofia", "label": "Esférica · SOFIA", "text": "SOFIA", "prompt": "Haz una maceta esférica hueca con abertura superior circular, la palabra SOFIA en sobrerrelieve centrada al frente y debajo una hoja simple en sobrerrelieve."},
+    {"id": "02_truncated_cone_juan", "label": "Troncocónica · JUAN", "text": "JUAN", "prompt": "Haz una maceta troncocónica funcional, claramente más estrecha abajo y más ancha en la boca, con la palabra JUAN en sobrerrelieve al frente y tres nervaduras verticales decorativas suaves."},
+    {"id": "03_rectangular_casa", "label": "Rectangular · CASA", "text": "CASA", "prompt": "Haz una jardinera rectangular horizontal de caras controladas, hueca y con abertura superior, con la palabra CASA en sobrerrelieve al frente y una hoja decorativa en bajorrelieve a un lado."},
+    {"id": "04_ovoid_luna", "label": "Ovoide · LUNA", "text": "LUNA", "prompt": "Haz una maceta ovoide escultórica, de vientre ancho y boca superior funcional, con la palabra LUNA en sobrerrelieve frontal y un pequeño emblema ovalado en bajorrelieve debajo."},
+    {"id": "05_origami_nova", "label": "Origami · NOVA", "text": "NOVA", "prompt": "Haz una maceta de estilo origami arquitectónico, plegada y facetada, hueca con abertura superior, con la palabra NOVA en sobrerrelieve frontal y una línea decorativa geométrica en relieve."},
+    {"id": "06_organic_mar", "label": "Orgánica ondulada · MAR", "text": "MAR", "prompt": "Haz una maceta orgánica asimétrica de superficie ondulada y biomórfica, hueca con abertura superior, con la palabra MAR en sobrerrelieve al frente y dos hojas decorativas suaves debajo."},
+)
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", value.strip().lower()).strip("_")
+
+
+def _load_mesh(path: str) -> trimesh.Trimesh:
+    mesh = trimesh.load_mesh(path, process=True)
+    if isinstance(mesh, trimesh.Scene):
+        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
+    if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
+        raise RuntimeError("STL did not contain a usable triangle mesh.")
+    return mesh
+
+
+def _render_mesh(mesh: trimesh.Trimesh, target: Path, elev: float, azim: float) -> None:
+    vertices = np.asarray(mesh.vertices, dtype=float)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    if len(faces) > 65000:
+        faces = faces[::max(1, len(faces) // 65000)]
+    used = np.unique(faces.reshape(-1))
+    remap = np.full(len(vertices), -1, dtype=np.int64)
+    remap[used] = np.arange(len(used))
+    v = vertices[used]
+    f = remap[faces]
+    v = v - (v.min(axis=0) + v.max(axis=0)) / 2.0
+    v = v / float(max(np.maximum(np.ptp(v, axis=0), 1.0)))
+    fig = plt.figure(figsize=(6.2, 6.2))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.plot_trisurf(v[:, 0], v[:, 1], v[:, 2], triangles=f, linewidth=0.02, shade=True)
+    ax.view_init(elev=elev, azim=azim)
+    ax.set_xlim(-0.58, 0.58); ax.set_ylim(-0.58, 0.58); ax.set_zlim(-0.58, 0.58)
+    ax.set_box_aspect((1, 1, 1)); ax.set_axis_off()
+    fig.tight_layout(pad=0)
+    fig.savefig(target, dpi=180, bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+
+
+def run(output_root: str | Path = "outputs-ci/combinatorial-product-benchmark") -> dict:
+    root = Path(output_root)
+    root.mkdir(parents=True, exist_ok=True)
+    if not os.environ.get("OPENAI_API_KEY", "").strip():
+        raise RuntimeError("OPENAI_API_KEY is not configured; live prompt benchmark cannot run.")
+    client = OpenAIResponsesSemanticClient(model=os.environ.get("DOBO_SEMANTIC_MODEL", "gpt-4.1-mini"))
+    interpreter = PromptSemanticInterpreter(client)
+    pipeline = DoboStructuralPipeline()
+    manufacturing_profile = ManufacturingProfile()
+    records: list[dict] = []
+
+    for case in CASES:
+        case_dir = root / case["id"]
+        case_dir.mkdir(parents=True, exist_ok=True)
+        (case_dir / "PROMPT.txt").write_text(case["prompt"] + "\n", encoding="utf-8")
+        record = {"id": case["id"], "label": case["label"], "prompt": case["prompt"], "expected_text": case["text"], "status": "FAIL", "stage": "start", "error": None, "semantic_family": None, "style_tags": [], "body_profile": None, "morphology_profile": None, "text_preserved": False, "decoration_preserved": False, "opening_valid": False, "watertight": False, "winding_consistent": False, "production_size_valid": False, "stl": None, "three_mf": None, "three_mf_valid": False, "surface_layers": 0, "color_zones": 0, "renders": {}}
+        try:
+            record["stage"] = "semantic_interpretation"
+            interpreted = interpreter.interpret(case["prompt"])
+            semantic = interpreted.program
+            semantic.validate()
+            record["semantic_family"] = semantic.body.family
+            record["style_tags"] = list(semantic.body.style_tags)
+            expected = _slug(case["text"])
+            text_features = [f for f in semantic.features if f.form_hint == "text"]
+            record["text_preserved"] = any(expected in _slug(f.concept) for f in text_features)
+            record["decoration_preserved"] = any(f.form_hint != "text" for f in semantic.features)
+            record["opening_valid"] = semantic.body.opening_shape in {"circular", "elliptical", "polygonal"} and 0.15 <= semantic.body.opening_width_ratio <= 0.95 and 0.15 <= semantic.body.opening_depth_ratio <= 0.95
+            record["stage"] = "surface_bridge"
+            surface_intents = SemanticSurfaceIntentBridge.compile(semantic)
+            record["stage"] = "physical_generation"
+            result = pipeline.generate_from_semantic(semantic, output_root=case_dir / "generated", interpreter_version=interpreted.trace.interpreter_version, model=interpreted.trace.model, response_id=interpreted.trace.response_id, surface_intents=surface_intents)
+            result.validate()
+            record["body_profile"] = result.trace.body_profile
+            motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
+            record["morphology_profile"] = motor.get("morphogenesis", {}).get("profile")
+            record["surface_layers"] = result.trace.surface_layers
+            record["color_zones"] = result.trace.color_zones
+            stl_target = case_dir / f"{case['id']}.stl"
+            mf_target = case_dir / f"{case['id']}.3mf"
+            shutil.copy2(result.stl_path, stl_target); shutil.copy2(result.three_mf_path, mf_target)
+            record["stl"] = str(stl_target); record["three_mf"] = str(mf_target)
+            mesh = _load_mesh(str(stl_target))
+            record["watertight"] = bool(mesh.is_watertight); record["winding_consistent"] = bool(mesh.is_winding_consistent)
+            extents = np.asarray(mesh.extents, dtype=float)
+            record["mesh_extents_mm"] = extents.tolist()
+            record["production_size_valid"] = bool(extents[0] <= manufacturing_profile.max_size_x and extents[1] <= manufacturing_profile.max_size_y and extents[2] <= manufacturing_profile.max_size_z)
+            record["stage"] = "three_mf_validation"
+            with ZipFile(mf_target, "r") as package:
+                corrupt = package.testzip(); names = set(package.namelist())
+            record["three_mf_valid"] = bool(corrupt is None and {"[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"}.issubset(names))
+            record["stage"] = "rendering"
+            for name, elev, azim in (("front", 0, 0), ("side", 0, 90), ("top", 90, -90), ("iso", 28, 42)):
+                render_path = case_dir / f"{name}.png"
+                _render_mesh(mesh, render_path, elev, azim)
+                record["renders"][name] = str(render_path)
+            required = (record["text_preserved"], record["decoration_preserved"], record["opening_valid"], record["watertight"], record["winding_consistent"], record["production_size_valid"], record["three_mf_valid"], record["surface_layers"] >= 1, Path(record["renders"]["iso"]).is_file())
+            record["status"] = "PASS" if all(required) else "PARTIAL"
+            record["stage"] = "complete"
+        except Exception as exc:
+            record["error"] = f"{type(exc).__name__}: {exc}"
+            print(f"CASE FAILURE {case['id']} at {record['stage']}: {record['error']}")
+        records.append(record)
+        (case_dir / "AUDIT.json").write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    tile_w, tile_h = 760, 820
+    board = Image.new("RGB", (tile_w * 3, tile_h * 2), "white")
+    draw = ImageDraw.Draw(board)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 30); small = ImageFont.truetype("DejaVuSans.ttf", 20)
+    except Exception:
+        font = ImageFont.load_default(); small = font
+    for idx, record in enumerate(records):
+        x = (idx % 3) * tile_w; y = (idx // 3) * tile_h
+        iso = record["renders"].get("iso")
+        if iso and Path(iso).is_file():
+            image = Image.open(iso).convert("RGB"); image.thumbnail((700, 650))
+            board.paste(image, (x + (tile_w-image.width)//2, y + 62))
+        else:
+            draw.rectangle((x+30, y+80, x+tile_w-30, y+650), outline="black", width=2)
+            draw.text((x+90, y+330), "SIN RENDER\nGENERACIÓN FALLÓ", fill="black", font=font)
+        draw.text((x+18, y+15), record["label"], fill="black", font=font)
+        detail = f"{record['status']}  family={record['semantic_family']}  morph={record['morphology_profile']}"
+        draw.text((x+18, y+735), detail[:72], fill="black", font=small)
+        if record["error"]:
+            draw.text((x+18, y+770), record["error"][:78], fill="black", font=small)
+    board_path = root / "DOBO_COMBINATORIAL_RENDER_BOARD.jpg"
+    board.save(board_path, quality=92)
+    summary = {"schema": "dobo.consolidation.combinatorial_product_benchmark.1", "branch": "integration-consolidation-core", "case_count": len(records), "pass": sum(r["status"] == "PASS" for r in records), "partial": sum(r["status"] == "PARTIAL" for r in records), "fail": sum(r["status"] == "FAIL" for r in records), "cases": records, "render_board": str(board_path)}
+    (root / "BENCHMARK_SUMMARY.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(json.dumps({k: summary[k] for k in ("case_count", "pass", "partial", "fail", "render_board")}, indent=2))
+    if summary["pass"] + summary["partial"] == 0:
+        raise RuntimeError("Combinatorial benchmark produced no usable DOBO product.")
+    return summary
+
+
+if __name__ == "__main__":
+    run()
