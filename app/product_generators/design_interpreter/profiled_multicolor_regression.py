@@ -17,18 +17,20 @@ TEXT_COLOR = "#6D3BFF"
 ACCENT_COLOR = "#19A974"
 
 
-def _surface_intents() -> tuple[SurfaceLayerIntent, ...]:
+def _surface_intents(*, effect: str, multiline: bool) -> tuple[SurfaceLayerIntent, ...]:
+    payload = "PLANTA\\nUNA\\nIDEA" if multiline else "WALTER"
+    text_effect = "recessed" if effect == "recessed" else "raised"
     return (
         SurfaceLayerIntent(
             id="profiled_text_material",
             kind="text",
-            payload="WALTER",
+            payload=payload,
             region="front",
             u_center=0.5,
             v_center=0.52,
             width_fraction=0.55,
-            height_fraction=0.14,
-            effect="raised",
+            height_fraction=0.12 if multiline else 0.14,
+            effect=text_effect,
             depth_mm=1.2,
             color=TEXT_COLOR,
             filament_slot=2,
@@ -55,18 +57,37 @@ def run() -> dict:
     pipeline = DoboStructuralPipeline()
     records: list[dict] = []
 
-    for variant in PROFILE_CATALOG:
-        name = f"{variant}_raised_three_color"
+    cases = [
+        (variant, "raised", False)
+        for variant in PROFILE_CATALOG
+    ]
+    cases.extend(
+        (variant, "recessed", False)
+        for variant in PROFILE_CATALOG
+    )
+    cases.extend(
+        (variant, "raised" if index % 2 == 0 else "recessed", True)
+        for index, variant in enumerate(PROFILE_CATALOG)
+    )
+
+    for variant, effect, multiline in cases:
+        name = (
+            f"{variant}_{effect}_{'multiline' if multiline else 'single'}_three_color"
+        )
         try:
             result = pipeline.generate_from_semantic(
-                _with_text(variant, effect="raised", multiline=False),
+                _with_text(variant, effect=effect, multiline=multiline),
                 output_root=OUTPUT / name,
-                surface_intents=_surface_intents(),
+                surface_intents=_surface_intents(
+                    effect=effect, multiline=multiline
+                ),
                 base_color=BASE_COLOR,
                 generation_budget_seconds=180.0,
             )
             motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
             multicolor = motor.get("_profiled_multicolor", {})
+            expected_mode = "deboss" if effect == "recessed" else "emboss"
+            expected_lines = 3 if multiline else 1
             assertions = {
                 "route": motor.get("_capability_route") == "analytic_cad_profiled_text",
                 "compound_contract": bool(multicolor.get("compound_object")),
@@ -74,6 +95,8 @@ def run() -> dict:
                     multicolor.get("method")
                     == "cad_volume_partition_creality_compound"
                 ),
+                "relief_mode": multicolor.get("text_relief_mode") == expected_mode,
+                "line_count": int(multicolor.get("text_lines", 0)) == expected_lines,
                 "three_regions": result.three_mf.material_count == 3,
                 "three_color_zones": result.surface_report.color_zones == 3,
                 "filament_slots": tuple(result.three_mf.filament_slots) == (1, 2, 3),
@@ -88,6 +111,12 @@ def run() -> dict:
                     float(multicolor.get("volume_final_mm3", 0.0)) * 2.0e-4,
                 ),
                 "physical_text_material": result.three_mf.painted_triangle_count > 0,
+                "visible_deboss": (
+                    float(multicolor.get("visible_recess_depth_mm", 0.0)) > 0.0
+                    and float(multicolor.get("open_recess_volume_mm3", 0.0)) > 0.0
+                    if expected_mode == "deboss"
+                    else float(multicolor.get("visible_recess_depth_mm", 0.0)) == 0.0
+                ),
                 "watertight": bool(result.mesh_result.watertight),
                 "one_component": int(result.mesh_result.component_count) == 1,
             }
@@ -96,6 +125,8 @@ def run() -> dict:
                 {
                     "name": name,
                     "variant": variant,
+                    "effect": effect,
+                    "multiline": multiline,
                     "status": "PASS" if not failed else "FAIL",
                     "failed_assertions": failed,
                     "three_mf": result.three_mf_path,
@@ -106,6 +137,10 @@ def run() -> dict:
                     "non_body_material_triangles": (
                         result.three_mf.painted_triangle_count
                     ),
+                    "relief_mode": multicolor.get("text_relief_mode"),
+                    "text_lines": multicolor.get("text_lines"),
+                    "visible_recess_depth_mm": multicolor.get("visible_recess_depth_mm"),
+                    "open_recess_volume_mm3": multicolor.get("open_recess_volume_mm3"),
                     "volume_error_mm3": result.three_mf.volume_error_mm3,
                     "assertions": assertions,
                 }
@@ -115,14 +150,15 @@ def run() -> dict:
                 {
                     "name": name,
                     "variant": variant,
+                    "effect": effect,
+                    "multiline": multiline,
                     "status": "ERROR",
                     "error_type": type(error).__name__,
                     "error": str(error),
                 }
             )
-
     summary = {
-        "schema": "dobo.profiled_multicolor_regression.1",
+        "schema": "dobo.profiled_multicolor_regression.2",
         "case_count": len(records),
         "pass": sum(record["status"] == "PASS" for record in records),
         "fail": sum(record["status"] != "PASS" for record in records),
