@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.5-compact-multiline-profile-layout"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.6-topology-safe-multiline-export"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -321,11 +321,11 @@ def _apply_text_block(
         minimum, float(first_feature.size.height_ratio) * height
     )
     # Multiline blocks cross several different meridian slopes. Limiting each
-    # line to 8% of vessel height keeps glyph prisms local to their receiving
+    # line to 9% of vessel height keeps glyph prisms local to their receiving
     # surface instead of spanning profile transitions. Single-line sizing is
     # unchanged.
     slot_height = (
-        min(requested_slot_height, 0.08 * height)
+        min(requested_slot_height, 0.09 * height)
         if multiline else requested_slot_height
     )
     gap = 0.18 * slot_height if multiline else 0.0
@@ -398,6 +398,40 @@ def decorate_profiled_mesh_result_with_native_text(
     )
     mesh = _load_mesh(stl_path)
     components = tuple(mesh.split(only_watertight=False))
+    mesh_normalization = "default"
+
+    # A valid OCC solid can occasionally tessellate with sub-tolerance seams
+    # around several curved glyph faces. First weld those seams at 0.01 mm,
+    # still below the authored 0.02 mm STL tolerance. If topology remains
+    # invalid, tessellate the same CAD solid more finely and repeat the weld.
+    if (
+        len(components) != 1
+        or not mesh.is_watertight
+        or not mesh.is_winding_consistent
+    ):
+        mesh.merge_vertices(digits_vertex=2)
+        mesh.remove_unreferenced_vertices()
+        mesh.process(validate=True)
+        components = tuple(mesh.split(only_watertight=False))
+        mesh_normalization = "weld_0_01_mm"
+
+    if (
+        len(components) != 1
+        or not mesh.is_watertight
+        or not mesh.is_winding_consistent
+    ):
+        cq.exporters.export(
+            final,
+            str(stl_path),
+            tolerance=0.015,
+            angularTolerance=0.035,
+        )
+        mesh = _load_mesh(stl_path)
+        mesh.merge_vertices(digits_vertex=2)
+        mesh.remove_unreferenced_vertices()
+        mesh.process(validate=True)
+        components = tuple(mesh.split(only_watertight=False))
+        mesh_normalization = "fine_0_015_mm_weld_0_01_mm"
 
     checks = dict(getattr(mesh_result, "semantic_checks", {}) or {})
     checks["native_profiled_text_volume_changed"] = abs(final_volume - base_volume) > 1e-8
@@ -421,6 +455,7 @@ def decorate_profiled_mesh_result_with_native_text(
         "base_volume_mm3": base_volume,
         "final_volume_mm3": final_volume,
         "volume_delta_mm3": final_volume - base_volume,
+        "mesh_normalization": mesh_normalization,
     }
 
     decorated = replace(
