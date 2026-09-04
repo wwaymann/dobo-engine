@@ -122,7 +122,7 @@ function makeSubstrate(center,size,rimY){
  const radius=Math.max(2,openingDiameter*.5-wallInset);
  const y=substrateSurfaceY(size,rimY);
  const tex=textureCanvas(plantState.substrate,1024);
- const mat=new THREE.MeshStandardMaterial({color:substrateColor(),map:tex.map,bumpMap:tex.bumpMap,bumpScale:plantState.substrate==='soil'?1.15:1.8,roughness:plantState.substrate==='white_stone'?.82:.98,metalness:0,side:THREE.DoubleSide});
+ const mat=new THREE.MeshStandardMaterial({color:substrateColor(),map:tex.map,bumpMap:tex.bumpMap,bumpScale:plantState.substrate==='soil'?1.15:1.8,roughness:plantState.substrate==='white_stone' ? 0.82 : 0.98,metalness:0,side:THREE.DoubleSide});
  const disc=new THREE.Mesh(new THREE.CircleGeometry(radius,96),mat);disc.rotation.x=-Math.PI/2;disc.position.set(center.x,y,center.z);disc.receiveShadow=true;disc.userData={visual_only:true,exportable:false,role:'substrate',surface_y:y};g.add(disc);
  g.name='DOBO_VISUAL_ONLY_SUBSTRATE';g.userData={visual_only:true,exportable:false,substrate:plantState.substrate};return g
 }
