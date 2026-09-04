@@ -205,7 +205,7 @@ def _profile_text_style(program) -> dict[str, str]:
             break
     resolved = _resolved_font_contract(selected)
     resolved["layout"] = "wrap" if "text_layout_wrap" in tags else "front"
-    resolved["wrap_target_fraction"] = "0.96"
+    resolved["wrap_target_fraction"] = "0.99"
     return resolved
 
 
