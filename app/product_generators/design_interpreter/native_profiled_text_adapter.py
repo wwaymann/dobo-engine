@@ -38,10 +38,11 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.2-robust-profile-surface-band"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.3-stable-profile-relief-booleans"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
+_BOOLEAN_TOLERANCE_MM = 0.005
 
 
 def uses_native_profiled_text(program: DesignSemanticProgram) -> bool:
@@ -148,9 +149,9 @@ def _surface_band(
         # highly sloped wall section and split the vessel.  Cap the engraving
         # depth to a conservative fraction of the actual wall while retaining
         # a clearly printable recessed mark.
-        safe_depth = max(0.65, min(0.85, 0.28 * wall))
-        inward = min(max(float(requested_depth), 0.65), safe_depth)
-        outward = 0.12
+        safe_depth = max(0.35, min(0.45, 0.12 * wall))
+        inward = min(max(float(requested_depth), 0.35), safe_depth)
+        outward = 0.18
     else:
         raise ValueError(f"Unsupported profiled text mode: {mode!r}")
     expanded = _offset_profile_solid(route, outward)
@@ -273,16 +274,16 @@ def _apply_line(
 
         before = float(current.Volume())
         for prism_index, prism in enumerate(prisms):
-            tool = prism.intersect(band, tol=0.01).clean()
+            tool = prism.intersect(band, tol=_BOOLEAN_TOLERANCE_MM).clean()
             if not tool.isValid() or float(tool.Volume()) <= 1e-7:
                 raise RuntimeError(
                     f"Profiled {mode} glyph {glyph_index} {glyph!r}, part "
                     f"{prism_index}, missed the receiving surface."
                 )
             raw = (
-                current.fuse(tool, tol=0.01)
+                current.fuse(tool, tol=_BOOLEAN_TOLERANCE_MM)
                 if mode == "emboss"
-                else current.cut(tool, tol=0.01)
+                else current.cut(tool, tol=_BOOLEAN_TOLERANCE_MM)
             ).clean()
             solids = tuple(raw.Solids())
             if len(solids) != 1:
