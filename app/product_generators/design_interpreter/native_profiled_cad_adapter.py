@@ -22,11 +22,11 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 
 
-PROFILED_CAD_ADAPTER_VERSION = "PCAD.3-expanded-text-zone-saucer"
+PROFILED_CAD_ADAPTER_VERSION = "PCAD.4-design-surface-style-contract"
 _PROFILED_ROUTE = "analytic_cad_profiled_revolution"
-_PROFILE_SAMPLES_PER_SPAN = 10
-_STL_TOLERANCE_MM = 0.02
-_STL_ANGULAR_TOLERANCE_RAD = 0.045
+_PROFILE_SAMPLES_PER_SPAN = 18
+_STL_TOLERANCE_MM = 0.015
+_STL_ANGULAR_TOLERANCE_RAD = 0.035
 _PREVIOUS_GENERATE = None
 _PREVIOUS_EXPAND = None
 
@@ -127,6 +127,33 @@ def _plain_motor(motor: dict[str, Any]) -> bool:
         and not hierarchy.get("templates")
         and not hierarchy.get("roots")
     )
+
+
+_PROFILE_FONT_STYLES: dict[str, tuple[str, str]] = {
+    "font_clean": ("DejaVu Sans", "regular"),
+    "font_strong": ("DejaVu Sans", "bold"),
+    "font_editorial": ("DejaVu Serif", "bold"),
+    "font_classic": ("DejaVu Serif", "regular"),
+    "font_tech": ("DejaVu Sans Mono", "bold"),
+}
+
+
+def _profile_text_style(program) -> dict[str, str]:
+    tags = {_plain(tag) for tag in program.body.style_tags}
+    font_name, font_kind = _PROFILE_FONT_STYLES["font_strong"]
+    selected = "font_strong"
+    for tag, contract in _PROFILE_FONT_STYLES.items():
+        if tag in tags:
+            selected = tag
+            font_name, font_kind = contract
+            break
+    layout = "wrap" if "text_layout_wrap" in tags else "front"
+    return {
+        "font_style": selected,
+        "font": font_name,
+        "kind": font_kind,
+        "layout": layout,
+    }
 
 
 def _profile_text_zone(profile: tuple[tuple[float,float], ...]) -> dict[str, Any]:
