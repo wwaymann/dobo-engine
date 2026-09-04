@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.7-stable-full-multiline-matrix"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.8-adaptive-multiline-topology"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -307,6 +307,8 @@ def _apply_text_block(
     shape: cq.Shape,
     route: dict[str, Any],
     program: DesignSemanticProgram,
+    *,
+    multiline_slot_fraction: float = 0.09,
 ) -> tuple[cq.Shape, float, float, int, int]:
     entries = tuple(_line_contract(program))
     if not entries:
@@ -320,12 +322,13 @@ def _apply_text_block(
     requested_slot_height = max(
         minimum, float(first_feature.size.height_ratio) * height
     )
-    # Multiline blocks cross several different meridian slopes. Limiting each
-    # line to 8% of vessel height keeps glyph prisms local to their receiving
-    # surface instead of spanning profile transitions. Single-line sizing is
-    # unchanged.
+    # Multiline blocks cross several different meridian slopes. The normal
+    # contract uses 9% of vessel height. A caller may request the compact 8%
+    # fallback only after the normal CAD tessellation proves topologically
+    # unstable on a high-curvature profile. Single-line sizing is unchanged.
+    slot_fraction = min(0.09, max(0.08, float(multiline_slot_fraction)))
     slot_height = (
-        min(requested_slot_height, 0.08 * height)
+        min(requested_slot_height, slot_fraction * height)
         if multiline else requested_slot_height
     )
     gap = 0.18 * slot_height if multiline else 0.0
@@ -433,6 +436,46 @@ def decorate_profiled_mesh_result_with_native_text(
         components = tuple(mesh.split(only_watertight=False))
         mesh_normalization = "fine_0_015_mm_weld_0_01_mm"
 
+    multiline_slot_fraction = 0.09
+    if (
+        line_count > 1
+        and (
+            len(components) != 1
+            or not mesh.is_watertight
+            or not mesh.is_winding_consistent
+        )
+    ):
+        # A small subset of strongly curved profiles can create OCC STL
+        # T-junctions when a 9%-high multiline glyph crosses a meridian
+        # transition. Rebuild the same physical text at 8% only after the
+        # normal route has demonstrably failed topology. This avoids shrinking
+        # profiles that are already stable.
+        multiline_slot_fraction = 0.08
+        final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
+            base,
+            route,
+            program,
+            multiline_slot_fraction=multiline_slot_fraction,
+        )
+        cq.exporters.export(
+            final,
+            str(stl_path),
+            tolerance=_STL_TOLERANCE_MM,
+            angularTolerance=_STL_ANGULAR_TOLERANCE_RAD,
+        )
+        mesh = _load_mesh(stl_path)
+        components = tuple(mesh.split(only_watertight=False))
+        if (
+            len(components) != 1
+            or not mesh.is_watertight
+            or not mesh.is_winding_consistent
+        ):
+            mesh.merge_vertices(digits_vertex=2)
+            mesh.remove_unreferenced_vertices()
+            mesh.process(validate=True)
+            components = tuple(mesh.split(only_watertight=False))
+        mesh_normalization = "adaptive_multiline_0_08"
+
     checks = dict(getattr(mesh_result, "semantic_checks", {}) or {})
     checks["native_profiled_text_volume_changed"] = abs(final_volume - base_volume) > 1e-8
     checks["native_profiled_text_one_component"] = len(components) == 1
@@ -456,6 +499,7 @@ def decorate_profiled_mesh_result_with_native_text(
         "final_volume_mm3": final_volume,
         "volume_delta_mm3": final_volume - base_volume,
         "mesh_normalization": mesh_normalization,
+        "multiline_slot_fraction": multiline_slot_fraction,
     }
 
     decorated = replace(
