@@ -40,7 +40,7 @@ on:
 jobs:
   profiled-cad-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       PYTHONPATH: app
     steps:
@@ -74,17 +74,13 @@ jobs:
           python - <<'PY'
           import dobo_capability_lab_live as lab
 
+          from product_generators.design_interpreter.native_profiled_cad_adapter import (
+              PROFILE_LABELS,
+          )
+
           prompts = [
-              "Crea una maceta ánfora ahusada",
-              "Crea una maceta urna globular",
-              "Crea una maceta barril",
-              "Crea una maceta cuello estrecho",
-              "Crea una maceta borde ensanchado",
-              "Crea una maceta tronco invertido",
-              "Crea una maceta reloj de arena",
-              "Crea una maceta ahusada alta",
-              "Crea una maceta ovoide alta",
-              "Crea una maceta urna pedestal",
+              f"Crea una maceta {label}"
+              for label in PROFILE_LABELS.values()
           ]
           variants = []
           for prompt in prompts:
@@ -98,7 +94,7 @@ jobs:
               assert result["vessel"]["opening"] is not None, prompt
               assert result["vessel"]["drain"] is not None, prompt
               variants.append(motor["morphogenesis"]["profile_variant"])
-          assert len(set(variants)) == 10, variants
+          assert len(set(variants)) == len(PROFILE_LABELS), variants
           print({"case_count": len(prompts), "pass": len(prompts), "variants": variants})
           PY
 

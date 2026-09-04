@@ -88,6 +88,7 @@ def run() -> dict:
                 "line_count": int(text.get("line_count", 0)) == expected_lines,
                 "glyph_count": int(text.get("applied_glyph_count", 0)) == expected_glyphs,
                 "mapping": text.get("method") == "local_radius_slope_surface_band",
+                "text_zone": text.get("text_zone_id") == "front_primary",
                 "watertight": bool(result.mesh_result.watertight),
                 "winding_consistent": bool(result.mesh_result.winding_consistent),
                 "one_component": int(result.mesh_result.component_count) == 1,

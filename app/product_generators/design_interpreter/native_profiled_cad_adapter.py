@@ -9,6 +9,7 @@ generator. The same revolve/shell/drain implementation builds every body.
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+import math
 import unicodedata
 
 import cadquery as cq
@@ -21,7 +22,7 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 
 
-PROFILED_CAD_ADAPTER_VERSION = "PCAD.2-smooth-dense-profile"
+PROFILED_CAD_ADAPTER_VERSION = "PCAD.3-expanded-text-zone-saucer"
 _PROFILED_ROUTE = "analytic_cad_profiled_revolution"
 _PROFILE_SAMPLES_PER_SPAN = 10
 _STL_TOLERANCE_MM = 0.02
@@ -30,74 +31,75 @@ _PREVIOUS_GENERATE = None
 _PREVIOUS_EXPAND = None
 
 
+PROFILE_CORE_VARIANTS = (
+    "amphora_tapered", "urn_bellied", "barrel", "narrow_neck",
+    "flared_rim", "inverted_taper", "hourglass", "tall_taper",
+    "oval_tall", "pedestal_urn",
+)
+
+
 PROFILE_CATALOG: dict[str, tuple[tuple[float, float], ...]] = {
-    "amphora_tapered": (
-        (0.00, 0.50), (0.10, 0.62), (0.40, 0.90),
-        (0.72, 0.78), (0.88, 0.45), (1.00, 0.52),
-    ),
-    "urn_bellied": (
-        (0.00, 0.58), (0.08, 0.68), (0.35, 1.00),
-        (0.70, 0.88), (0.88, 0.55), (1.00, 0.62),
-    ),
-    "barrel": (
-        (0.00, 0.75), (0.15, 0.90), (0.50, 1.00),
-        (0.85, 0.90), (1.00, 0.76),
-    ),
-    "narrow_neck": (
-        (0.00, 0.58), (0.12, 0.70), (0.55, 1.00),
-        (0.82, 0.72), (0.92, 0.42), (1.00, 0.45),
-    ),
-    "flared_rim": (
-        (0.00, 0.62), (0.15, 0.76), (0.65, 0.90),
-        (0.88, 0.62), (0.96, 0.66), (1.00, 0.90),
-    ),
-    "inverted_taper": (
-        (0.00, 0.55), (0.08, 0.58), (0.90, 0.86), (1.00, 0.95),
-    ),
-    "hourglass": (
-        (0.00, 0.82), (0.12, 0.78), (0.50, 0.48),
-        (0.85, 0.78), (1.00, 0.90),
-    ),
-    "tall_taper": (
-        (0.00, 0.45), (0.10, 0.50), (0.85, 0.72), (1.00, 0.75),
-    ),
-    "oval_tall": (
-        (0.00, 0.55), (0.12, 0.70), (0.50, 1.00),
-        (0.88, 0.72), (1.00, 0.62),
-    ),
-    "pedestal_urn": (
-        (0.00, 0.40), (0.08, 0.55), (0.20, 0.45),
-        (0.45, 0.70), (0.78, 0.58), (0.92, 0.52), (1.00, 0.82),
-    ),
+    "amphora_tapered": ((0.00,0.50),(0.10,0.62),(0.40,0.90),(0.72,0.78),(0.88,0.45),(1.00,0.52)),
+    "urn_bellied": ((0.00,0.58),(0.08,0.68),(0.35,1.00),(0.70,0.88),(0.88,0.55),(1.00,0.62)),
+    "barrel": ((0.00,0.75),(0.15,0.90),(0.50,1.00),(0.85,0.90),(1.00,0.76)),
+    "narrow_neck": ((0.00,0.58),(0.12,0.70),(0.55,1.00),(0.82,0.72),(0.92,0.42),(1.00,0.45)),
+    "flared_rim": ((0.00,0.62),(0.15,0.76),(0.65,0.90),(0.88,0.62),(0.96,0.66),(1.00,0.90)),
+    "inverted_taper": ((0.00,0.55),(0.08,0.58),(0.90,0.86),(1.00,0.95)),
+    "hourglass": ((0.00,0.82),(0.12,0.78),(0.50,0.48),(0.85,0.78),(1.00,0.90)),
+    "tall_taper": ((0.00,0.45),(0.10,0.50),(0.85,0.72),(1.00,0.75)),
+    "oval_tall": ((0.00,0.55),(0.12,0.70),(0.50,1.00),(0.88,0.72),(1.00,0.62)),
+    "pedestal_urn": ((0.00,0.40),(0.08,0.55),(0.20,0.45),(0.45,0.70),(0.78,0.58),(0.92,0.52),(1.00,0.82)),
+    "bell_vase": ((0.00,0.50),(0.12,0.58),(0.55,0.72),(0.82,0.88),(1.00,0.98)),
+    "chalice": ((0.00,0.42),(0.10,0.50),(0.22,0.38),(0.48,0.48),(0.72,0.86),(0.92,0.95),(1.00,0.92)),
+    "tulip": ((0.00,0.55),(0.12,0.62),(0.45,0.72),(0.72,0.85),(0.90,1.00),(1.00,0.92)),
+    "pear": ((0.00,0.48),(0.12,0.62),(0.40,0.95),(0.62,1.00),(0.82,0.75),(1.00,0.58)),
+    "teardrop": ((0.00,0.44),(0.10,0.56),(0.40,0.95),(0.58,1.00),(0.78,0.72),(0.92,0.50),(1.00,0.46)),
+    "bulb": ((0.00,0.50),(0.10,0.65),(0.35,1.00),(0.62,0.95),(0.82,0.70),(1.00,0.62)),
+    "capsule": ((0.00,0.66),(0.12,0.82),(0.35,0.92),(0.65,0.92),(0.88,0.82),(1.00,0.68)),
+    "wide_bowl": ((0.00,0.68),(0.10,0.80),(0.38,0.96),(0.70,1.00),(0.90,0.96),(1.00,0.90)),
+    "goblet": ((0.00,0.42),(0.10,0.52),(0.24,0.40),(0.40,0.46),(0.62,0.75),(0.85,0.96),(1.00,0.92)),
+    "bottle": ((0.00,0.58),(0.10,0.65),(0.45,0.82),(0.70,0.78),(0.82,0.58),(0.92,0.42),(1.00,0.45)),
+    "shoulder_jar": ((0.00,0.62),(0.10,0.70),(0.45,0.90),(0.68,1.00),(0.82,0.82),(0.92,0.62),(1.00,0.66)),
+    "double_bulb": ((0.00,0.52),(0.10,0.65),(0.30,0.88),(0.46,0.68),(0.62,0.92),(0.78,0.72),(0.90,0.55),(1.00,0.60)),
+    "trumpet": ((0.00,0.52),(0.10,0.58),(0.55,0.62),(0.75,0.72),(0.90,0.90),(1.00,1.00)),
+    "s_curve": ((0.00,0.58),(0.15,0.72),(0.38,0.84),(0.55,0.62),(0.75,0.70),(0.90,0.88),(1.00,0.80)),
+    "footed_bowl": ((0.00,0.42),(0.08,0.58),(0.18,0.48),(0.30,0.60),(0.55,0.90),(0.78,1.00),(0.92,0.96),(1.00,0.90)),
+    "drum": ((0.00,0.78),(0.08,0.82),(0.35,0.90),(0.65,0.90),(0.92,0.82),(1.00,0.78)),
+    "cone_bell": ((0.00,0.52),(0.10,0.58),(0.65,0.82),(0.88,0.92),(1.00,1.00)),
+    "lantern": ((0.00,0.56),(0.08,0.70),(0.20,0.82),(0.38,0.94),(0.55,0.82),(0.72,0.96),(0.90,0.80),(1.00,0.68)),
+    "spindle": ((0.00,0.48),(0.10,0.56),(0.40,0.78),(0.55,0.95),(0.70,0.78),(0.90,0.56),(1.00,0.50)),
+    "low_urn": ((0.00,0.62),(0.10,0.76),(0.38,1.00),(0.68,0.94),(0.86,0.78),(1.00,0.72)),
+}
+
+
+PROFILE_LABELS: dict[str, str] = {
+    "amphora_tapered":"anfora ahusada","urn_bellied":"urna globular","barrel":"barril",
+    "narrow_neck":"cuello estrecho","flared_rim":"borde ensanchado","inverted_taper":"tronco invertido",
+    "hourglass":"reloj de arena","tall_taper":"ahusada alta","oval_tall":"ovoide alta","pedestal_urn":"urna pedestal",
+    "bell_vase":"vaso campana","chalice":"caliz","tulip":"tulipan","pear":"pera","teardrop":"gota",
+    "bulb":"bulbosa","capsule":"capsula","wide_bowl":"cuenco ancho","goblet":"copa alta","bottle":"botella",
+    "shoulder_jar":"jarra de hombros","double_bulb":"doble bulbo","trumpet":"trompeta","s_curve":"curva s",
+    "footed_bowl":"cuenco pedestal","drum":"tambor","cone_bell":"cono campana","lantern":"farol","spindle":"huso","low_urn":"urna baja",
+}
+
+
+PROFILE_DEFAULT_DIMENSIONS: dict[str, tuple[float, float]] = {
+    **{variant:(120.0,120.0) for variant in PROFILE_CORE_VARIANTS},
+    "bell_vase":(130.0,120.0),"chalice":(140.0,120.0),"tulip":(125.0,120.0),"pear":(130.0,125.0),
+    "teardrop":(140.0,118.0),"bulb":(120.0,130.0),"capsule":(145.0,110.0),"wide_bowl":(90.0,145.0),
+    "goblet":(145.0,115.0),"bottle":(155.0,105.0),"shoulder_jar":(130.0,125.0),"double_bulb":(145.0,115.0),
+    "trumpet":(140.0,120.0),"s_curve":(135.0,120.0),"footed_bowl":(110.0,135.0),"drum":(105.0,130.0),
+    "cone_bell":(125.0,125.0),"lantern":(135.0,120.0),"spindle":(150.0,110.0),"low_urn":(95.0,140.0),
 }
 
 
 PROFILE_ALIASES: dict[str, str] = {
-    "amphora": "amphora_tapered",
-    "amphora_tapered": "amphora_tapered",
-    "anfora": "amphora_tapered",
-    "anfora_ahusada": "amphora_tapered",
-    "urn": "urn_bellied",
-    "urn_bellied": "urn_bellied",
-    "urna": "urn_bellied",
-    "urna_globular": "urn_bellied",
-    "barrel": "barrel",
-    "barril": "barrel",
-    "narrow_neck": "narrow_neck",
-    "cuello_estrecho": "narrow_neck",
-    "flared_rim": "flared_rim",
-    "borde_ensanchado": "flared_rim",
-    "inverted_taper": "inverted_taper",
-    "tronco_invertido": "inverted_taper",
-    "hourglass": "hourglass",
-    "reloj_de_arena": "hourglass",
-    "tall_taper": "tall_taper",
-    "ahusada_alta": "tall_taper",
-    "oval_tall": "oval_tall",
-    "ovoide_alto": "oval_tall",
-    "pedestal_urn": "pedestal_urn",
-    "urna_pedestal": "pedestal_urn",
+    **{variant: variant for variant in PROFILE_CATALOG},
+    **{label.replace(" ","_"): variant for variant,label in PROFILE_LABELS.items()},
+    "amphora":"amphora_tapered","anfora":"amphora_tapered","urn":"urn_bellied","urna":"urn_bellied",
+    "bell":"bell_vase","campana":"bell_vase","copa":"goblet","jarra":"shoulder_jar","gota_agua":"teardrop",
 }
+
 
 
 def _plain(value: object) -> str:
@@ -127,6 +129,65 @@ def _plain_motor(motor: dict[str, Any]) -> bool:
     )
 
 
+def _profile_text_zone(profile: tuple[tuple[float,float], ...]) -> dict[str, Any]:
+    dense = _smooth_profile(profile)
+    best = (-1.0, 0.52, _radius_at(dense, 0.52), 0.0)
+    for index in range(47):
+        z = 0.28 + index * (0.46 / 46.0)
+        radius = _radius_at(dense, z)
+        step = 0.008
+        slope = abs(_radius_at(dense, min(1.0,z+step)) - _radius_at(dense, max(0.0,z-step))) / (2.0*step)
+        score = radius * (1.0 - 0.18*min(1.0,abs(z-0.52)/0.30)) / (1.0 + 0.55*slope)
+        if score > best[0]:
+            best = (score, z, radius, slope)
+    _, z, radius, slope = best
+    return {
+        "id":"front_primary","region":"front","center_z_ratio":round(z,4),
+        "local_radius_ratio":round(radius,4),"slope_abs":round(slope,4),
+        "width_fraction":0.55,"height_fraction":0.14,
+        "emboss_allowed":True,"deboss_allowed":True,
+    }
+
+
+def _saucer_contract(route: dict[str, Any]) -> dict[str, Any]:
+    maximum_radius = 0.5 * float(route["diameter_mm"])
+    profile = tuple((float(p[0]),float(p[1])) for p in route["normalized_profile"])
+    base_radius = maximum_radius * _radius_at(profile, 0.0)
+    drain_radius = 0.5 * float(route["drain_diameter_mm"])
+    outer_radius = max(base_radius + 6.0, drain_radius + 12.0)
+    wall, floor, wall_height, support_height = 2.0, 1.8, 6.0, 1.2
+    support_ring = max(drain_radius+5.0, min(0.55*base_radius, outer_radius-wall-5.0))
+    return {
+        "outer_radius_mm":round(outer_radius,4),"base_footprint_radius_mm":round(base_radius,4),
+        "floor_mm":floor,"wall_mm":wall,"wall_height_mm":wall_height,
+        "reservoir_depth_mm":wall_height-floor,"support_height_mm":support_height,
+        "support_pad_radius_mm":3.5,"support_ring_radius_mm":round(support_ring,4),
+        "drain_clearance_mm":support_height,
+        "surface_regions":["saucer_body","saucer_rim","saucer_supports"],
+        "color_regions":["saucer_body","saucer_rim","saucer_supports"],
+    }
+
+
+def _profiled_saucer(route: dict[str, Any]) -> cq.Shape:
+    contract = route.get("saucer")
+    if not isinstance(contract, dict):
+        raise RuntimeError("Profiled saucer contract is missing.")
+    outer_radius=float(contract["outer_radius_mm"]); wall=float(contract["wall_mm"])
+    floor=float(contract["floor_mm"]); wall_height=float(contract["wall_height_mm"])
+    support_height=float(contract["support_height_mm"]); pad_radius=float(contract["support_pad_radius_mm"])
+    support_ring=float(contract["support_ring_radius_mm"])
+    outer=cq.Workplane("XY").circle(outer_radius).extrude(wall_height).val()
+    inner=(cq.Workplane("XY").workplane(offset=floor).circle(outer_radius-wall).extrude(wall_height-floor+1.0).val())
+    shape=outer.cut(inner).clean()
+    for angle_deg in (45.0,135.0,225.0,315.0):
+        angle=math.radians(angle_deg); x=support_ring*math.cos(angle); y=support_ring*math.sin(angle)
+        pad=(cq.Workplane("XY").workplane(offset=floor-0.20).center(x,y).circle(pad_radius).extrude(support_height+0.20).val())
+        shape=shape.fuse(pad,tol=0.005).clean()
+    if not shape.isValid() or len(tuple(shape.Solids())) != 1:
+        raise RuntimeError("Profiled saucer must be one valid printable solid.")
+    return shape
+
+
 def _expand_with_profiled_cad(cls, motor: dict[str, Any], program):
     result = _PREVIOUS_EXPAND(cls, motor, program)
     variant = profile_variant(program)
@@ -143,9 +204,10 @@ def _expand_with_profiled_cad(cls, motor: dict[str, Any], program):
 
     motor["morphogenesis"]["profile"] = "profiled_revolution"
     motor["morphogenesis"]["profile_variant"] = variant
-    motor["_profiled_revolution"] = {
+    route = {
         "adapter_version": PROFILED_CAD_ADAPTER_VERSION,
         "variant": variant,
+        "label": PROFILE_LABELS[variant],
         "diameter_mm": diameter,
         "height_mm": float(program.body.height_mm),
         "wall_mm": float(vessel.get("wall_mm", program.manufacturing.minimum_wall_mm)),
@@ -153,11 +215,14 @@ def _expand_with_profiled_cad(cls, motor: dict[str, Any], program):
         "drain_required": drain_radius > 0.0,
         "drain_diameter_mm": 2.0 * drain_radius,
         "control_profile": [list(point) for point in PROFILE_CATALOG[variant]],
-        "normalized_profile": [
-            list(point) for point in _smooth_profile(PROFILE_CATALOG[variant])
-        ],
+        "normalized_profile": [list(point) for point in _smooth_profile(PROFILE_CATALOG[variant])],
         "profile_samples_per_span": _PROFILE_SAMPLES_PER_SPAN,
+        "surface_regions": ["body_main","rim","base","text_zone"],
+        "color_regions": ["body_main","rim","base","text"],
     }
+    route["text_zone"] = _profile_text_zone(PROFILE_CATALOG[variant])
+    route["saucer"] = _saucer_contract(route)
+    motor["_profiled_revolution"] = route
     return result
 
 
@@ -356,6 +421,23 @@ def _generate_profiled(motor: dict[str, Any]) -> OrganicVesselResult:
     )
     mesh = _load_mesh(stl_path)
 
+    saucer_shape = _profiled_saucer(route)
+    saucer_path = output_dir / f"{output['basename']}.saucer.stl"
+    cq.exporters.export(saucer_shape, str(saucer_path), tolerance=_STL_TOLERANCE_MM, angularTolerance=_STL_ANGULAR_TOLERANCE_RAD)
+    saucer_mesh = _load_mesh(saucer_path)
+    saucer_components = tuple(saucer_mesh.split(only_watertight=False))
+    saucer_contract = dict(route["saucer"])
+    motor["_profiled_saucer"] = {
+        "adapter_version": PROFILED_CAD_ADAPTER_VERSION,
+        "stl_path": str(saucer_path),
+        **saucer_contract,
+        "watertight": bool(saucer_mesh.is_watertight),
+        "winding_consistent": bool(saucer_mesh.is_winding_consistent),
+        "component_count": len(saucer_components),
+        "vertex_count": int(len(saucer_mesh.vertices)),
+        "face_count": int(len(saucer_mesh.faces)),
+    }
+
     height = float(route["height_mm"])
     maximum_radius = 0.5 * float(route["diameter_mm"])
     wall = float(route["wall_mm"])
@@ -391,6 +473,12 @@ def _generate_profiled(motor: dict[str, Any]) -> OrganicVesselResult:
         "below_base_is_empty": not _inside(shape, (base_probe, 0.0, -1.0)),
         "profile_is_revolved": True,
         "profile_variant_known": str(route["variant"]) in PROFILE_CATALOG,
+        "text_zone_available": isinstance(route.get("text_zone"), dict) and route["text_zone"].get("id") == "front_primary",
+        "saucer_generated": saucer_path.is_file(),
+        "saucer_watertight": bool(saucer_mesh.is_watertight),
+        "saucer_winding_consistent": bool(saucer_mesh.is_winding_consistent),
+        "saucer_one_component": len(saucer_components) == 1,
+        "saucer_drain_clearance": float(saucer_contract["drain_clearance_mm"]) >= 1.0,
     }
 
     elapsed = perf_counter() - started

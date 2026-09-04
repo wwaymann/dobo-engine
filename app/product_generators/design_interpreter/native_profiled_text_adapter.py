@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.8-adaptive-multiline-topology"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.9-expanded-profile-text-zone"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -500,6 +500,7 @@ def decorate_profiled_mesh_result_with_native_text(
         "volume_delta_mm3": final_volume - base_volume,
         "mesh_normalization": mesh_normalization,
         "multiline_slot_fraction": multiline_slot_fraction,
+        "text_zone_id": route.get("text_zone", {}).get("id") if isinstance(route.get("text_zone"), dict) else None,
     }
 
     decorated = replace(

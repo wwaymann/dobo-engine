@@ -18,6 +18,10 @@ if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 
 from product_generators.design_interpreter.phase_5_design_matrix import _program
+from product_generators.design_interpreter.native_profiled_cad_adapter import (
+    PROFILE_DEFAULT_DIMENSIONS,
+    PROFILE_LABELS,
+)
 from product_generators.design_interpreter.prompt_interpreter import OpenAIResponsesSemanticClient
 from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
 
@@ -52,6 +56,20 @@ PRIMITIVES = {
     "ovoide alta": dict(family="tapered", tags=["oval_tall"], height=145.0, width=115.0, depth=115.0, opening="circular"),
     "urna pedestal": dict(family="tapered", tags=["pedestal_urn"], height=145.0, width=120.0, depth=120.0, opening="circular"),
 }
+
+for _variant, _label in PROFILE_LABELS.items():
+    _height, _width = PROFILE_DEFAULT_DIMENSIONS[_variant]
+    PRIMITIVES.setdefault(
+        _label,
+        dict(
+            family="tapered",
+            tags=[_variant],
+            height=_height,
+            width=_width,
+            depth=_width,
+            opening="circular",
+        ),
+    )
 
 
 def _slug(text: str) -> str:
@@ -168,6 +186,16 @@ def generate(prompt: str, mode: str = "auto") -> dict:
             "semantic": "/artifact?path=" + urllib.parse.quote(_rel(result.semantic_path)),
             "motor": "/artifact?path=" + urllib.parse.quote(_rel(result.motor_path)),
             "manifest": "/artifact?path=" + urllib.parse.quote(_rel(result.manifest_path)),
+            **(
+                {
+                    "saucer": "/artifact?path=" + urllib.parse.quote(
+                        _rel(motor_data["_profiled_saucer"]["stl_path"])
+                    )
+                }
+                if isinstance(motor_data.get("_profiled_saucer"), dict)
+                and motor_data["_profiled_saucer"].get("stl_path")
+                else {}
+            ),
         },
         "trace": {
             "pipeline": result.trace.pipeline_version,

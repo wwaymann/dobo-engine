@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from .intelligent_surfaces import SurfaceLayerIntent
-from .native_profiled_cad_adapter import PROFILE_CATALOG
+from .native_profiled_cad_adapter import PROFILE_CATALOG, PROFILE_CORE_VARIANTS
 from .profiled_native_text_regression import _with_text
 from .structural_pipeline import DoboStructuralPipeline
 
@@ -57,21 +57,27 @@ def run() -> dict:
     pipeline = DoboStructuralPipeline()
     records: list[dict] = []
 
+    core = tuple(PROFILE_CORE_VARIANTS)
+    expanded = tuple(variant for variant in PROFILE_CATALOG if variant not in core)
     cases = [
-        (variant, "raised", False)
-        for variant in PROFILE_CATALOG
+        (variant, effect, multiline)
+        for variant in core
+        for effect, multiline in (
+            ("raised", False),
+            ("recessed", False),
+            ("raised", True),
+            ("recessed", True),
+        )
     ]
-    cases.extend(
-        (variant, "recessed", False)
-        for variant in PROFILE_CATALOG
+    expanded_patterns = (
+        ("raised", False),
+        ("recessed", False),
+        ("raised", True),
+        ("recessed", True),
     )
     cases.extend(
-        (variant, "raised", True)
-        for variant in PROFILE_CATALOG
-    )
-    cases.extend(
-        (variant, "recessed", True)
-        for variant in PROFILE_CATALOG
+        (variant, *expanded_patterns[index % len(expanded_patterns)])
+        for index, variant in enumerate(expanded)
     )
 
     for variant, effect, multiline in cases:
@@ -162,11 +168,14 @@ def run() -> dict:
                 }
             )
     summary = {
-        "schema": "dobo.profiled_multicolor_regression.3",
+        "schema": "dobo.profiled_multicolor_regression.4",
         "case_count": len(records),
         "pass": sum(record["status"] == "PASS" for record in records),
         "fail": sum(record["status"] != "PASS" for record in records),
         "colors": [BASE_COLOR, TEXT_COLOR, ACCENT_COLOR],
+        "core_full_matrix": 4 * len(core),
+        "expanded_smoke_matrix": len(expanded),
+        "catalog_variants": len(PROFILE_CATALOG),
         "records": records,
     }
     target = OUTPUT / "PROFILED_MULTICOLOR_REGRESSION.json"

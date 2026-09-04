@@ -58,7 +58,7 @@ install_native_radial_cad_adapter()
 install_native_foundational_cad_adapter()
 install_native_profiled_cad_adapter()
 
-STRUCTURAL_PIPELINE_VERSION = "8.11-profiled-compound-multicolor"
+STRUCTURAL_PIPELINE_VERSION = "8.12-expanded-profile-catalog"
 STRUCTURAL_FUSION_VERSION = "7C.3"
 STRUCTURAL_GENERATION_BUDGET_SECONDS = 45.0
 ADVANCED_GENERATION_BUDGET_SECONDS = 30.0
@@ -415,6 +415,11 @@ class DoboStructuralPipeline:
                         "repair_report": str(repair_path),
                         "stl": str(mesh_result.stl_path),
                         "three_mf": three_mf.path,
+                        "profiled_saucer": (
+                            selected_motor.get("_profiled_saucer", {}).get("stl_path")
+                            if isinstance(selected_motor.get("_profiled_saucer"), dict)
+                            else None
+                        ),
                     },
                     "validation": {
                         "watertight": mesh_result.watertight,
@@ -433,6 +438,16 @@ class DoboStructuralPipeline:
                         "native_cad_text": native_cad_text,
                         "native_profiled_text": native_profiled_text,
                         "profiled_compound_multicolor": profiled_compound_multicolor,
+                        "profiled_text_zone": (
+                            selected_motor.get("_profiled_revolution", {}).get("text_zone")
+                            if isinstance(selected_motor.get("_profiled_revolution"), dict)
+                            else None
+                        ),
+                        "profiled_saucer_generated": bool(
+                            selected_motor.get("_profiled_saucer", {}).get("stl_path")
+                            if isinstance(selected_motor.get("_profiled_saucer"), dict)
+                            else False
+                        ),
                         "native_foundational_text": native_foundational_text,
                         "native_tapered_text": native_tapered_text,
                         "native_radial_text": native_radial_text,

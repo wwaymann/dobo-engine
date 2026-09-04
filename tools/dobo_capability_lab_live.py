@@ -73,6 +73,7 @@ from product_generators.design_interpreter.native_foundational_cad_adapter impor
     install_native_foundational_cad_adapter,
 )
 from product_generators.design_interpreter.native_profiled_cad_adapter import (
+    PROFILE_LABELS,
     install_native_profiled_cad_adapter,
 )
 
@@ -236,6 +237,10 @@ _BASIC_PROMPTS = {
     "crea una maceta urna pedestal": "Crea una maceta urna pedestal",
 }
 
+for _variant, _label in PROFILE_LABELS.items():
+    _key = f"crea una maceta {_label}"
+    _BASIC_PROMPTS.setdefault(_key, f"Crea una maceta {_label}")
+
 _PROMOTED_ROUTE_FOR = {
     "crea una maceta cubo": "analytic_cad_angular_primitive",
     "crea una maceta cubica": "analytic_cad_angular_primitive",
@@ -261,6 +266,12 @@ _PROMOTED_ROUTE_FOR = {
     "crea una maceta ovoide alta": "analytic_cad_profiled_revolution",
     "crea una maceta urna pedestal": "analytic_cad_profiled_revolution",
 }
+
+for _variant, _label in PROFILE_LABELS.items():
+    _PROMOTED_ROUTE_FOR.setdefault(
+        f"crea una maceta {_label}",
+        "analytic_cad_profiled_revolution",
+    )
 
 _FOUNDATIONAL_ROUTE_BY_PROFILE = {
     "cylindrical": "analytic_cad_cylindrical_text",

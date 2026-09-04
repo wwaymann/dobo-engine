@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .native_profiled_cad_adapter import PROFILE_CATALOG
+from .native_profiled_cad_adapter import PROFILE_CATALOG, PROFILE_DEFAULT_DIMENSIONS, PROFILE_LABELS
 from .phase_5_design_matrix import _program
 from .structural_pipeline import DoboStructuralPipeline
 
@@ -14,31 +14,13 @@ OUTPUT = Path("outputs-ci/profiled-cad")
 
 
 def _semantic(variant: str):
-    labels = {
-        "amphora_tapered": "ánfora ahusada",
-        "urn_bellied": "urna globular",
-        "barrel": "barril",
-        "narrow_neck": "cuello estrecho",
-        "flared_rim": "borde ensanchado",
-        "inverted_taper": "tronco invertido",
-        "hourglass": "reloj de arena",
-        "tall_taper": "ahusada alta",
-        "oval_tall": "ovoide alto",
-        "pedestal_urn": "urna pedestal",
-    }
+    height, width = PROFILE_DEFAULT_DIMENSIONS[variant]
     return _program(
         f"profiled_{variant}",
-        f"Crea una maceta de perfil {labels[variant]}, hueca, abierta y con drenaje.",
-        family="tapered",
-        height=120.0,
-        width=120.0,
-        depth=120.0,
-        opening_shape="circular",
-        opening_width=0.58,
-        opening_depth=0.58,
-        style_tags=[variant],
-        features=[],
-        relations=[],
+        f"Crea una maceta de perfil {PROFILE_LABELS[variant]}, hueca, abierta y con drenaje.",
+        family="tapered", height=height, width=width, depth=width,
+        opening_shape="circular", opening_width=0.58, opening_depth=0.58,
+        style_tags=[variant], features=[], relations=[],
     )
 
 
@@ -57,6 +39,8 @@ def run() -> dict:
         motor = json.loads(Path(result.motor_path).read_text(encoding="utf-8"))
         route = motor.get("_profiled_revolution", {})
         checks = dict(result.mesh_result.semantic_checks or {})
+        saucer = motor.get("_profiled_saucer", {})
+        text_zone = route.get("text_zone", {})
         assertions = {
             "route": motor.get("_capability_route") == "analytic_cad_profiled_revolution",
             "morphology": motor.get("morphogenesis", {}).get("profile") == "profiled_revolution",
@@ -73,6 +57,14 @@ def run() -> dict:
             "wall": bool(checks.get("wall_is_solid")),
             "base": bool(checks.get("base_is_solid")),
             "known_profile": bool(checks.get("profile_variant_known")),
+            "text_zone": isinstance(text_zone, dict) and text_zone.get("id") == "front_primary" and bool(text_zone.get("emboss_allowed")) and bool(text_zone.get("deboss_allowed")),
+            "surface_regions": len(route.get("surface_regions", [])) >= 4,
+            "color_regions": len(route.get("color_regions", [])) >= 4,
+            "saucer_file": isinstance(saucer, dict) and Path(str(saucer.get("stl_path", ""))).is_file(),
+            "saucer_watertight": bool(saucer.get("watertight")),
+            "saucer_winding": bool(saucer.get("winding_consistent")),
+            "saucer_one_component": int(saucer.get("component_count", 0)) == 1,
+            "saucer_clearance": float(saucer.get("drain_clearance_mm", 0.0)) >= 1.0,
             "native_mesh": 0 < int(result.mesh_result.vertex_count) < 150_000,
         }
         record = {
@@ -85,6 +77,8 @@ def run() -> dict:
             "assertions": assertions,
             "stl": result.stl_path,
             "three_mf": result.three_mf_path,
+            "text_zone": text_zone,
+            "saucer": saucer.get("stl_path"),
         }
         records.append(record)
         if record["status"] != "PASS":
@@ -96,17 +90,16 @@ def run() -> dict:
         for record in records
     })
     summary = {
-        "schema": "dobo.profiled_cad_regression.1",
+        "schema": "dobo.profiled_cad_regression.2",
         "case_count": len(records),
         "pass": sum(record["status"] == "PASS" for record in records),
         "fail": sum(record["status"] != "PASS" for record in records),
         "distinct_volumes": distinct_volumes,
         "profiles": records,
     }
-    if distinct_volumes < 8:
-        raise RuntimeError(
-            "Profile catalog did not produce enough physically distinct bodies."
-        )
+    minimum_distinct = max(8, int(0.75 * len(PROFILE_CATALOG)))
+    if distinct_volumes < minimum_distinct:
+        raise RuntimeError(f"Profile catalog did not produce enough physically distinct bodies: {distinct_volumes} < {minimum_distinct}.")
     target = OUTPUT / "PROFILED_CAD_REGRESSION.json"
     target.write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
