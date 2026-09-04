@@ -34,7 +34,7 @@ from product_generators.design_interpreter.phase_5_design_matrix import _feature
 from product_generators.design_interpreter.structural_pipeline import DoboStructuralPipeline
 
 
-DESIGN_LAB_VERSION = "DESIGNLAB.3-faithful-multicolor-preview"
+DESIGN_LAB_VERSION = "DESIGNLAB.4-region-faithful-preview"
 HOST = "127.0.0.1"
 PORT = 8770
 OUTPUT_ROOT = ROOT / "outputs" / "design-lab"
@@ -342,9 +342,26 @@ def generate_design(spec: dict[str, Any]) -> dict[str, Any]:
             ),
         },
         "preview": {
-            "preferred": "three_mf" if multicolor.get("compound_object") else "stl",
+            "preferred": (
+                "region_stls"
+                if isinstance(multicolor.get("preview_parts"), list)
+                and multicolor.get("preview_parts")
+                else "three_mf"
+                if multicolor.get("compound_object")
+                else "stl"
+            ),
             "colors": [body_color, text_color, accent_color],
             "region_names": list(multicolor.get("region_names", ["Body", "Text", "Accent"])),
+            "parts": [
+                {
+                    "name": str(part.get("name", "Part")),
+                    "slot": int(part.get("filament_slot", index + 1)),
+                    "color": str(part.get("color", "#CCCCCC")),
+                    "url": _artifact_url(str(part["path"])),
+                }
+                for index, part in enumerate(multicolor.get("preview_parts", []))
+                if isinstance(part, dict) and part.get("path")
+            ],
         },
     }
 
@@ -477,7 +494,14 @@ function fit(){if(!model)return;const b=new THREE.Box3().setFromObject(model),s=
 function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera)}loop();
 function loadSTL(url,color){return new Promise((ok,bad)=>new STLLoader().load(url,g=>{clearModel();g.computeVertexNormals();model=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(color),roughness:.55,metalness:.01}));scene.add(model);$('#empty').style.display='none';fit();ok()},undefined,bad))}
 function load3MF(url,colors){return new Promise((ok,bad)=>new ThreeMFLoader().load(url,obj=>{clearModel();model=obj;const meshes=[];model.traverse(n=>{if(n.isMesh)meshes.push(n)});meshes.forEach((n,index)=>{const color=colors[Math.min(index,colors.length-1)]||'#cccccc';if(n.material){if(Array.isArray(n.material))n.material.forEach(m=>m.dispose?.());else n.material.dispose?.()}n.material=new THREE.MeshStandardMaterial({color:new THREE.Color(color),roughness:.55,metalness:.01,side:THREE.DoubleSide});n.castShadow=true;n.receiveShadow=true});scene.add(model);$('#empty').style.display='none';fit();ok(meshes.length)},undefined,bad))}
-async function loadPreview(d){if(d.preview.preferred==='three_mf'){try{const parts=await load3MF(d.artifacts.three_mf,d.preview.colors);$('#previewMode').textContent='3MF multicolor · '+parts+' partes';return}catch(e){console.warn('3MF preview fallback',e)}}await loadSTL(d.artifacts.stl,d.selection.body_color);$('#previewMode').textContent='STL monocolor (fallback)'}
+function loadColoredParts(parts){return new Promise((ok,bad)=>{clearModel();const group=new THREE.Group(),loader=new STLLoader();Promise.all(parts.map(part=>new Promise((yes,no)=>loader.load(part.url,g=>{g.computeVertexNormals();const meshPart=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(part.color),roughness:.55,metalness:.01,side:THREE.DoubleSide}));meshPart.name=part.name;meshPart.castShadow=true;meshPart.receiveShadow=true;group.add(meshPart);yes()},undefined,no)))).then(()=>{model=group;scene.add(model);$('#empty').style.display='none';fit();ok(group.children.length)}).catch(bad)})}
+async function loadPreview(d){
+ if(d.preview.preferred==='region_stls'&&Array.isArray(d.preview.parts)&&d.preview.parts.length){
+  try{const parts=await loadColoredParts(d.preview.parts);$('#previewMode').textContent='Partición multicolor real · '+parts+' partes';return}catch(e){console.warn('region preview fallback',e)}
+ }
+ if(d.preview.preferred==='three_mf'){try{const parts=await load3MF(d.artifacts.three_mf,d.preview.colors);$('#previewMode').textContent='3MF multicolor · '+parts+' partes';return}catch(e){console.warn('3MF preview fallback',e)}}
+ await loadSTL(d.artifacts.stl,d.selection.body_color);$('#previewMode').textContent='STL monocolor (fallback)'
+}
 function swatches(colors){$('#swatches').innerHTML=colors.map(c=>'<span class="swatch" style="background:'+c+'" title="'+c+'"></span>').join('')}
 
 $('#generate').onclick=async()=>{
