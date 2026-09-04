@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.10-active-profile-text-zone"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.11-adaptive-text-zone-fallback"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -309,6 +309,7 @@ def _apply_text_block(
     program: DesignSemanticProgram,
     *,
     multiline_slot_fraction: float = 0.09,
+    use_text_zone: bool = False,
 ) -> tuple[cq.Shape, float, float, int, int]:
     entries = tuple(_line_contract(program))
     if not entries:
@@ -334,7 +335,8 @@ def _apply_text_block(
         # zone detected from the actual profile. Explicit user placement stays
         # untouched.
         if (
-            str(feature.anchor.region) == "front"
+            use_text_zone
+            and str(feature.anchor.region) == "front"
             and abs(authored - 0.52) <= 0.035
             and isinstance(text_zone, dict)
             and text_zone.get("id") == "front_primary"
@@ -412,9 +414,31 @@ def decorate_profiled_mesh_result_with_native_text(
 
     started = perf_counter()
     base = _profiled_body(route)
-    final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
-        base, route, program
-    )
+    placement_mode = "authored_or_default"
+    try:
+        final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
+            base, route, program
+        )
+    except RuntimeError as primary_error:
+        text_zone = route.get("text_zone", {})
+        default_front = all(
+            str(feature.anchor.region) == "front"
+            and abs(float(feature.anchor.vertical) - 0.52) <= 0.035
+            for feature, _literal in _line_contract(program)
+        )
+        if (
+            not default_front
+            or not isinstance(text_zone, dict)
+            or text_zone.get("id") != "front_primary"
+        ):
+            raise
+        final, base_volume, final_volume, line_count, glyph_count = _apply_text_block(
+            base,
+            route,
+            program,
+            use_text_zone=True,
+        )
+        placement_mode = "detected_text_zone_fallback"
     stl_path = Path(str(mesh_result.stl_path))
     cq.exporters.export(
         final,
@@ -529,6 +553,7 @@ def decorate_profiled_mesh_result_with_native_text(
             if isinstance(route.get("text_zone"), dict)
             else None
         ),
+        "placement_mode": placement_mode,
     }
 
     decorated = replace(
