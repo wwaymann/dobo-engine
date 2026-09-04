@@ -66,8 +66,12 @@ def run() -> dict:
         for variant in PROFILE_CATALOG
     )
     cases.extend(
-        (variant, "raised" if index % 2 == 0 else "recessed", True)
-        for index, variant in enumerate(PROFILE_CATALOG)
+        (variant, "raised", True)
+        for variant in PROFILE_CATALOG
+    )
+    cases.extend(
+        (variant, "recessed", True)
+        for variant in PROFILE_CATALOG
     )
 
     for variant, effect, multiline in cases:
@@ -158,7 +162,7 @@ def run() -> dict:
                 }
             )
     summary = {
-        "schema": "dobo.profiled_multicolor_regression.2",
+        "schema": "dobo.profiled_multicolor_regression.3",
         "case_count": len(records),
         "pass": sum(record["status"] == "PASS" for record in records),
         "fail": sum(record["status"] != "PASS" for record in records),
