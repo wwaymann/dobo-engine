@@ -24,11 +24,12 @@ from .body_family_expansion import GeneralBodyFamilyExpander
 from .design_pipeline import DoboDesignPipeline
 
 
-PROFILED_CAD_ADAPTER_VERSION = "PCAD.6-adaptive-mesh-real-fonts"
+PROFILED_CAD_ADAPTER_VERSION = "PCAD.7-smooth-high-budget"
 _PROFILED_ROUTE = "analytic_cad_profiled_revolution"
 _PROFILE_SAMPLES_PER_SPAN = 18
 _STL_TOLERANCE_MM = 0.015
 _STL_ANGULAR_TOLERANCE_RAD = 0.035
+_PROFILE_VERTEX_BUDGET = 240_000
 _PREVIOUS_GENERATE = None
 _PREVIOUS_EXPAND = None
 
@@ -101,7 +102,6 @@ PROFILE_ALIASES: dict[str, str] = {
     "amphora":"amphora_tapered","anfora":"amphora_tapered","urn":"urn_bellied","urna":"urn_bellied",
     "bell":"bell_vase","campana":"bell_vase","copa":"goblet","jarra":"shoulder_jar","gota_agua":"teardrop",
 }
-
 
 
 def _plain(value: object) -> str:
@@ -272,7 +272,6 @@ def _profile_text_zones(
 def _profile_text_zone(
     profile: tuple[tuple[float, float], ...],
 ) -> dict[str, Any]:
-    # Backward-compatible primary zone for existing consumers.
     return _profile_text_zones(profile)["center"]
 
 
@@ -350,6 +349,7 @@ def _expand_with_profiled_cad(cls, motor: dict[str, Any], program):
     route["text_zones"] = _profile_text_zones(PROFILE_CATALOG[variant])
     route["text_zone"] = route["text_zones"]["center"]
     route["saucer"] = _saucer_contract(route)
+    route["text_style"] = _profile_text_style(program)
     motor["_profiled_revolution"] = route
     return result
 
@@ -359,13 +359,6 @@ def _smooth_profile(
     *,
     samples_per_span: int = _PROFILE_SAMPLES_PER_SPAN,
 ) -> tuple[tuple[float, float], ...]:
-    """Densify a sparse vessel silhouette with a shape-preserving cubic curve.
-
-    The catalog points remain the intentional design landmarks (foot, belly,
-    shoulder, neck and rim).  PCHIP-style tangents add enough intermediate
-    vertices to make those transitions visibly fluid without overshooting the
-    radius range of either adjacent span.
-    """
     if len(profile) < 2:
         raise ValueError("A profiled planter needs at least two control points.")
     samples = max(2, int(samples_per_span))
@@ -521,10 +514,6 @@ def _load_mesh(path: str | Path) -> trimesh.Trimesh:
         mesh.process(validate=True)
     if not isinstance(mesh, trimesh.Trimesh):
         raise RuntimeError("Profiled CAD route did not export a triangle mesh.")
-    # OCC tessellates adjacent CAD faces independently.  Their shared seam can
-    # differ by sub-micron numerical noise even though the source is one solid.
-    # Welding at 1e-3 mm is still 20x tighter than the 0.02 mm STL tolerance and
-    # prevents valid relief faces from being misclassified as extra components.
     mesh.merge_vertices(digits_vertex=3)
     mesh.remove_unreferenced_vertices()
     return mesh
@@ -550,28 +539,37 @@ def _generate_profiled(motor: dict[str, Any]) -> OrganicVesselResult:
         angularTolerance=tessellation_angular,
     )
     mesh = _load_mesh(stl_path)
-    # Preserve the denser cubic design curve, but relax only the final STL
-    # tessellation when a visually complex profile would exceed the native
-    # mesh budget. This avoids reverting to coarse silhouettes just to satisfy
-    # a triangle-count guard.
-    if len(mesh.vertices) >= 145_000:
-        for tolerance, angular in ((0.020, 0.045), (0.025, 0.055), (0.030, 0.065)):
+
+    # Keep the design curve dense. Only the final triangle tessellation is relaxed
+    # if an unusually complex profile exceeds the rendering/transport budget.
+    if len(mesh.vertices) >= _PROFILE_VERTEX_BUDGET:
+        for tolerance, angular in (
+            (0.020, 0.045),
+            (0.025, 0.055),
+            (0.030, 0.065),
+            (0.040, 0.080),
+            (0.055, 0.110),
+        ):
             cq.exporters.export(
                 shape,
                 str(stl_path),
                 tolerance=tolerance,
                 angularTolerance=angular,
             )
-            candidate = _load_mesh(stl_path)
+            mesh = _load_mesh(stl_path)
             tessellation_tolerance = tolerance
             tessellation_angular = angular
-            mesh = candidate
-            if len(mesh.vertices) < 145_000:
+            if len(mesh.vertices) < _PROFILE_VERTEX_BUDGET:
                 break
 
     saucer_shape = _profiled_saucer(route)
     saucer_path = output_dir / f"{output['basename']}.saucer.stl"
-    cq.exporters.export(saucer_shape, str(saucer_path), tolerance=_STL_TOLERANCE_MM, angularTolerance=_STL_ANGULAR_TOLERANCE_RAD)
+    cq.exporters.export(
+        saucer_shape,
+        str(saucer_path),
+        tolerance=_STL_TOLERANCE_MM,
+        angularTolerance=_STL_ANGULAR_TOLERANCE_RAD,
+    )
     saucer_mesh = _load_mesh(saucer_path)
     saucer_components = tuple(saucer_mesh.split(only_watertight=False))
     saucer_contract = dict(route["saucer"])
@@ -621,18 +619,20 @@ def _generate_profiled(motor: dict[str, Any]) -> OrganicVesselResult:
         "below_base_is_empty": not _inside(shape, (base_probe, 0.0, -1.0)),
         "profile_is_revolved": True,
         "profile_variant_known": str(route["variant"]) in PROFILE_CATALOG,
-        "text_zone_available": isinstance(route.get("text_zone"), dict) and route["text_zone"].get("id") == "front_primary",
+        "text_zone_available": isinstance(route.get("text_zone"), dict)
+        and route["text_zone"].get("id") == "front_primary",
         "saucer_generated": saucer_path.is_file(),
         "saucer_watertight": bool(saucer_mesh.is_watertight),
         "saucer_winding_consistent": bool(saucer_mesh.is_winding_consistent),
         "saucer_one_component": len(saucer_components) == 1,
         "saucer_drain_clearance": float(saucer_contract["drain_clearance_mm"]) >= 1.0,
-        "mesh_budget_respected": int(len(mesh.vertices)) < 150_000,
+        "mesh_budget_respected": int(len(mesh.vertices)) < _PROFILE_VERTEX_BUDGET,
     }
     motor["_profiled_revolution"]["effective_tessellation"] = {
         "tolerance_mm": tessellation_tolerance,
         "angular_tolerance_rad": tessellation_angular,
         "vertex_count": int(len(mesh.vertices)),
+        "vertex_budget": _PROFILE_VERTEX_BUDGET,
     }
 
     elapsed = perf_counter() - started
