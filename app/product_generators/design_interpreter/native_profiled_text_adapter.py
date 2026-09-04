@@ -38,7 +38,7 @@ from .proposal_repair import ProposalValidationSnapshot, SemanticProposalRepaire
 from .semantic_contract import DesignSemanticProgram
 
 
-NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.14-real-fonts-wrap-size-metrics"
+NATIVE_PROFILED_TEXT_ADAPTER_VERSION = "NPT.17-robust-relief-tessellation"
 _PROFILED_TEXT_ROUTE = "analytic_cad_profiled_text"
 _FONT = "DejaVu Sans"
 _FONT_KIND = "bold"
@@ -340,8 +340,18 @@ def _apply_line(
         if float(np.dot(normal, np.array([cos_t, sin_t, 0.0]))) < 0.0:
             normal = -normal
 
-        start_inside = inward + 0.70
-        total_span = inward + outward + 1.40
+        # A tangent glyph can span a rapidly changing meridian (trumpet,
+        # pedestal, waist). Give the prism enough normal travel to cross the
+        # whole receiving band, then clip it back to the band. This improves
+        # robustness without deepening the authored relief.
+        curvature_allowance = min(
+            3.5,
+            0.18 * actual_size + 0.24 * actual_size * abs(slope),
+        )
+        start_inside = inward + 0.85 + 0.45 * curvature_allowance
+        total_span = (
+            inward + outward + 1.70 + curvature_allowance
+        )
         plane = cq.Plane(
             origin=tuple(float(value) for value in point - normal * start_inside),
             xDir=tuple(float(value) for value in tangent_u),
@@ -589,6 +599,28 @@ def decorate_profiled_mesh_result_with_native_text(
         mesh.process(validate=True)
         components = tuple(mesh.split(only_watertight=False))
         mesh_normalization = "fine_0_015_mm_weld_0_01_mm"
+
+    if (
+        len(components) != 1
+        or not mesh.is_watertight
+        or not mesh.is_winding_consistent
+    ):
+        # OCC can occasionally emit T-junctions around relief booleans at the
+        # finest tessellation. A slightly coarser tessellation of the *same*
+        # valid CAD solid often removes those numerical seams while remaining
+        # well below an FDM extrusion width.
+        cq.exporters.export(
+            final,
+            str(stl_path),
+            tolerance=0.025,
+            angularTolerance=0.050,
+        )
+        mesh = _load_mesh(stl_path)
+        mesh.merge_vertices(digits_vertex=2)
+        mesh.remove_unreferenced_vertices()
+        mesh.process(validate=True)
+        components = tuple(mesh.split(only_watertight=False))
+        mesh_normalization = "recovery_0_025_mm_weld_0_01_mm"
 
     multiline_slot_fraction = 0.22
     if (
